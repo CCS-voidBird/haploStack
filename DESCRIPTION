@@ -33,5 +33,5 @@ Config/roxygen2/version: 8.0.0
 RoxygenNote: 7.3.3
 NeedsCompilation: yes
 Packaged: 2026-08-17 04:13:17 UTC; uqcche32
-Author: University of Queensland Bioinformatics [aut, cre]
-Maintainer: University of Queensland Bioinformatics <ccsconnet@gmail.com>
+Author: Chensong Chen [aut, cre]
+Maintainer: Chensong Chen <chensong.chen@uq.edu.au>
