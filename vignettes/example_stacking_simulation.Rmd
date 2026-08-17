@@ -1,0 +1,214 @@
+---
+title: "Example 4 — Haplotype stacking simulation"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Example 4 — Haplotype stacking simulation}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse  = TRUE,
+  comment   = "#>",
+  message   = FALSE,
+  warning   = FALSE,
+  fig.width = 9,
+  fig.height = 4.5
+)
+```
+
+## What you will learn
+
+The stacking simulation runs recurrent breeding cycles — **select → design →
+cross → advance** — on a founder population and tracks how a trait's genetic
+value accumulates. It reuses the `GenoMeta` and marker effects from
+*Example 1/2*. This example shows:
+
+1. A **standalone run with one selection method** and explicit parameters.
+2. An **assessment comparing several methods** in a single call.
+
+`run_stacking_simulation()` offers four schemes:
+
+| Scheme | Meaning |
+|--------|---------|
+| `TS`  | Truncation (genomic) selection — top founders by total local GEBV |
+| `OHS` | Optimal Haplotype Selection — maximise next-cross block gain |
+| `OCS` | Optimal Contribution Selection — kinship-constrained gain |
+| `GBS` | Genotype Building Strategy — drive block frequencies to an ideal |
+
+The default crossing backend is pure-R (`"block"`), so no external simulation
+package is required.
+
+```{r load}
+library(haploStack)
+library(data.table)
+```
+
+## 0  Founder population (the "outputs from above")
+
+We build a founder `GenoMeta` with blocks and marker effects — the same kind of
+object produced in Examples 1–2 — and save it so the simulation starts from a
+stored hand-off point.
+
+```{r founders}
+set.seed(42)
+
+n_founders <- 16L; n_per_chrom <- 8L; n_chrom <- 3L; block_size <- 4L
+n_mk    <- n_per_chrom * n_chrom
+markers <- paste0("M", seq_len(n_mk))
+chrom   <- rep(seq_len(n_chrom), each = n_per_chrom)
+alleles <- c("1", "4")
+
+arr <- array(sample(alleles, n_founders * n_mk * 2L, replace = TRUE),
+             dim = c(n_founders, n_mk, 2L),
+             dimnames = list(paste0("P", seq_len(n_founders)), markers, c("1", "2")))
+
+map <- data.frame(Chrom = as.character(chrom), Marker = markers,
+                  Pos = unlist(lapply(seq_len(n_chrom),
+                        function(c) sort(sample(seq(1e6, 1e8, 1e5), n_per_chrom)))),
+                  stringsAsFactors = FALSE)
+bmm <- data.frame(Chrom = as.character(chrom), Marker = markers,
+                  Block = unlist(lapply(seq_len(n_chrom),
+                    function(c) paste0("Chr", c, "_B",
+                                       ceiling(seq_len(n_per_chrom) / block_size)))),
+                  stringsAsFactors = FALSE)
+effects <- data.frame(Marker = rep(markers, each = 2L),
+                      Allele = rep(alleles, times = n_mk),
+                      Effect = round(rnorm(n_mk * 2L, 0, 0.5), 3),
+                      stringsAsFactors = FALSE)
+
+meta <- new_geno_meta(
+  geno_arrays = arr, map_info = map, block_marker_map_info = bmm,
+  metadata = list(ploidy = 2L, char_dict = c("1" = 1L, "4" = 2L),
+                  n_samples = n_founders, n_markers = n_mk,
+                  source_format = "selectiontools", encoding = "selectiontools"),
+  marker_effects = effects)
+
+rds_path <- file.path(tempdir(), "founders.rds")
+save_geno_meta(meta, rds_path)
+
+meta <- load_geno_meta(rds_path)            # resume from the stored founders
+cat("Founders:", meta$metadata$n_samples, "| Blocks:",
+    length(unique(meta$block_marker_map_info$Block)), "\n")
+```
+
+---
+
+## 1  Standalone simulation — one method, explicit parameters
+
+Run **Optimal Haplotype Selection** on its own. Every parameter is named so the
+run is fully reproducible.
+
+```{r single-run}
+sim_ohs <- run_stacking_simulation(
+  geno_meta         = meta,
+  effect_df         = effects,
+  scheme            = "OHS",         # single method
+  ohs_method        = "Greedy",      # OHS engine
+  replications      = 3L,            # independent runs (averaged in plots)
+  select_cycles     = 5L,            # breeding cycles per replication
+  top_founders      = 6L,            # parents chosen each cycle
+  num_offspring     = 4L,            # offspring per cross
+  select_top_blocks = 50L,           # cap on blocks selection considers
+  cross_backend     = "block",       # pure-R crossing (no extra packages)
+  seed              = 42L,
+  output_dir        = NULL,          # keep everything in memory
+  verbose           = FALSE
+)
+
+names(sim_ohs)
+```
+
+The `summary` table has one row per cycle × replication; the `trajectories`
+table is the plotting view (`Rep, Cycle, Method, MeanGEBV, …`).
+
+```{r single-summary}
+head(sim_ohs$summary[, .(cycle, rep, sel_scheme, mean_F1mean, mean_D2Ideal)])
+```
+
+Plot the gain trajectory (mean ± SD ribbon across replications):
+
+```{r single-plot}
+plot_simulation_trajectories(sim_ohs$trajectories,
+                             trait_name  = "Demo trait",
+                             show_ribbon = TRUE)
+```
+
+---
+
+## 2  Assessment across different methods
+
+Pass a **vector of schemes** to compare them in one call — each runs under the
+same founders, cycles, and seeds, so differences reflect the method, not the
+draw.
+
+```{r multi-run}
+sim_cmp <- run_stacking_simulation(
+  geno_meta         = meta,
+  effect_df         = effects,
+  scheme            = c("TS", "OHS", "OCS", "GBS"),   # compare all four
+  ohs_method        = "Greedy",
+  gbs_method        = "ARCSIN",
+  replications      = 3L,
+  select_cycles     = 5L,
+  top_founders      = 6L,
+  num_offspring     = 4L,
+  select_top_blocks = 50L,
+  cross_backend     = "block",
+  seed              = 42L,
+  output_dir        = NULL,
+  verbose           = FALSE
+)
+
+unique(sim_cmp$summary$sel_scheme)
+```
+
+### 2.1  Trajectories, coloured by method
+
+```{r multi-plot}
+plot_simulation_trajectories(sim_cmp$trajectories,
+                             trait_name = "Demo trait",
+                             colour_by  = "Method",
+                             show_ribbon = TRUE)
+```
+
+### 2.2  Tabular summary
+
+`summarise_simulation()` aggregates the trajectories across replications, per
+cycle and method — a compact basis for ranking the schemes.
+
+```{r multi-summary}
+summ <- summarise_simulation(sim_cmp$trajectories, group_by = c("Cycle", "Method"))
+
+# Final-cycle mean GEBV per method.
+final_cycle <- max(summ$Cycle)
+summ[Cycle == final_cycle, .(Method, MeanGEBV_mean, MeanGEBV_sd)][order(-MeanGEBV_mean)]
+```
+
+---
+
+## Notes for real studies
+
+- **Scale up gradually.** Increase `replications` and `select_cycles` once the
+  pipeline runs; start small to check parameters.
+- **Linkage-aware crossing.** Install the *genomicSimulation* package and set
+  `cross_backend = "genomicSimulation"` for marker-level recombination instead
+  of the default whole-block inheritance.
+- **Selection direction.** Use `select_priority = "low"` to minimise a trait.
+- **Parallelism.** Replications × schemes are independent; set `n_cores > 1`
+  (needs *future* / *future.apply*) for large comparisons.
+
+## Summary
+
+| Goal | Call |
+|------|------|
+| Resume from saved founders | `load_geno_meta()` |
+| One-method simulation | `run_stacking_simulation(scheme = "OHS", ...)` |
+| Multi-method comparison | `run_stacking_simulation(scheme = c("TS","OHS","OCS","GBS"), ...)` |
+| Trajectory plot | `plot_simulation_trajectories()` |
+| Aggregated summary | `summarise_simulation()` |
+
+```{r session}
+sessionInfo()
+```

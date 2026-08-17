@@ -1,0 +1,37 @@
+Package: haploStack
+Title: Haplotype Block Analysis and Stacking Simulation for Genomic
+        Breeding
+Version: 0.5.5
+Authors@R: 
+    person("Chensong", "Chen",
+           email = "chensong.chen@uq.edu.au", role = c("aut", "cre"))
+Description: A toolkit for haplotype block definition, catalogue construction,
+    and breeding-cycle simulation (haplotype stacking) in diploid crop species.
+    The workflow covers four main stages: (1) genotype format standardisation,
+    (2) LD-based haplotype block definition via SelectionTools, (3) haplotype
+    catalogue construction — per-sample local GEBVs, Manhattan plots, and
+    alignment visualisations — and (4) crossing-design simulation using Genetic
+    Algorithm (GA), Genomic Selection (GS), and Optimal Contribution Selection
+    (OCS) strategies. Designed for the GRDC barley haplotype stacking project
+    but applicable to any biparental or multiparental breeding programme.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+Depends: R (>= 4.1.0)
+Imports: data.table (>= 1.14.0), dplyr (>= 1.0.0), ggplot2 (>= 3.4.0),
+        tidyr, reshape2, stringr, magrittr, methods, stats, utils, Rcpp
+LinkingTo: Rcpp
+Suggests: SelectionTools, genomicSimulation, rrBLUP, BGLR, circlize,
+        testthat (>= 3.0.0), knitr, rmarkdown, scico, cowplot,
+        gridExtra, LDheatmap, praise, shiny (>= 1.7.0), zip, vcfR,
+        future, future.apply
+Config/testthat/edition: 3
+VignetteBuilder: knitr
+URL: https://github.com/CCS-voidBird/haploStack
+BugReports: https://github.com/CCS-voidBird/haploStack/issues
+Config/roxygen2/version: 8.0.0
+RoxygenNote: 7.3.3
+NeedsCompilation: yes
+Packaged: 2026-08-17 04:13:17 UTC; uqcche32
+Author: University of Queensland Bioinformatics [aut, cre]
+Maintainer: University of Queensland Bioinformatics <ccsconnet@gmail.com>

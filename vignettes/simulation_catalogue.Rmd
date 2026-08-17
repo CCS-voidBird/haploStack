@@ -1,0 +1,300 @@
+---
+title: "Simulation Workflow — Haplotype Catalogue"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Simulation Workflow — Haplotype Catalogue}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse  = TRUE,
+  comment   = "#>",
+  fig.width = 8,
+  fig.height = 5
+)
+```
+
+## Overview
+
+This document tests the **catalogue module** using a fully simulated dataset.
+No external files are required. Each section is an independent node that can be
+run in isolation to verify a specific function.
+
+The simulated data represents a diploid species with:
+- **20 bi-allelic SNP markers** across **3 chromosomes**
+- **10 samples**, each with two phased haplotypes
+- **5 haplotype blocks** (4 markers/block average)
+- **One quantitative trait** with random marker effects
+
+---
+
+## 1  Generate Simulation Dataset
+
+```{r sim-data}
+library(haploStack)
+library(data.table)
+
+set.seed(42)
+
+## ── Parameters ────────────────────────────────────────────────────────────────
+N_SAMPLES  <- 10L
+N_MARKERS  <- 20L
+N_CHROM    <- 3L
+BLOCK_SIZE <- 4L
+ENCODING   <- "selectiontools"   # "1/4" style
+
+## ── Genotype matrix (markers × samples) ───────────────────────────────────────
+geno_mat <- sim_geno_matrix(N_SAMPLES, N_MARKERS, ENCODING)
+
+cat("Genotype matrix dimensions:", dim(geno_mat), "\n")
+cat("First 5 columns, first 3 rows:\n")
+print(geno_mat[1:3, 1:5])
+```
+
+```{r sim-map}
+## ── Marker map (Marker, Chrom, Pos) ───────────────────────────────────────────
+map_df <- sim_map_data(rownames(geno_mat), n_chrom = N_CHROM)
+
+cat("Map data (first 8 rows):\n")
+print(head(map_df, 8))
+cat("Chromosomes:", unique(map_df$Chrom), "\n")
+cat("Position range:", range(map_df$Pos), "bp\n")
+```
+
+```{r sim-blockmap}
+## ── Block map (Chrom, Marker, Block) ──────────────────────────────────────────
+block_map_df <- sim_block_map(map_df, block_size = BLOCK_SIZE)
+
+cat("Block map (first 8 rows):\n")
+print(head(block_map_df, 8))
+cat("Number of unique blocks:", length(unique(block_map_df$Block)), "\n")
+```
+
+```{r sim-effects}
+## ── Marker effects (Marker, Allele, Effect) ───────────────────────────────────
+## SelectionTools encoding uses alleles "1" and "4"
+effect_df <- sim_effect_df(rownames(geno_mat), alleles = c("1","4"))
+
+cat("Effect data (first 8 rows):\n")
+print(head(effect_df, 8))
+cat("Effect range:", round(range(effect_df$Effect), 3), "\n")
+```
+
+---
+
+## 2  Assemble the GenoMeta object  [Node: `build_geno_meta` / `geno_meta_views`]
+
+`GenoMeta` is the single central object — it bundles the genotype array, map,
+block assignments, `sample_info`, and an optional `marker_effects` copy. The
+denormalised profile views (wide allele table, marker/block metadata) are
+derived on demand with `geno_meta_views()`; nothing is stored separately.
+
+```{r create-profile}
+## ── Node: build_geno_meta ─────────────────────────────────────────────────────
+## Input : geno_mat (markers × samples), map_df, block_map_df
+## Output: GenoMeta object
+
+meta <- build_geno_meta(geno_mat, map_df, blocks = block_map_df)
+
+## Derived profile views (built on demand)
+profile <- geno_meta_views(meta)
+
+cat("View components:\n")
+str(profile, max.level = 1)
+
+cat("\nDetected encoding:", profile$encoding, "\n")
+cat("Samples:", length(profile$samples), "\n")
+cat("Markers:", nrow(profile$marker_meta), "\n")
+cat("Blocks defined:", nrow(profile$block_meta), "\n")
+cat("Alleles table rows:", nrow(profile$alleles),
+    "(expected:", N_SAMPLES * 2L, "= n_samples × ploidy)\n")
+```
+
+### 2.1 Inspect allele table
+
+```{r inspect-alleles}
+## First 3 columns and 5 rows of the allele table
+print(profile$alleles[1:5, 1:5, with = FALSE])
+```
+
+### 2.2 Block metadata
+
+```{r block-meta}
+cat("Block metadata:\n")
+print(profile$block_meta)
+cat("\nBlock sizes (markers):\n")
+print(profile$block_meta[order(chromosome, start_pos)])
+```
+
+---
+
+## 3  Filter the GenoMeta  [Node: `filter_geno_meta`]
+
+```{r filter-profile}
+## ── Node: filter_geno_meta ────────────────────────────────────────────────────
+## filter_geno_meta() returns a new GenoMeta; derive views with geno_meta_views()
+
+## 3a — by samples
+sub_samples <- geno_meta_views(filter_geno_meta(meta, keep_samples = c("S1","S2","S3")))
+cat("After sample filter: samples =", length(sub_samples$samples), "\n")
+
+## 3b — by blocks (first 2 blocks)
+first_two_blocks <- profile$block_meta$block_id[1:2]
+sub_blocks <- geno_meta_views(filter_geno_meta(meta, blocks = first_two_blocks))
+cat("After block filter: n_markers =", nrow(sub_blocks$marker_meta), "\n")
+
+## 3c — by chromosome
+sub_chr1 <- geno_meta_views(filter_geno_meta(meta, chromosomes = list(list(chr = "1"))))
+cat("After chr=1 filter: markers on chr1 =",
+    nrow(sub_chr1$marker_meta), "\n")
+
+## 3d — combined: samples + chromosome
+sub_combo <- geno_meta_views(filter_geno_meta(meta,
+                             keep_samples = c("S1","S4"),
+                             chromosomes  = list(list(chr = "2"))))
+cat("Combined filter: samples =", length(sub_combo$samples),
+    ", markers =", nrow(sub_combo$marker_meta), "\n")
+```
+
+---
+
+## 4  Save and Load GenoMeta  [Node: `save_geno_meta`]
+
+```{r save-load-profile}
+## ── Node: save/load ────────────────────────────────────────────────────────────
+tmp_meta <- tempfile(fileext = ".rds")
+save_geno_meta(meta, tmp_meta)
+cat("GenoMeta saved to:", tmp_meta, "\n")
+
+meta_reload <- load_geno_meta(tmp_meta)
+cat("Reloaded samples:", nrow(meta_reload$sample_info), "\n")
+cat("Valid GenoMeta:", is_geno_meta(meta_reload), "\n")
+unlink(tmp_meta)
+```
+
+---
+
+## 5  Recode GenoMeta  [Node: `recode_geno_meta`]
+
+```{r recode-profile}
+## ── Node: recode_geno_meta ────────────────────────────────────────────────────
+## Convert selectiontools (numeric) to nucleotide (char)
+meta_nuc <- recode_geno_meta(meta, to_type = "nucleotide")
+cat("Original encoding:", meta$metadata$encoding, "\n")
+cat("Recoded encoding:", meta_nuc$metadata$encoding, "\n")
+
+## Show a sample value before/after recoding
+cat("geno_arrays[1,1,1] — before:", meta$geno_arrays[1, 1, 1],
+    "| after:", meta_nuc$geno_arrays[1, 1, 1], "\n")
+```
+
+---
+
+## 6  Compute Local GEBV Matrix  [Node: `compute_profile_localgebv`]
+
+```{r compute-gebv}
+## ── Node: compute_profile_localgebv ───────────────────────────────────────────
+## Input : GenoMeta, effect_df  (effect_df may be omitted if attached as
+##         meta$marker_effects)
+## Output: wide data.table (Block × Sample)
+
+gebv_matrix <- compute_profile_localgebv(
+  geno_meta      = meta,
+  effect_df      = effect_df,
+  level          = "genotype",
+  center_by_freq = TRUE
+)
+
+cat("GEBV matrix dimensions:", dim(gebv_matrix), "\n")
+cat("(Expected:", nrow(profile$block_meta), "blocks ×",
+    length(profile$samples) + 1L, "cols inc. Block)\n\n")
+
+print(gebv_matrix)
+```
+
+### 6.1  Haplotype-level output
+
+```{r compute-gebv-hap}
+gebv_hap <- compute_profile_localgebv(
+  geno_meta      = meta,
+  effect_df      = effect_df,
+  level          = "haplotype",
+  center_by_freq = FALSE
+)
+cat("Haplotype-level columns:", ncol(gebv_hap) - 1L,
+    "(expected:", length(profile$samples) * 2L, ")\n")
+```
+
+### 6.2  Per-sample total GEBV summary
+
+```{r gebv-summary}
+sample_cols  <- setdiff(names(gebv_matrix), "Block")
+total_gebv   <- colSums(gebv_matrix[, sample_cols, with = FALSE], na.rm = TRUE)
+gebv_summary <- data.table(Sample = names(total_gebv), TotalGEBV = total_gebv)
+gebv_summary <- gebv_summary[order(-TotalGEBV)]
+cat("Per-sample GEBV summary:\n")
+print(gebv_summary)
+```
+
+---
+
+## 7  Block Location Info  [Node: `build_block_location_info`]
+
+```{r block-location}
+## ── Node: build_block_location_info ───────────────────────────────────────────
+block_info <- build_block_location_info(meta)$block_info
+cat("Block location table:\n")
+print(as.data.table(block_info)[, .(Block, Chrom, Start, End,
+                                    Block_length, Num_SNPs)])
+```
+
+---
+
+## 8  Visualisation  [Node: `plot_haplotype_alignment`]
+
+```{r plot-alignment, fig.width=10, fig.height=6}
+## ── Node: plot_haplotype_alignment ────────────────────────────────────────────
+p_align <- plot_haplotype_alignment(
+  meta,
+  show_block_boundaries = TRUE,
+  show_block_labels     = TRUE
+)
+print(p_align)
+```
+
+### 8.1  Manhattan plots
+
+```{r plot-manhattan, fig.width=10, fig.height=4}
+## Effect
+effect_plot_data <- data.table::melt(
+  gebv_matrix,
+  id.vars      = "Block",
+  variable.name = "Sample",
+  value.name   = "Effect"
+)
+effect_plot_data <- merge(effect_plot_data,
+                           block_info[, .(Block, Chrom, Pos)],
+                           by = "Block", all.x = TRUE)
+
+p_eff <- plot_manhattan_effect(effect_plot_data, trait_name = "Simulated Trait")
+print(p_eff)
+```
+
+```{r plot-variance, fig.width=10, fig.height=4}
+## Variance
+block_var <- effect_plot_data[, .(BlockVariance = var(Effect, na.rm = TRUE)),
+                               by = Block]
+block_var <- merge(block_var, block_info[, .(Block, Chrom, Pos)], by = "Block")
+p_var <- plot_manhattan_variance(block_var, trait_name = "Simulated Trait")
+print(p_var)
+```
+
+---
+
+## 9  Session Info
+
+```{r session-info}
+sessionInfo()
+```

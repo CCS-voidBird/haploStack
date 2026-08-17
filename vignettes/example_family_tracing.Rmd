@@ -1,0 +1,253 @@
+---
+title: "Example 3 — Family tracing and in-family analysis"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Example 3 — Family tracing and in-family analysis}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse  = TRUE,
+  comment   = "#>",
+  message   = FALSE,
+  warning   = FALSE,
+  fig.width = 8,
+  fig.height = 4.5
+)
+```
+
+## What you will learn
+
+When a population has a pedigree, haploStack can walk it generation by
+generation, work out which **haplotype block each offspring inherited from each
+parent**, and test which **markers reliably tag that inheritance**. This example:
+
+1. Loads an **external pedigree file** and attaches it to a `GenoMeta`.
+2. Traces the family structure (`trace_family_history()` /
+   `attach_family_history()`).
+3. Runs **block-level inheritance** tracing (`trace_haplotype_family()`) and
+   visualises parental origins.
+4. Runs **in-family IBD and marker-signal** analysis
+   (`compute_block_ibd()`, `score_marker_signal()`) with its plots.
+
+```{r load}
+library(haploStack)
+library(data.table)
+library(ggplot2)
+```
+
+## 0  A demonstration family
+
+We build four bi-parental families. Each offspring inherits **whole parental
+blocks** (no intra-block recombination), so the inheritance signal is real and
+recoverable. Founders carry random haplotypes; the pedigree is written to an
+external file we read back in the next section.
+
+```{r make-family}
+set.seed(1)
+alleles    <- c("1", "4")
+n_per_chrom <- 6L; n_chrom <- 3L; block_size <- 3L
+n_mk       <- n_per_chrom * n_chrom
+markers    <- paste0("M", seq_len(n_mk))
+chrom      <- rep(seq_len(n_chrom), each = n_per_chrom)
+blk        <- unlist(lapply(seq_len(n_chrom),
+              function(c) paste0("Chr", c, "_B", ceiling(seq_len(n_per_chrom) / block_size))))
+
+map <- data.frame(Chrom = as.character(chrom), Marker = markers,
+                  Pos = unlist(lapply(seq_len(n_chrom),
+                        function(c) sort(sample(seq(1e6, 1e8, 1e5), n_per_chrom)))),
+                  stringsAsFactors = FALSE)
+bmm <- data.frame(Chrom = as.character(chrom), Marker = markers, Block = blk,
+                  stringsAsFactors = FALSE)
+
+# Eight founders, paired into four crosses, four offspring each.
+founders <- paste0("P", 1:8)
+fa <- array(NA_character_, dim = c(8L, n_mk, 2L),
+            dimnames = list(founders, markers, c("1", "2")))
+for (s in founders) for (h in 1:2) fa[s, , h] <- sample(alleles, n_mk, replace = TRUE)
+
+crosses  <- data.frame(P1 = founders[c(1, 3, 5, 7)],
+                       P2 = founders[c(2, 4, 6, 8)], stringsAsFactors = FALSE)
+off_arr  <- list(); ped_rows <- list()
+for (i in seq_len(nrow(crosses))) {
+  p1 <- crosses$P1[i]; p2 <- crosses$P2[i]
+  for (j in 1:4) {
+    oid <- sprintf("F%d_O%d", i, j)
+    oa  <- array(NA_character_, dim = c(1L, n_mk, 2L),
+                 dimnames = list(oid, markers, c("1", "2")))
+    for (b in unique(blk)) {
+      idx <- which(blk == b)
+      oa[1, idx, 1] <- fa[p1, idx, sample(2L, 1L)]   # haplotype 1 from parent 1
+      oa[1, idx, 2] <- fa[p2, idx, sample(2L, 1L)]   # haplotype 2 from parent 2
+    }
+    off_arr[[oid]]  <- oa
+    ped_rows[[oid]] <- data.frame(FID = paste0("FAM", i), IID = oid,
+                                  Father = p1, Mother = p2, stringsAsFactors = FALSE)
+  }
+}
+
+ids <- c(founders, names(off_arr))
+arr <- array(NA_character_, dim = c(length(ids), n_mk, 2L),
+             dimnames = list(ids, markers, c("1", "2")))
+arr[founders, , ] <- fa
+for (oid in names(off_arr)) arr[oid, , ] <- off_arr[[oid]]
+
+meta <- new_geno_meta(
+  geno_arrays = arr, map_info = map, block_marker_map_info = bmm,
+  metadata = list(ploidy = 2L, char_dict = c("1" = 1L, "4" = 2L),
+                  n_samples = length(ids), n_markers = n_mk,
+                  source_format = "selectiontools", encoding = "selectiontools"))
+
+# The pedigree: founders have missing parents ("0").
+pedigree <- rbind(
+  data.frame(FID = "0", IID = founders, Father = "0", Mother = "0",
+             stringsAsFactors = FALSE),
+  do.call(rbind, ped_rows))
+rownames(pedigree) <- NULL
+```
+
+---
+
+## 1  Load the external family-tracing file
+
+Pedigrees usually live in a separate file (a PLINK-style FAM, or any table with
+an individual-ID column and parent columns). We write ours out, then read it
+back the way you would read your own.
+
+```{r write-fam}
+fam_file <- file.path(tempdir(), "pedigree.txt")
+write.table(pedigree, fam_file, sep = "\t", quote = FALSE, row.names = FALSE)
+
+# --- read your pedigree file here ---
+ped_in <- read.table(fam_file, header = TRUE, stringsAsFactors = FALSE)
+head(ped_in)
+```
+
+Attach it to the `GenoMeta`. `attach_family_history()` traces the pedigree and
+stores the result at `meta$metadata$family_history`; it also stamps each
+sample's birth family into `sample_info$Family`. Tell it which columns hold the
+individual ID and the parents.
+
+```{r attach}
+meta <- attach_family_history(meta, ped_in,
+                              parent_cols = c("Father", "Mother"),
+                              id_col      = "IID")
+
+length(meta$metadata$family_history)        # generations traced
+meta$metadata$family_history[[1]][Label == "O"][1:4]   # first-generation offspring
+```
+
+> You can also trace a pedigree without a `GenoMeta` using
+> `trace_family_history(ped_in, parent_cols = c("Father", "Mother"), id_col = "IID")`.
+
+---
+
+## 2  Block-level inheritance — `trace_haplotype_family()`
+
+`family_history_to_pedigree()` flattens the traced history into the
+`Sample / Parent1 / Parent2` form, and `trace_haplotype_family()` then assigns
+each offspring haplotype-block to the parent it most resembles.
+
+```{r trace}
+ped <- family_history_to_pedigree(meta)
+head(ped)
+
+inheritance <- trace_haplotype_family(meta, ped)
+head(inheritance)
+```
+
+Each row reports, for one offspring haplotype within one block, the inferred
+parental origin (`Parent1`, `Parent2`, `ambiguous`, or `unknown`) and the number
+of matching markers. Summarise the parental composition across all offspring:
+
+```{r trace-viz, fig.height=4}
+origin_counts <- inheritance[, .N, by = Parent][order(-N)]
+origin_counts
+
+ggplot(origin_counts, aes(x = reorder(Parent, -N), y = N, fill = Parent)) +
+  geom_col(width = 0.7, show.legend = FALSE) +
+  labs(x = "Inferred parental origin", y = "Offspring haplotype-blocks",
+       title = "Where did offspring blocks come from?") +
+  theme_minimal(base_size = 12)
+```
+
+---
+
+## 3  In-family IBD and marker-signal analysis
+
+The similarity module answers a sharper question: across a family, **which
+markers reliably report that a block was inherited (IBD) from a parent?**
+
+### 3.1  Block IBD — `compute_block_ibd()`
+
+One row per (parental haplotype × progeny haplotype) block comparison, with the
+identity-by-state similarity and the IBD call at the chosen threshold.
+
+```{r ibd}
+ibd <- compute_block_ibd(meta, threshold = 0.5)
+head(ibd)
+cat("Comparisons:", nrow(ibd),
+    "| IBD-positive:", sum(ibd$Similarity >= 0.5), "\n")
+```
+
+### 3.2  Marker signal score — `score_marker_signal()`
+
+For every marker, block IBD is the ground truth and per-marker allele identity
+is the prediction, giving a TP/FP/TN/FN confusion table and the usual metrics
+(precision, recall, F1, MCC). The `final_*` metrics down-weight
+near-monomorphic markers by `MAF × (1 − MAF)`.
+
+```{r signal}
+sig <- score_marker_signal(meta, mode = "IBD")
+names(sig)                                   # detail / marker / metrics / signal
+head(sig$metrics[, .(Chrom, Marker, TP, FP, TN, FN, precision, recall, mcc, final_mcc)])
+```
+
+Scoring is followed by a selection: the `n` best marker(s) per block (default 1)
+come back as `sig$signal`, and `attach_signal_markers()` records them on the
+GenoMeta's `block_info`.
+
+```{r signal-select}
+meta <- attach_signal_markers(meta, sig$signal)
+get_signal_markers(meta)
+```
+
+### 3.3  Visualise the signal markers
+
+A Manhattan of the signal score highlights the selected markers and names the
+blocks they represent…
+
+```{r signal-manhattan, fig.height=4}
+plot_marker_signal(sig$metrics, geno_meta = meta, score = "final_mcc")
+```
+
+…and a precision–recall scatter (coloured by MAF) shows which markers combine
+high precision, high recall, and informative allele frequency — the markers in
+the top-right are the strongest tags.
+
+```{r signal-pr, fig.width=6, fig.height=5}
+plot_signal_precision_recall(sig$metrics)
+```
+
+> Switch to `mode = "IBS"` to weight the confusion cells by block similarity
+> instead of the hard IBD call — useful when inheritance is partial.
+
+---
+
+## Summary
+
+| Goal | Function |
+|------|----------|
+| Read an external pedigree | base `read.table()` |
+| Trace + attach family history | `attach_family_history()`, `trace_family_history()` |
+| Flatten to a parent pedigree | `family_history_to_pedigree()` |
+| Per-block parental origin | `trace_haplotype_family()` |
+| Per-block IBD across a family | `compute_block_ibd()` |
+| Per-marker signal test | `score_marker_signal()` |
+| Signal plots | `plot_marker_signal()`, `plot_signal_precision_recall()` |
+
+```{r session}
+sessionInfo()
+```

@@ -1,0 +1,343 @@
+---
+title: "Workflow — SelectionTools genotype input"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Workflow — SelectionTools genotype input}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse  = TRUE,
+  comment   = "#>",
+  eval      = FALSE,   # file paths are illustrative; set eval=TRUE with real files
+  fig.width = 9,
+  fig.height = 5
+)
+```
+
+## Overview
+
+This vignette demonstrates the end-to-end haploStack workflow starting from
+**SelectionTools (ST) numeric genotype files**.  ST genotypes store diploid
+calls as marker-coded values (e.g. `1/4`, `4/4`) with markers as rows and
+samples as columns.
+
+```
+Input files                     Output artefacts
+──────────────────────────────  ──────────────────────────────────────────
+my_genotype.csv (ST format)     GenoMeta object (in memory)
+my_map.txt                      Haplotype profile (.rds)
+my_blocks.txt                   Block location table (.csv)
+my_effects_yield.GS.Eff         Local-GEBV matrix (.txt per trait)
+                                Format-converted genotype files (.ped / .csv)
+                                Plots (Manhattan, block-counts, alignment)
+```
+
+---
+
+## 1  Input file formats
+
+### 1.1  Genotype file (SelectionTools CSV)
+
+Markers as rows, samples as columns.  Cell values use the ST numeric encoding
+(A→1, G→2, C→3, T→4) as slash-separated haplotypes:
+
+```
+Marker   S001   S002   S003   ...
+SNP_001  1/4    1/1    4/4    ...
+SNP_002  2/2    2/3    3/3    ...
+```
+
+The file may be tab or comma delimited.  The first column is treated as marker
+names; the remaining columns are samples.
+
+### 1.2  Map file (`.txt`)
+
+Three columns with a header — order: Marker | Chrom | Pos (bp):
+
+```
+Marker    Chrom  Pos
+SNP_001   1H     12340000
+SNP_002   1H     18920000
+```
+
+### 1.3  Block file (optional)
+
+Either **coordinate format** (Chrom, Block, Start, End) or
+**marker-level format** (Chrom, Marker, Block) — tab-delimited with header.
+
+### 1.4  Effect file (`.GS.Eff` or plain `.txt`)
+
+Three columns, no header — Marker | Allele | Effect:
+
+```
+SNP_001  1   0.0412
+SNP_002  2  -0.0187
+```
+
+Allele codes must match the ST encoding (`"1"` = A, `"2"` = G, etc.).
+
+---
+
+## 2  Read genotype data
+
+```{r read-st}
+library(haploStack)
+library(data.table)
+
+# ── Read ST genotype + map (and optionally a block file) ──────────────────────
+meta <- read_st_genotype(
+  file       = "data/my_genotype.csv",
+  map_file   = "data/my_map.txt",
+  block_file = "data/my_blocks.txt",   # omit if attaching blocks separately
+  pos_unit   = "bp"
+)
+
+is_geno_meta(meta)   # TRUE
+
+cat("Samples :", meta$metadata$n_samples,  "\n")
+cat("Markers :", meta$metadata$n_markers,  "\n")
+cat("Encoding:", paste(names(meta$metadata$char_dict), collapse = ", "), "\n")
+
+# Array shape: (n_samples, n_markers, ploidy=2)
+dim(meta$geno_arrays)
+head(meta$map_info)
+```
+
+---
+
+## 3  Build GenoMeta from in-memory objects (alternative)
+
+If your genotype data is already loaded as an R matrix — from another tool or
+custom preprocessing — use `build_geno_meta()` instead of a file reader.  It
+accepts both ST-style slash-separated matrices and wide-allele matrices
+(one column per allele, as produced by PLINK allele extraction).
+
+```{r build-from-memory}
+# Example: ST-style matrix already in memory
+geno_mat <- read.csv("data/my_genotype.csv", row.names = 1, check.names = FALSE)
+map_df   <- read.table("data/my_map.txt",   header = TRUE)
+
+meta_mem <- build_geno_meta(
+  geno_2d      = as.matrix(geno_mat),   # markers × samples OR samples × markers
+  map          = map_df,
+  ploidy       = 2L,
+  split_char   = "/",   # "/" for ST slash-separated; "" for two-char concat
+  source_format = "selectiontools"
+)
+
+is_geno_meta(meta_mem)
+dim(meta_mem$geno_arrays)
+```
+
+---
+
+## 4  Attach block information (if not loaded with the reader)
+
+Skip this step if you passed `block_file` to `read_st_genotype()` above.
+
+```{r attach-blocks}
+block_map <- fread("data/my_blocks.txt")
+meta      <- attach_block_info(meta, block_source = block_map)
+
+# Confirm blocks attached
+head(meta$block_marker_map_info)
+nrow(meta$block_info)
+```
+
+---
+
+## 5  Build block location table
+
+```{r block-location}
+bloc <- build_block_location_info(
+  meta,
+  output_dir = "output",
+  prefix     = "barley_st"
+)
+
+# Chrom, Block, Start, End, Pos (midpoint), Num_SNPs, Block_length
+print(bloc$block_info)
+```
+
+---
+
+## 6  Derive profile views from the GenoMeta
+
+`meta` is the single central object. Derive the denormalised profile views
+(wide allele table, marker/block metadata) on demand with `geno_meta_views()`.
+
+```{r profile}
+profile <- geno_meta_views(meta)
+
+cat("Encoding :", profile$encoding,           "\n")
+cat("Samples  :", length(profile$samples),    "\n")
+cat("Blocks   :", nrow(profile$block_meta),   "\n")
+cat("Markers  :", nrow(profile$marker_meta),  "\n")
+
+# Allele table: rows = samples × ploidy, cols = markers
+head(profile$alleles[, 1:8, with = FALSE])
+
+# Persist the GenoMeta
+save_geno_meta(meta, "output/barley_st_geno_meta.rds")
+```
+
+---
+
+## 7  Compute local GEBVs
+
+```{r effects}
+# ── Single trait ──────────────────────────────────────────────────────────────
+eff_yield <- read_effect_file("data/effects_yield.GS.Eff")
+
+gebv_yield <- compute_profile_localgebv(
+  profile        = profile,
+  effect_df      = eff_yield,
+  level          = "genotype",   # "haplotype" for per-haplotype resolution
+  center_by_freq = TRUE
+)
+
+cat("GEBV matrix:", dim(gebv_yield), "(blocks × samples + 1)\n")
+print(gebv_yield[1:5, 1:6, with = FALSE])
+
+fwrite(gebv_yield, "output/gebv_yield.txt", sep = "\t")
+```
+
+---
+
+## 8  Run the full catalogue (multi-trait)
+
+```{r catalogue}
+effect_list <- list(
+  Yield    = read_effect_file("data/effects_yield.GS.Eff"),
+  Protein  = read_effect_file("data/effects_protein.GS.Eff"),
+  Maturity = read_effect_file("data/effects_maturity.GS.Eff")
+)
+
+results <- run_haplotype_catalogue(
+  geno_meta      = meta,
+  effect_list    = effect_list,
+  output_dir     = "output/catalogue_st",
+  ld_threshold   = 0.5,
+  save_profile   = TRUE,
+  center_by_freq = TRUE,
+  n_cores        = 1L
+)
+
+names(results)            # one element per trait
+names(results$Yield)      # gebv_matrix, gebv_summary, block_counts, profile
+```
+
+Files written to `output/catalogue_st/`:
+
+| File | Content |
+|------|---------|
+| `haplotype_profile_0.5_t0.rds` | Serialised haplotype profile |
+| `Haplotype_GA_Matrix_*_Yield.txt` | Block × Sample GEBV matrix |
+| `GEBV_*_Yield.txt` | Per-sample total GEBV |
+| `Block_Counts_*_Yield.txt` | Positive / zero / negative block counts |
+| `Manhattan_Variance_*_Yield.png` | Per-block effect variance |
+| `Manhattan_Effect_*_Yield.png` | Per-sample effect distribution |
+| `Block_Counts_Yield.png` | Stacked bar chart |
+
+---
+
+## 9  Visualise results
+
+```{r plots, eval=FALSE, fig.width=10, fig.height=5}
+library(ggplot2)
+
+# ── Manhattan — effect variance ───────────────────────────────────────────────
+block_var <- results$Yield$gebv_matrix |>
+  data.table::melt(id.vars = "Block", variable.name = "Sample",
+                   value.name = "Effect") |>
+  merge(bloc$block_info[, .(Block, Chrom, Pos)], by = "Block") |>
+  (\(dt) dt[, .(BlockVariance = var(Effect, na.rm = TRUE)), by = .(Block, Chrom, Pos)])()
+
+p_var <- plot_manhattan_variance(block_var, trait_name = "Yield")
+print(p_var)
+ggsave("output/Manhattan_Variance_Yield.png", p_var, width = 10, height = 5, dpi = 150)
+
+# ── Block counts per sample ───────────────────────────────────────────────────
+p_counts <- plot_block_counts(results$Yield$block_counts, trait_name = "Yield")
+print(p_counts)
+ggsave("output/Block_Counts_Yield.png", p_counts, width = 12, height = 6, dpi = 150)
+
+# ── Haplotype alignment — chromosome 1H ──────────────────────────────────────
+meta_1H  <- filter_geno_meta(meta, chromosomes = list(list(chr = "1H")))
+p_align  <- plot_haplotype_alignment(meta_1H, show_block_boundaries = TRUE,
+                                      show_block_labels = TRUE)
+print(p_align)
+ggsave("output/Alignment_1H.png", p_align, width = 14, height = 8, dpi = 150)
+```
+
+---
+
+## 10  Filter the GenoMeta
+
+```{r filter}
+# ── Chromosome region ─────────────────────────────────────────────────────────
+meta_1H <- filter_geno_meta(
+  meta,
+  chromosomes = list(list(chr = "1H", start = 0, end = 300e6))
+)
+
+# ── Specific samples and blocks ───────────────────────────────────────────────
+elite    <- c("S001", "S002", "S010", "S020")
+top_blks <- profile$block_meta[order(-n_markers)][1:10, block_id]
+
+meta_sub <- filter_geno_meta(meta, keep_samples = elite, blocks = top_blks)
+prof_sub <- geno_meta_views(meta_sub)
+cat("Subset GenoMeta:", length(prof_sub$samples), "samples,",
+    nrow(prof_sub$block_meta), "blocks\n")
+```
+
+---
+
+## 11  Export genotypes in other formats
+
+Convert a SelectionTools genotype into PLINK PED or genomicSimulation format.
+
+```{r export}
+# ── ST → PLINK PED ────────────────────────────────────────────────────────────
+write_geno_meta(meta, path = "output/genotype_plink", output_format = "plink_ped")
+# Writes: output/genotype_plink.ped + output/genotype_plink.map
+
+# ── ST → genomicSimulation CSV ────────────────────────────────────────────────
+write_geno_meta(meta, path = "output/genotype_gs.csv", output_format = "gs")
+
+# ── Inspect the ST matrix (markers × samples, "1/4" cells) ───────────────────
+converted_st <- geno_meta_to_matrix(meta, output_format = "st")
+dim(converted_st$matrix)         # n_markers × n_samples
+converted_st$matrix[1:4, 1:5]
+
+# ── Inspect the PLINK matrix (samples × markers, "A T" space-sep cells) ──────
+converted_pl <- geno_meta_to_matrix(meta, output_format = "plink_ped")
+dim(converted_pl$matrix)         # n_samples × n_markers
+converted_pl$matrix[1:3, 1:4]
+
+# ── Re-encode the GenoMeta: ST numeric → nucleotide letters ──────────────────
+meta_nuc <- recode_geno_meta(meta, to_type = "nucleotide")
+meta_nuc$metadata$encoding     # "nucleotide"
+geno_meta_views(meta_nuc)$alleles[1:2, 1:6, with = FALSE]
+```
+
+---
+
+## 12  Load a saved GenoMeta in a new session
+
+```{r reload}
+meta2 <- load_geno_meta("output/barley_st_geno_meta.rds")
+meta2$metadata$encoding
+nrow(meta2$sample_info)
+```
+
+---
+
+## Session info
+
+```{r session}
+sessionInfo()
+```

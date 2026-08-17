@@ -1,0 +1,429 @@
+---
+title: "Example 2 — Haplotype catalogue and visualisation"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Example 2 — Haplotype catalogue and visualisation}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse  = TRUE,
+  comment   = "#>",
+  message   = FALSE,
+  warning   = FALSE,
+  fig.width = 9,
+  fig.height = 4.5
+)
+```
+
+## What you will learn
+
+The **haplotype catalogue** turns a `GenoMeta` plus a trait's marker effects
+into per-sample, per-block local GEBVs (genomic estimated breeding values) and a
+set of diagnostic plots. This example covers:
+
+1. Starting from a **saved `GenoMeta` `.rds` file** (the usual hand-off point).
+2. Computing **local GEBVs** with `compute_profile_localgebv()`.
+3. **Effect** and **variance** Manhattan plots across the genome.
+4. **Haplotype-alignment** plots on chosen subsets (a chromosome, a block set,
+   selected samples).
+5. Pinning **one row order across every figure** with `use_sample_order()`
+   (0.5.5).
+6. The one-call orchestrator `run_haplotype_catalogue()`.
+
+```{r load}
+library(haploStack)
+library(data.table)
+```
+
+## 0  Prepare and save a demonstration GenoMeta
+
+The catalogue normally consumes a `GenoMeta` produced earlier (see
+*Example 1 — Building a GenoMeta from varying sources*). Here we synthesise a
+small population, **save it to an `.rds` file**, and then reload it — mirroring
+how you would resume an analysis from a stored object.
+
+```{r make-rds}
+set.seed(42)
+
+n_samples <- 16L; n_per_chrom <- 8L; n_chrom <- 3L; block_size <- 4L
+n_mk      <- n_per_chrom * n_chrom
+markers   <- paste0("M", seq_len(n_mk))
+chrom     <- rep(seq_len(n_chrom), each = n_per_chrom)
+alleles   <- c("1", "4")                       # SelectionTools encoding
+
+# 3-D genotype array: samples × markers × ploidy(2)
+arr <- array(sample(alleles, n_samples * n_mk * 2L, replace = TRUE),
+             dim = c(n_samples, n_mk, 2L),
+             dimnames = list(paste0("S", seq_len(n_samples)), markers, c("1", "2")))
+
+map <- data.frame(
+  Chrom  = as.character(chrom),
+  Marker = markers,
+  Pos    = unlist(lapply(seq_len(n_chrom),
+            function(c) sort(sample(seq(1e6, 1e8, 1e5), n_per_chrom)))),
+  stringsAsFactors = FALSE)
+
+# Consecutive markers within a chromosome form a block.
+bmm <- data.frame(
+  Chrom  = as.character(chrom),
+  Marker = markers,
+  Block  = unlist(lapply(seq_len(n_chrom),
+            function(c) paste0("Chr", c, "_B", ceiling(seq_len(n_per_chrom) / block_size)))),
+  stringsAsFactors = FALSE)
+
+# One additive effect per (marker, allele).
+effects <- data.frame(
+  Marker = rep(markers, each = 2L),
+  Allele = rep(alleles, times = n_mk),
+  Effect = round(rnorm(n_mk * 2L, 0, 0.5), 3),
+  stringsAsFactors = FALSE)
+
+meta <- new_geno_meta(
+  geno_arrays           = arr,
+  map_info              = map,
+  block_marker_map_info = bmm,
+  metadata = list(ploidy = 2L, char_dict = c("1" = 1L, "4" = 2L),
+                  n_samples = n_samples, n_markers = n_mk,
+                  source_format = "selectiontools", encoding = "selectiontools"),
+  marker_effects = effects)
+
+rds_path <- file.path(tempdir(), "catalogue_demo.rds")
+save_geno_meta(meta, rds_path)
+```
+
+```{r load-rds}
+# === The catalogue workflow begins here, from a saved object ===
+meta <- load_geno_meta(rds_path)
+is_geno_meta(meta)
+
+cat("Samples:", meta$metadata$n_samples,
+    "| Markers:", meta$metadata$n_markers,
+    "| Blocks:", length(unique(meta$block_marker_map_info$Block)), "\n")
+```
+
+---
+
+## 1  Compute local GEBVs
+
+`compute_profile_localgebv()` returns a wide **Block × Sample** `data.table`.
+With `level = "genotype"` the two haplotypes of each sample are summed;
+`center_by_freq = TRUE` expresses each value relative to the population mean.
+The marker effects stored on the object are used automatically.
+
+```{r gebv}
+gebv <- compute_profile_localgebv(meta, level = "genotype", center_by_freq = TRUE)
+
+dim(gebv)                              # n_blocks × (n_samples + 1 Block column)
+gebv[, 1:6]
+```
+
+A quick per-sample ranking by total GEBV:
+
+```{r gebv-summary}
+sample_cols <- setdiff(names(gebv), "Block")
+totals <- data.table(Sample = sample_cols,
+                     TotalGEBV = colSums(gebv[, ..sample_cols], na.rm = TRUE))
+head(totals[order(-TotalGEBV)])
+```
+
+---
+
+## 2  Genome-wide visualisation
+
+Both Manhattan helpers need genomic coordinates, so first build a block-location
+table (`Block, Chrom, Pos, …`) and reshape the GEBV matrix to long form.
+
+```{r block-loc}
+bloc <- as.data.table(build_block_location_info(meta)$block_info)
+bloc[, .(Block, Chrom, Start, End, Pos, Num_SNPs)]
+
+long_gebv <- melt(gebv, id.vars = "Block",
+                  variable.name = "Sample", value.name = "Effect")
+long_gebv <- merge(long_gebv, bloc[, .(Block, Chrom, Pos)], by = "Block")
+```
+
+### 2.1  Effect Manhattan — per-sample block effects
+
+Each point is one sample's local GEBV at one block, placed at the block's
+genomic position. Useful for spotting blocks where carriers differ strongly.
+
+```{r manhattan-effect}
+p_eff <- plot_manhattan_effect(long_gebv, trait_name = "Demo trait")
+print(p_eff)
+```
+
+### 2.2  Variance Manhattan — where the population varies
+
+Collapsing to per-block variance of the GEBV highlights the blocks that
+discriminate most between samples (the natural targets for stacking).
+
+```{r manhattan-variance}
+block_var <- long_gebv[, .(BlockVariance = var(Effect, na.rm = TRUE)),
+                       by = .(Block, Chrom, Pos)]
+p_var <- plot_manhattan_variance(block_var, trait_name = "Demo trait")
+print(p_var)
+```
+
+---
+
+## 3  Haplotype alignment on specific subsets
+
+`plot_haplotype_alignment()` draws every sample's two haplotypes as coloured
+marker tracks. The figure carries two column-level groupings: **chromosomes**
+are sub-panels (one facet column each, as wide as its share of the markers) and
+**blocks** are annotated inside each panel — dot-dash boundaries plus vertical
+block IDs hanging from the panel top.
+
+```{r align-genome, fig.height=6, fig.width=10}
+plot_haplotype_alignment(meta, method = "genotype")
+```
+
+Whole-genome alignments are dense, so subset with `filter_geno_meta()` — by
+chromosome, by block, or by sample — when you want to read individual markers.
+`chrom_panels = FALSE` returns the pre-0.5.0 figure: one continuous marker axis
+with the chromosomes named only in the subtitle.
+
+### 3.1  One chromosome
+
+A single-chromosome panel is never faceted; the `Chr …` subtitle names it.
+
+```{r align-chrom, fig.height=6}
+meta_chr1 <- filter_geno_meta(meta, chromosomes = list(list(chr = "1")))
+plot_haplotype_alignment(meta_chr1,
+                         show_block_boundaries = TRUE,
+                         show_block_labels     = TRUE)
+```
+
+### 3.2  A chosen set of blocks, for a subset of samples
+
+```{r align-blocks, fig.height=5}
+top_blocks <- block_var[order(-BlockVariance)][1:3, Block]   # 3 most-variable blocks
+elite      <- paste0("S", 1:6)
+
+meta_sub <- filter_geno_meta(meta, keep_samples = elite, blocks = top_blocks)
+plot_haplotype_alignment(meta_sub,
+                         show_block_boundaries = TRUE,
+                         show_block_labels     = TRUE,
+                         show_individual_names = TRUE)
+```
+
+### 3.3  One row order for every figure — `use_sample_order()`
+
+Each figure with a sample axis used to pick its own row order: alphabetical
+here, family history there, ggplot2's discrete scale elsewhere. Two panels of
+the same population could therefore put the same line on different rows, and
+`plot_meta_alignment()` *hid* it — it imposes the first panel's axis on the
+rest, so a mismatched pair still rendered, silently re-ordered.
+
+Since 0.5.5 there is one rule:
+
+> A per-call `sample_order` argument wins. Then the broadcast option. Then the
+> figure's own default.
+
+`cluster_samples()` produces a dendrogram leaf order; `use_sample_order()`
+broadcasts it to every figure in the session and returns the previous value, so
+a script can put it back.
+
+```{r sample-order, fig.height=6, fig.width=10}
+cl  <- cluster_samples(meta, k = 2)
+old <- use_sample_order(cl)          # broadcast; returns the previous setting
+
+plot_haplotype_alignment(meta, method = "genotype")
+```
+
+The subtitle now carries the ordering provenance (`rows: ward.D2 / hamming,
+k=2`), so a clustered panel cannot be mistaken for an alphabetical one. Each
+figure also records what it drew:
+
+```{r sample-order-attrs}
+p <- plot_haplotype_alignment(meta, method = "genotype")
+attr(p, "sample_order_source")       # "default" | "argument" | "option"
+head(attr(p, "sample_order"))
+```
+
+Two asymmetries are worth knowing:
+
+- An order passed **as an argument** must be a permutation of that panel's
+  samples — a mismatch is an error, because you named those samples for that
+  figure.
+- A **broadcast** order is best-effort: it is intersected with whatever the
+  panel holds, and panel samples missing from it are appended after the ordered
+  ones. Without that, one `use_sample_order()` call would turn every filtered
+  panel in the session into an error at a distance.
+
+An order never moves a sample between groups. In the family-faceted figures the
+offspring/founder split and its dashed boundary stay put; rows are re-arranged
+only *inside* each group. Haplotype-level panels keep a sample's copies adjacent
+(`S1.1`, `S1.2`), so re-ordering moves whole samples, never single copies.
+Blocks are untouched — the column axis stays in genomic order.
+
+Clear the broadcast when you are done, or every later figure in the session
+inherits it:
+
+```{r sample-order-clear}
+use_sample_order(old)                # `old` is NULL if nothing was set before
+```
+
+Composing panels, `plot_meta_alignment(check_order = TRUE)` (the default) warns
+when panels disagree rather than re-ordering them silently. The fix is to draw
+both from the same order — usually by broadcasting one.
+
+---
+
+## 4  One-call catalogue — `run_haplotype_catalogue()`
+
+For a (multi-trait) production run, `run_haplotype_catalogue()` wraps GEBV
+computation, per-sample summaries, block counts, the long block catalogue, and
+plot/file export into a single call. Pass effects as a **named list** (one
+element per trait).
+
+```{r catalogue}
+out_dir <- file.path(tempdir(), "catalogue_out")
+
+results <- run_haplotype_catalogue(
+  geno_meta    = meta,
+  effect_list  = list(Demo = effects),     # add more named traits here
+  output_dir   = out_dir,
+  save_profile = TRUE,                      # writes the GenoMeta .rds too
+  n_cores      = 1L
+)
+
+names(results)                              # one element per trait
+names(results$Demo)                         # gebv_matrix, gebv_summary, block_counts, ...
+```
+
+The per-trait `block_counts` table feeds a ready-made stacked bar chart of how
+many blocks carry a positive / zero / negative effect in each sample:
+
+```{r block-counts, fig.height=5}
+plot_block_counts(results$Demo$block_counts, trait_name = "Demo")
+```
+
+Files written to the output directory (GEBV matrices, summaries, the long
+catalogue, and PNG plots):
+
+```{r list-outputs}
+list.files(out_dir)
+```
+
+---
+
+## 5  Cross-trait block analysis — `analyze_block_catalogue()`
+
+`run_haplotype_catalogue()` is **per-trait**. To compare blocks **across several
+traits at once** — which blocks are commonly good, which are trait-specific, and
+which carry trade-offs — use `analyze_block_catalogue()`. It works in three
+load-bearing steps:
+
+1. **Normalize within each trait.** Each trait's subtype effects are put on a
+   common scale (`normalize = "zscore"` is a **true standard score**
+   `(x − mean)/sd`, so `0` means an *average*-effect subtype for that trait).
+2. **Select one subtype per block, shared across traits.** A **subtype** is a
+   specific allele combination; its identity is trait-invariant but its effect
+   differs per trait. Each block is represented by the *single* subtype with the
+   **highest summed value across traits**,
+   `argmax_subtype Σ_t w_t · value(subtype, t)`, where `value` is the raw effect
+   `S` or the normalized `N` chosen by **`value_source`**, and `trait_weights`
+   are **signed direction only**.
+3. **Report each trait's own value.** The selected subtype's per-trait `S` and
+   `N` are returned side by side (no composite score), so trade-offs stay visible.
+
+```{r xtrait-data}
+# A second trait on a deliberately different scale (so normalisation matters).
+set.seed(7)
+effects2 <- data.frame(
+  Marker = rep(markers, each = 2L),
+  Allele = rep(alleles, times = n_mk),
+  Effect = round(rnorm(n_mk * 2L, 0, 3), 3),    # ~6x the spread of `effects`
+  stringsAsFactors = FALSE)
+
+ana <- analyze_block_catalogue(
+  geno_meta    = meta,
+  effect_list  = list(Yield = effects, Protein = effects2),
+  fitness_fn   = "max_effect",   # candidate value = the subtype's effect
+  normalize    = "zscore",       # within-trait standard score
+  value_source = "normalized",   # sum standard scores so the large-scale
+                                 # trait does not dominate the selection
+  plots        = c("rectangular", "manhattan", "density", "heatmap"))
+
+names(ana)
+```
+
+Each block is now represented by **one** subtype, identical across every trait:
+
+```{r xtrait-selected}
+head(ana$selected[, .(Block, Subtype, Count, Chrom, Pos)])
+```
+
+Its per-trait **raw** effect `S` and **normalized** value `N` are returned as
+tidy `Block × Trait` tables (both keyed to that one selected subtype), with a
+per-trait top-block flag `is_top`:
+
+```{r xtrait-SN}
+head(ana$S[, .(Block, Trait, Subtype, S, is_top)])
+head(ana$N[, .(Block, Trait, Subtype, N, is_top)])
+```
+
+> **Mixed scales, one honest selection.** Compare `value_source = "raw"` — where
+> the wide-spread `Protein` trait dominates the summed selection — with
+> `value_source = "normalized"` above, which sums standard scores so neither trait
+> swamps the other. Because the analysis reports **each trait's own value** rather
+> than a single composite, a block that is good for one trait but poor for another
+> stays visible. Use signed `trait_weights` (e.g. `c(Yield = 1, Protein = -1)`) to
+> treat a trait as lower-is-better.
+
+The plots are returned in `ana$plots` and **fill by the `value_source` chosen at
+analysis time** (D2), so no re-specification is needed; `circos` is a base plot
+when the optional *circlize* package is installed, else a linear fallback:
+
+```{r xtrait-genome, fig.height=4}
+ana$plots$rectangular     # genome: position x trait, fill = selected subtype's N
+ggsave(filename = file.path(out_dir, "cross_trait_rectangular.png"), width = 9, height = 4)
+```
+
+```{r xtrait-manhattan, fig.height=6}
+ana$plots$manhattan       # one Manhattan panel per trait, top blocks labelled
+
+```
+
+```{r xtrait-density, fig.height=4}
+ana$plots$density         # distribution of selected-subtype values per trait
+```
+
+Any standalone plotter accepts a `value_source` override, so you can re-plot the
+**raw** effect from a `normalized`-selected result without recomputing:
+
+```{r xtrait-genome-raw, fig.height=4}
+plot_block_effect_genome(ana, value_source = "raw")   # white = zero effect
+```
+
+```{r xtrait-circos, eval=requireNamespace("circlize", quietly = TRUE), fig.height=6}
+# One ring per trait (requires the optional 'circlize' package).
+plot_block_effect_circos(ana, link_top = TRUE)
+```
+
+---
+
+## Summary
+
+| Goal | Function |
+|------|----------|
+| Resume from a saved object | `load_geno_meta()` |
+| Per-block local GEBVs | `compute_profile_localgebv()` |
+| Block genomic coordinates | `build_block_location_info()` |
+| Effect / variance Manhattan | `plot_manhattan_effect()`, `plot_manhattan_variance()` |
+| Subset before plotting | `filter_geno_meta()` |
+| Haplotype alignment | `plot_haplotype_alignment()` |
+| Whole catalogue + files | `run_haplotype_catalogue()`, `plot_block_counts()` |
+| Cross-trait block comparison | `analyze_block_catalogue()` |
+| Cross-trait figures | `plot_block_effect_genome()`, `plot_block_effect_manhattan()`, `plot_block_effect_density()`, `plot_top_block_heatmap()`, `plot_block_effect_circos()` |
+
+The local-GEBV matrix produced here is exactly what the stacking simulation
+(*Example 4*) selects on.
+
+```{r session}
+sessionInfo()
+```

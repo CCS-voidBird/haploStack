@@ -1,0 +1,22 @@
+# Compiled artefacts — never commit; src/*.cpp is compiled on the target machine
+src/*.o
+src/*.so
+src/*.dll
+src/*.dylib
+src/Makevars.win
+
+# R session / build output
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+Rplots.pdf
+*.Rcheck/
+*.tar.gz
+inst/doc/
+vignettes/figure/
+vignettes/*.html
+
+# OS
+.DS_Store
+Thumbs.db

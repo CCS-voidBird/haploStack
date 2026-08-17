@@ -1,0 +1,324 @@
+---
+title: "Example 1 — Building a GenoMeta from varying sources"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Example 1 — Building a GenoMeta from varying sources}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment  = "#>",
+  message  = FALSE,
+  warning  = FALSE
+)
+```
+
+## What you will learn
+
+`GenoMeta` is the single central object in **haploStack**: it bundles the
+genotype array, marker map, haplotype-block assignments, a per-sample
+pedigree/`sample_info` table, and (optionally) marker effects and phenotypes
+into one container that every downstream function consumes.
+
+This example shows the three ways to obtain a `GenoMeta`, the optional pieces
+you can attach to it, and how to write it back out in another file format
+(format transformation):
+
+1. **From in-memory variables** — `build_geno_meta()`
+2. **From files** — `read_st_genotype()`, `read_plink_ped()`, `read_genotype()`
+3. **Optional contents** — blocks, marker effects, phenotypes
+4. **File outputs / format transformation** — `write_geno_meta()`,
+   `geno_meta_to_matrix()`, `recode_geno_meta()`, `save_geno_meta()`
+
+Everything below runs on a tiny, self-contained dataset created in the next
+chunk — no external files of your own are required.
+
+```{r load}
+library(haploStack)
+library(data.table)
+
+set.seed(7)
+```
+
+## 0  A tiny demonstration dataset
+
+We hand-build a 5-sample × 8-marker diploid dataset in **SelectionTools**
+encoding (alleles coded `1` and `4`, the two haplotypes of a genotype written
+as `"1/4"`).
+
+```{r demo-data}
+markers <- paste0("SNP", 1:8)
+samples <- paste0("L", 1:5)
+
+# Genotype matrix — markers as rows, samples as columns, "allele1/allele2" cells.
+geno <- matrix(sample(c("1/1", "1/4", "4/4"), 40, replace = TRUE),
+               nrow = 8, dimnames = list(markers, samples))
+
+# Marker map — one row per marker: Chrom, Marker, Pos (bp).
+map <- data.frame(
+  Chrom  = c(rep("1H", 4), rep("2H", 4)),
+  Marker = markers,
+  Pos    = c(12, 18, 25, 40, 5, 11, 22, 33) * 1e6,
+  stringsAsFactors = FALSE
+)
+
+# Block map — one row per marker: which haplotype block each marker belongs to.
+blocks <- data.frame(
+  Chrom  = map$Chrom,
+  Marker = markers,
+  Block  = c("1H_B1", "1H_B1", "1H_B2", "1H_B2",
+             "2H_B1", "2H_B1", "2H_B2", "2H_B2"),
+  stringsAsFactors = FALSE
+)
+
+print(geno[, 1:3])
+```
+
+---
+
+## 1  Build from in-memory variables — `build_geno_meta()`
+
+`build_geno_meta()` is the assembler when your genotypes are already in R (from
+another tool or custom pre-processing).
+
+> **Orientation matters.** `build_geno_meta()` expects the genotype matrix in
+> the fixed orientation **rows = samples, columns = markers**. Our `geno`
+> matrix is markers × samples, so we transpose it with `t()`.
+
+```{r build-minimal}
+geno_sm <- t(geno)                      # now rows = samples, cols = markers
+
+meta <- build_geno_meta(
+  geno_2d       = geno_sm,
+  map           = map,                  # columns in order: Chrom, Marker, Pos
+  ploidy        = 2L,
+  split_char    = "/",                  # allele separator inside a cell ("1/4")
+  encoding      = "selectiontools",     # or "nucleotide" for A/C/G/T data
+  source_format = "selectiontools"
+)
+
+is_geno_meta(meta)                      # TRUE → structurally valid
+dim(meta$geno_arrays)                   # samples × markers × ploidy
+```
+
+The `GenoMeta` is a plain named list — inspect any field directly:
+
+```{r build-inspect}
+str(meta$metadata)
+head(meta$sample_info)                  # auto-built FAM table (one row per sample)
+```
+
+---
+
+## 2  Optional contents
+
+A `GenoMeta` is useful with just genotypes and a map, but most analyses attach
+more. Each piece below is optional and can be added at build time or later.
+
+### 2.1  Haplotype blocks
+
+Pass `blocks =` to `build_geno_meta()`, or attach later with
+`attach_block_info()`. The block source may be a marker→block data.frame (as
+here), a block-coordinate table, or a file path.
+
+```{r blocks}
+meta <- attach_block_info(meta, block_source = blocks)
+
+nrow(meta$block_info)                   # number of blocks
+head(meta$block_marker_map_info)        # marker → block assignments
+```
+
+### 2.2  A pedigree / `sample_info` (FAM) table
+
+`sample_info` follows the 5-column PLINK FAM contract read **by position**:
+`Family, Sample, Parent1, Parent2, Sex`. Supply it via the `fam =` argument of
+`build_geno_meta()`, or set `meta$sample_info` directly. Here all five samples
+are unrelated founders (`"0"` = missing parent).
+
+```{r fam}
+meta$sample_info <- data.frame(
+  Family  = "F0",
+  Sample  = samples,
+  Parent1 = "0",
+  Parent2 = "0",
+  Sex     = 0,
+  stringsAsFactors = FALSE
+)
+stopifnot(is_geno_meta(meta))           # Sample column must match the genotypes
+```
+
+### 2.3  Marker effects (for local GEBVs)
+
+Store an allele-effect table on the object so GEBV functions can find it without
+re-passing it. Columns are read by position: `Marker, Allele, Effect`.
+
+```{r effects}
+effects <- data.frame(
+  Marker = rep(markers, each = 2L),
+  Allele = rep(c("1", "4"), times = 8L),
+  Effect = round(rnorm(16, 0, 0.4), 3),
+  stringsAsFactors = FALSE
+)
+meta$marker_effects <- effects          # optional; is_geno_meta() does not require it
+```
+
+### 2.4  Phenotypes
+
+`attach_phenotype()` aligns a `Sample` + trait-columns table to the genotype
+sample set (left-join: missing samples are filled with `NA`).
+
+```{r phenotype}
+pheno <- data.frame(Sample = samples, Yield = round(rnorm(5, 5, 1), 2))
+meta  <- attach_phenotype(meta, pheno)
+head(meta$phenotype)
+```
+
+> Family / pedigree tracing is its own topic — see
+> *Example 3 — Family tracing*.
+
+---
+
+## 3  Build from files
+
+The same `GenoMeta` can be read directly from disk. To keep this example
+self-contained we first write our demo data out as small files, then read them
+back.
+
+```{r write-demo-files}
+io <- file.path(tempdir(), "geno_io")
+dir.create(io, showWarnings = FALSE)
+
+# SelectionTools genotype: markers as rows, first column = marker, then samples.
+st_geno <- file.path(io, "geno_st.tsv")
+fwrite(cbind(Marker = markers, as.data.frame(geno)), st_geno, sep = "\t")
+
+# Map file (SelectionTools column order: Marker, Chrom, Pos).
+st_map <- file.path(io, "map_st.tsv")
+fwrite(map[, c("Marker", "Chrom", "Pos")], st_map, sep = "\t")
+
+# Block file.
+blk_file <- file.path(io, "blocks.tsv")
+fwrite(blocks, blk_file, sep = "\t")
+```
+
+### 3.1  A known format — `read_st_genotype()`
+
+Thin format-specific readers wrap the generic reader with the right layout
+preset. `read_st_genotype()`, `read_gs_genotype()` (genomicSimulation) and
+`read_plink_ped()` (PLINK) cover the common cases.
+
+```{r read-st}
+meta_st <- read_st_genotype(st_geno, map_file = st_map, block_file = blk_file)
+
+is_geno_meta(meta_st)
+meta_st$metadata$n_samples
+```
+
+### 3.2  A custom layout — `resolve_geno_format()` + `read_genotype()`
+
+For a file that does not match a built-in preset, describe its layout once with
+`resolve_geno_format()` and hand the spec to `read_genotype()`. (Here we
+re-describe the ST layout explicitly to show the mechanism.)
+
+```{r read-custom}
+spec <- resolve_geno_format(list(
+  geno_orient = "marker",                       # markers are rows
+  split_char  = "/",                            # "1/4" cells
+  encoding    = "selectiontools",
+  map_order   = c("Marker", "Chrom", "Pos")     # column order in the map file
+))
+
+meta_custom <- read_genotype(st_geno, map_file = st_map,
+                             preset = spec, block_file = blk_file)
+is_geno_meta(meta_custom)
+```
+
+---
+
+## 4  File outputs — format transformation
+
+A built `GenoMeta` can be written out in any supported format, turning the
+reader/assembler pipeline into a **format converter**. The encoding and the
+3-D haplotype array are reconstructed into the target 2-D layout on the way out.
+
+### 4.1  Write to other genotype formats — `write_geno_meta()`
+
+```{r write-formats}
+# SelectionTools → PLINK PED/MAP (writes out_plink.ped + out_plink.map)
+write_geno_meta(meta, path = file.path(io, "out_plink"), output_format = "plink_ped")
+
+# SelectionTools → genomicSimulation CSV
+write_geno_meta(meta, path = file.path(io, "out_gs.csv"), output_format = "gs")
+
+list.files(io, pattern = "^out_")
+```
+
+Round-trip check — read the PLINK files we just wrote back into a `GenoMeta`:
+
+```{r roundtrip}
+meta_pl <- read_plink_ped(file.path(io, "out_plink.ped"),
+                          file.path(io, "out_plink.map"))
+is_geno_meta(meta_pl)
+```
+
+### 4.2  Inspect a converted matrix without writing — `geno_meta_to_matrix()`
+
+```{r to-matrix}
+m_st <- geno_meta_to_matrix(meta, output_format = "st")          # markers × samples
+m_pl <- geno_meta_to_matrix(meta, output_format = "plink_ped")   # samples × markers
+
+dim(m_st$matrix)
+m_st$matrix[1:3, 1:3]                  # SelectionTools "1/4" cells
+m_pl$matrix[1:3, 1:3]                  # PLINK concatenated-allele cells
+```
+
+### 4.3  Re-encode alleles — `recode_geno_meta()`
+
+Convert the whole object between SelectionTools numeric codes and nucleotide
+letters (e.g. `1 → A`, `4 → T`).
+
+```{r recode}
+meta_nuc <- recode_geno_meta(meta, to_type = "nucleotide")
+
+meta$metadata$encoding         # before
+meta_nuc$metadata$encoding     # after
+c(before = meta$geno_arrays[1, 1, 1], after = meta_nuc$geno_arrays[1, 1, 1])
+```
+
+### 4.4  Persist and reload the object — `save_geno_meta()` / `load_geno_meta()`
+
+The most convenient "format" for haploStack itself is an `.rds` of the whole
+object: genotypes, map, blocks, `sample_info`, effects and phenotypes in one
+file. The other examples in this series start from such a file.
+
+```{r save-load}
+rds <- file.path(io, "demo_geno_meta.rds")
+save_geno_meta(meta, rds)
+
+meta_reload <- load_geno_meta(rds)     # validated on load
+is_geno_meta(meta_reload)
+```
+
+---
+
+## Summary
+
+| Goal | Function |
+|------|----------|
+| Assemble from R objects | `build_geno_meta()` |
+| Read a SelectionTools / GS / PLINK file | `read_st_genotype()`, `read_gs_genotype()`, `read_plink_ped()` |
+| Read a custom layout | `resolve_geno_format()` + `read_genotype()` |
+| Attach blocks / phenotypes | `attach_block_info()`, `attach_phenotype()` |
+| Convert to another format | `write_geno_meta()`, `geno_meta_to_matrix()` |
+| Re-encode alleles | `recode_geno_meta()` |
+| Save / reload the object | `save_geno_meta()`, `load_geno_meta()` |
+
+A valid `GenoMeta` (`is_geno_meta(meta) == TRUE`) is the entry point for the
+catalogue, family-tracing, and stacking examples that follow.
+
+```{r session}
+sessionInfo()
+```

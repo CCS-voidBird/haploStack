@@ -1,0 +1,194 @@
+---
+title: "Haplotype IBD/IBS and marker-signal testing"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Haplotype IBD/IBS and marker-signal testing}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse  = TRUE,
+  comment   = "#>",
+  fig.width = 8,
+  fig.height = 4.5
+)
+library(haploStack)
+suppressPackageStartupMessages(library(data.table))
+```
+
+## What this module does
+
+The similarity module (`R/catalogue_similarity.R`) answers a breeding question:
+**which markers reliably report whether a haplotype block was inherited from a
+parent?** It has four pieces:
+
+| Function | Role |
+|---|---|
+| `compute_segment_ibs()` | identity-by-state (IBS) of two haplotype segments |
+| `compute_block_ibd()` | per-block parent→progeny IBD across a family |
+| `score_marker_signal()` | per-marker TP/FP/TN/FN signal test (`IBD` or `IBS` mode) |
+| `compute_signal_metrics()` | accuracy / precision / recall / specificity / F1 / MCC + MAF-weighted final scores |
+| `select_signal_markers()` | the top `n` marker(s) of each block — the *signal markers* |
+| `attach_signal_markers()` / `get_signal_markers()` | record that selection on the GenoMeta and read it back |
+
+Two visualisations help pick candidates: `plot_marker_signal()` (a Manhattan of
+a signal score) and `plot_signal_precision_recall()`.
+
+### The comparison model
+
+For each family, the comparison is **anchored on the parental haplotypes**: every
+parental haplotype block (a family may have more than two parents — a
+double-cross family with 4 parents has up to 8 parental haplotypes) is compared
+against **every** progeny haplotype block. Block IBD is the ground truth
+(`Similarity >= threshold`, inclusive); per-marker allele identity is the
+prediction. The confusion matrix uses the standard orientation:
+
+|             | IBD true | IBD false |
+|-------------|----------|-----------|
+| marker same | TP       | FP        |
+| marker diff | FN       | TN        |
+
+`mode = "IBD"` fills the cells with integer counts; `mode = "IBS"` fills them
+with similarity-weighted fractional sums (`TP += same x Similarity`, etc.).
+
+## A worked example
+
+We build a small GenoMeta whose offspring genuinely inherit parental block
+haplotypes, so the IBD signal is real.
+
+```{r build}
+set.seed(42)
+n_mk    <- 20L
+markers <- paste0("m", seq_len(n_mk))
+bases   <- c("A", "C", "G", "T")
+
+# Four founder haplotypes (parent P1: haps 1-2, parent P2: haps 3-4)
+founder <- replicate(4L, sample(bases, n_mk, replace = TRUE))   # n_mk x 4
+
+samples   <- c("P1", "P2", paste0("O", 1:6))
+arr <- array(NA_character_, dim = c(length(samples), n_mk, 2L),
+             dimnames = list(samples, markers, c("1", "2")))
+arr["P1", , 1] <- founder[, 1]; arr["P1", , 2] <- founder[, 2]
+arr["P2", , 1] <- founder[, 3]; arr["P2", , 2] <- founder[, 4]
+
+# Two blocks; each offspring haplotype inherits a founder block-haplotype
+blk <- rep(c("B1", "B2"), each = 10L)
+for (o in paste0("O", 1:6)) for (h in 1:2) {
+  hap <- character(n_mk)
+  for (b in unique(blk)) {
+    idx <- which(blk == b)
+    hap[idx] <- founder[idx, sample(4L, 1L)]
+  }
+  arr[o, , h] <- hap
+}
+
+map <- data.frame(Chrom = "1", Marker = markers,
+                  Pos = seq(1e4, by = 1e4, length.out = n_mk))
+bmm <- data.frame(Chrom = "1", Marker = markers, Block = blk)
+
+meta <- new_geno_meta(
+  geno_arrays = arr, map_info = map, block_marker_map_info = bmm,
+  metadata = list(ploidy = 2L, char_dict = c(A = 1L, C = 2L, G = 3L, T = 4L),
+                  n_samples = length(samples), n_markers = n_mk,
+                  source_format = "nucleotide", encoding = "nucleotide"))
+
+# Attach a family: P1 x P2 -> O1..O6
+fam <- data.frame(IID = samples,
+                  Father = c(NA, NA, rep("P1", 6)),
+                  Mother = c(NA, NA, rep("P2", 6)))
+meta <- attach_family_history(meta, fam, parent_cols = c("Father", "Mother"))
+```
+
+### Segment IBS
+
+```{r ibs}
+seg_a <- arr["P1", 1:10, 1]
+seg_b <- arr["O1", 1:10, 1]
+compute_segment_ibs(seg_a, seg_b)
+```
+
+### Block IBD
+
+`compute_block_ibd()` returns one row per pairwise (ParentHap x ProgenyHap)
+comparison.
+
+```{r ibd}
+ibd <- compute_block_ibd(meta, threshold = 0.5)
+head(ibd)
+```
+
+### Marker signal score and metrics
+
+```{r signal}
+sig <- score_marker_signal(meta, mode = "IBD")
+names(sig)                 # detail / marker / metrics / signal
+head(sig$metrics)
+```
+
+`mode = "IBS"` weights the confusion cells by block similarity instead of using
+the hard IBD call:
+
+```{r signal-ibs}
+sig_ibs <- score_marker_signal(meta, mode = "IBS")
+head(sig_ibs$metrics[, .(Marker, TP, FP, TN, FN, mcc, final_mcc)])
+```
+
+The final score `final_<metric> = metric x MAF x (1 - MAF)` down-weights
+near-monomorphic markers (where a high metric is uninformative).
+
+## Choosing the signal markers
+
+Scoring ranks every marker; the *selection* step turns that into a decision —
+the `n` marker(s) that represent each block. `score_marker_signal()` already did
+it (`n_signal = 1` by default) and returned it as `sig$signal`;
+`attach_signal_markers()` records it on the container, in
+`block_info$Signal_Marker` / `Signal_Score` / `N_Signal`.
+
+```{r select}
+sig$signal                                   # Block, Marker, score_val, rank
+meta <- attach_signal_markers(meta, sig$signal)
+head(meta$block_info)
+get_signal_markers(meta)                     # tidy read-back
+```
+
+The selection travels with the object: `filter_geno_meta()` prunes markers that
+leave the panel, `save_geno_meta()` round-trips it, and re-running
+`attach_block_info()` drops it (with a message) because new block definitions
+invalidate a selection made against the old ones.
+
+## Visualising the signal markers
+
+The Manhattan highlights exactly the selected markers, and the block strip along
+the top names the blocks they represent. Marker labels and the title are off by
+default so the vertical block labels stay legible.
+
+```{r manhattan, fig.alt="Manhattan of marker signal score"}
+p <- plot_marker_signal(sig$metrics, geno_meta = meta, score = "final_mcc")
+p
+```
+
+Every plot carries the marker × block table behind it, and
+`save_marker_signal()` writes both under one name — `marker_signal.png` next to
+`marker_signal.csv`:
+
+```{r signal-table}
+head(attr(p, "signal_table")[, .(Chrom, Pos, Marker, Block, is_signal,
+                                 score_val, block_score, block_n_markers)])
+```
+
+```{r save-signal, eval=FALSE}
+save_marker_signal(p, "marker_signal.png")
+```
+
+```{r prscatter, fig.width=6, fig.height=5, fig.alt="Precision-recall scatter coloured by MAF"}
+plot_signal_precision_recall(sig$metrics)
+```
+
+Markers toward the top-right of the precision-recall plot, coloured for high
+MAF, are the strongest candidate tags of block inheritance. The same flow scales
+to real pedigrees: read genotypes with `read_plink_ped()` (or another
+`read_*()`), define blocks with `define_haplotype_blocks()` /
+`attach_block_info()`, attach the pedigree with `attach_family_history()`, then
+run `score_marker_signal()`.

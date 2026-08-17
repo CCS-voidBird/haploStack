@@ -1,0 +1,23 @@
+# Files and directories kept OUT of the distributed source tarball.
+#
+# Entries are Perl regexes matched against paths relative to the package root.
+# A distribution build must be a PORTABLE SOURCE tarball — sources only,
+# compiled on the target platform — so the src/ object files and any platform
+# shared library below are excluded for correctness, not just for size.
+
+# --- Compiled artefacts (platform-specific; must never ship) -----------------
+^src/.*\.o$
+^src/.*\.so$
+^src/.*\.dll$
+^src/.*\.dylib$
+^src/Makevars\.win$
+
+# --- Repo-only material (kept on GitHub, not in the tarball) -----------------
+^docs$
+^\.git.*$
+^\.Rproj\.user$
+^.*\.Rproj$
+
+# --- Scratch output that can appear in a working tree ------------------------
+^Rplots\.pdf$
+^vignettes/figure$

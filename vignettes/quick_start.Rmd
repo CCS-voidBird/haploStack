@@ -1,0 +1,423 @@
+---
+title: "haploStack — Quick Start Guide"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{haploStack — Quick Start Guide}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse  = TRUE,
+  comment   = "#>",
+  fig.width = 8,
+  fig.height = 5
+)
+```
+
+## What is haploStack?
+
+**haploStack** is an R package for haplotype block analysis and stacking
+simulation in diploid crop breeding programmes. It implements a four-stage
+pipeline:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ Stage 1 │ Genotype format standardisation               │
+│ Stage 2 │ LD-based haplotype block definition           │
+│ Stage 3 │ Haplotype catalogue (local GEBV + plots)      │
+│ Stage 4 │ Stacking simulation (GA / GS / OCS)           │
+└─────────────────────────────────────────────────────────┘
+```
+
+This guide walks a complete minimal analysis using **simulated data** —
+no external files required.
+
+---
+
+## Installation
+
+```{r}
+# From GitHub
+remotes::install_github("uq-bioinformatics/haploStack")
+```
+```{r}
+# Or from a release source tarball
+install.packages("haploStack_0.5.5.tar.gz", repos = NULL, type = "source")
+```
+```{r}
+# Or from a local clone, with devtools
+devtools::install("path/to/haploStack")
+```
+
+**Required packages** (installed automatically):
+`data.table`, `dplyr`, `ggplot2`, `tidyr`, `reshape2`, `stringr`
+
+**Optional packages** (for full functionality):
+`SelectionTools` (block definition), `genomicSimulation` (realistic crossing),
+`Rcpp` (C++ speed-ups), `cowplot` (combined plots)
+
+---
+
+## Beginner Walkthrough
+
+### Step 1 — Load the package and generate simulated data
+
+```{r load}
+library(haploStack)
+library(data.table)
+
+set.seed(42)
+
+# Generate a small simulated genotype dataset
+geno_mat  <- sim_geno_matrix(n_samples = 12L, n_markers = 24L,
+                              encoding = "selectiontools")
+map_df    <- sim_map_data(rownames(geno_mat), n_chrom = 3L)
+block_map <- sim_block_map(map_df, block_size = 4L)
+effect_df <- sim_effect_df(rownames(geno_mat), alleles = c("1","4"))
+
+cat("Genotype matrix:", dim(geno_mat), "(markers × samples)\n")
+cat("Blocks defined:", length(unique(block_map$Block)), "\n")
+```
+
+### Step 2 — Assemble a GenoMeta object
+
+`GenoMeta` is the **single central data structure**. It bundles the genotype
+array, map, block assignments, a required per-sample `sample_info` table, and an
+optional `marker_effects` copy into one object. There is no separate "profile"
+object — derive the per-haplotype allele table and marker/block metadata on
+demand with `geno_meta_views()`.
+
+```{r profile}
+meta <- build_geno_meta(
+  geno_mat,               # markers × samples matrix
+  map_df,                 # Marker, Chrom, Pos
+  blocks = block_map      # Chrom, Marker, Block
+)
+
+# sample_info is auto-populated from the genotype samples and validated to stay
+# aligned with them (is_geno_meta() enforces this). Add your own columns freely.
+head(meta$sample_info, 3)
+
+# Optionally store the marker effects on the object so downstream functions can
+# use them without re-passing effect_df. is_geno_meta() does not require it.
+meta$marker_effects <- effect_df
+stopifnot(is_geno_meta(meta))
+
+# Derived views (built on demand, never stored)
+profile <- geno_meta_views(meta)
+cat("Encoding:", profile$encoding, "\n")
+cat("Samples:", length(profile$samples), "\n")
+cat("Blocks:", nrow(profile$block_meta), "\n")
+```
+
+### Step 3 — Visualise haplotype patterns
+
+```{r alignment, fig.width=10, fig.height=6}
+p <- plot_haplotype_alignment(
+  meta,
+  show_block_boundaries = TRUE,
+  show_block_labels     = TRUE
+)
+print(p)
+```
+
+Each column is one marker. Each row is one haplotype copy from one sample.
+Colours indicate allele values. Vertical lines separate haplotype blocks.
+
+### Step 4 — Compute local GEBVs
+
+Local GEBVs measure the effect of carrying a particular haplotype at each
+genomic block, relative to the population mean. The output is a
+Block × Sample matrix.
+
+```{r gebv}
+gebv_matrix <- compute_profile_localgebv(
+  geno_meta      = meta,
+  effect_df      = effect_df,     # or omit: defaults to meta$marker_effects
+  level          = "genotype",    # sum both haplotypes per sample
+  center_by_freq = TRUE           # population-mean centering
+)
+
+cat("GEBV matrix:", dim(gebv_matrix), "(blocks × samples + Block col)\n")
+print(gebv_matrix[1:4, 1:6, with = FALSE])
+```
+
+> **Tip.** Because we stored `meta$marker_effects` in Step 2, the `effect_df`
+> argument is optional here — `compute_profile_localgebv(meta)` would use the
+> stored copy. An explicit `effect_df` always overrides it.
+
+### Estimating marker effects & GEBVs from phenotypes
+
+Steps 2–4 assumed the marker effects were already known. When you instead have
+**phenotypes** and want to *estimate* effects and GEBVs, use
+`fit_genomic_prediction()`. It transforms the haplo-wise genotype array into the
+numeric dosage matrix that rrBLUP / BGLR need, fits the chosen model, and returns
+results already shaped to plug back into the GenoMeta: a `marker_effects` table
+(for `compute_profile_localgebv()`) and a GEBV "phenotype" table (for
+`attach_phenotype()`), plus a ready-to-use `geno_meta` with both attached.
+
+```{r gp, eval=requireNamespace("rrBLUP", quietly = TRUE)}
+# A phenotype table: Sample + one or more numeric trait columns
+set.seed(1)
+pheno <- data.frame(
+  Sample = dimnames(meta$geno_arrays)[[1]],
+  Yield  = rnorm(dim(meta$geno_arrays)[1])
+)
+
+res <- fit_genomic_prediction(
+  meta,
+  phenotype = pheno,
+  model     = "rrblup"          # or "gblup", "bayesc" (needs the BGLR package)
+)
+
+head(res$marker_effects)        # Marker, Allele, Effect, Trait
+head(res$gebv)                  # Sample, GEBV_Yield
+
+# res$geno_meta already carries the fitted effects + GEBVs, so the local-GEBV
+# pipeline from Step 4 runs straight off it:
+compute_profile_localgebv(res$geno_meta)[1:4, 1:6, with = FALSE]
+```
+
+The genotype must use a diploid allele encoding (`"selectiontools"` or
+`"nucleotide"`); recode with `recode_geno_meta()` if needed. `rrBLUP` (for
+`"rrblup"`/`"gblup"`) and `BGLR` (for `"bayesc"`) are optional — install the one
+you use.
+
+### Step 5 — Select parents for stacking
+
+Three selection methods are available:
+
+```{r selection}
+# Greedy: maximise block coverage
+sel_greedy <- greedy_selection(gebv_matrix, n_parents = 6L)
+cat("Greedy selected:", sel_greedy, "\n")
+
+# Genetic Algorithm: optimised coverage across generations
+sel_ga <- genetic_algorithm_selection(gebv_matrix, n_parents = 6L,
+                                       n_generations = 50L, verbose = FALSE)
+cat("GA selected:", sel_ga, "\n")
+
+# OCS: GEBV-ranked (use OCS with kinship matrix for full functionality)
+gebv_totals <- setNames(
+  colSums(gebv_matrix[, setdiff(names(gebv_matrix),"Block"), with=FALSE]),
+  setdiff(names(gebv_matrix),"Block")
+)
+sel_ocs <- ocs_selection(gebv_totals, n_parents = 6L)
+cat("OCS selected:", sel_ocs, "\n")
+```
+
+### Step 6 — Design crosses
+
+```{r crosses}
+design <- make_cross_design(
+  selected_parents = sel_ga,
+  method           = "all_pairs",
+  n_offspring      = 4L
+)
+cat("Cross design (", nrow(design), "crosses):\n")
+print(design)
+```
+
+### Step 7 — Run stacking simulation
+
+```{r simulation}
+# Build a minimal catalogue_results list (normally from run_haplotype_catalogue)
+catalogue_results <- list(
+  SimTrait = list(
+    gebv_matrix  = gebv_matrix,
+    gebv_summary = data.table(
+      Sample = setdiff(names(gebv_matrix), "Block"),
+      GEBV   = gebv_totals[setdiff(names(gebv_matrix), "Block")]
+    ),
+    block_counts = data.table(),  # placeholder
+    geno_meta    = meta
+  )
+)
+
+sim_results <- run_stacking_simulation(
+  catalogue_results = catalogue_results,
+  trait_name        = "SimTrait",
+  effect_df         = effect_df,
+  replications      = 3L,
+  select_cycles     = 5L,
+  top_founders      = 4L,
+  num_offspring     = 3L,
+  select_method     = "GA",
+  output_dir        = tempdir(),
+  verbose           = FALSE
+)
+
+cat("Simulation complete.\n")
+cat("Trajectory table rows:", nrow(sim_results$trajectories), "\n")
+```
+
+### Step 8 — Plot trajectories
+
+```{r plot-traj, fig.width=9, fig.height=4}
+p_traj <- plot_simulation_trajectories(
+  sim_results$trajectories,
+  trait_name  = "Simulated Trait",
+  show_ribbon = TRUE
+)
+print(p_traj)
+```
+
+---
+
+## Family Structure & Inheritance
+
+If you have a pedigree, haploStack can walk it generation by generation and
+identify which haplotype blocks each offspring inherits from each parent.
+
+```{r family}
+# A fam / pedigree table: an individual-ID column plus one or more parent
+# columns (PLINK-style). Missing parents (NA / "" / "0") mark founders.
+fam <- data.frame(
+  IID    = colnames(geno_mat),                                  # S1 .. S12
+  Father = c(NA, NA, NA, NA, "S1", "S1", "S3", "S3", "S5", "S5", "S6", "S6"),
+  Mother = c(NA, NA, NA, NA, "S2", "S2", "S4", "S4", "S7", "S7", "S8", "S8"),
+  stringsAsFactors = FALSE
+)
+
+# Trace the family history (oldest -> newest) and store it as supplementary
+# metadata. is_geno_meta() does not validate it; it rides through filtering.
+meta <- attach_family_history(meta, fam, parent_cols = c("Father", "Mother"))
+cat("Generations traced:", length(meta$metadata$family_history), "\n")
+
+# Bridge to block-level inheritance: convert the history to a
+# Sample/Parent1/Parent2 pedigree and compare offspring blocks to their parents.
+ped <- family_history_to_pedigree(meta)
+inheritance <- trace_haplotype_family(meta, ped)
+head(inheritance)
+```
+
+`trace_haplotype_family()` returns, per offspring-haplotype-block, the inferred
+parental origin (`Parent1` / `Parent2` / `ambiguous` / `unknown`) and the number
+of matching markers — the basis for family-wise block alignment.
+
+---
+
+## Key Data Structures
+
+### Genotype matrix
+```
+Orientation : rows = markers, cols = samples
+Rownames    : marker IDs
+Colnames    : sample IDs
+Cell values : "1/4" (SelectionTools) | "A/T" (nucleotide) | 0/1/2 (dosage)
+```
+
+### Map data frame
+```
+Columns : Marker (chr), Chrom (chr), Pos (numeric, bp)
+One row per marker
+```
+
+### Block map data frame
+```
+Columns : Chrom (chr), Marker (chr), Block (chr)
+One row per marker-block assignment
+```
+
+### Effect data frame
+```
+Columns : Marker (chr), Allele (chr), Effect (numeric)
+No header required (read by column position)
+Allele encoding must match the genotype encoding
+```
+
+### GenoMeta object (the single central object)
+```r
+meta$geno_arrays           # 3-D array [samples × markers × ploidy]
+meta$map_info              # data.frame: Chrom, Marker, Pos
+meta$block_info            # data.frame: Chrom, Block, Start, End (or NULL)
+meta$block_marker_map_info # data.frame: Chrom, Marker, Block (or NULL)
+meta$sample_info           # FAM df: Family, Sample, Parent1, Parent2, Sex (required)
+meta$marker_effects        # data.frame: Marker, Allele, Effect [, Trait] (optional)
+meta$metadata              # list: ploidy, char_dict, n_samples, n_markers,
+                           #       source_format, encoding,
+                           #       family_history (supplementary, optional)
+```
+
+Validate with `is_geno_meta(meta)`; persist with `save_geno_meta()` /
+`load_geno_meta()`; re-encode alleles with `recode_geno_meta()`.
+
+### Profile views (`geno_meta_views(meta)`)
+```r
+v <- geno_meta_views(meta)
+v$alleles      # data.table: Sample, Haplotype_idx, [marker cols]
+v$marker_meta  # data.table: marker, chromosome, position, block_id
+v$block_meta   # data.table: block_id, chromosome, start_pos, end_pos, n_markers
+v$samples      # character vector of sample names
+v$encoding     # "selectiontools" | "nucleotide" | "numeric"
+```
+
+---
+
+## Common Workflows
+
+### Real data: SelectionTools genotype file
+
+```r
+# Step 1: read ST genotype and map
+geno_raw <- read.table("my_genotype.txt", header = FALSE, row.names = 1)
+map_raw  <- read.table("my_map.txt", header = TRUE)
+
+# Step 2: read into a GenoMeta object
+meta <- read_st_genotype("my_genotype.txt", map_path = "my_map.txt")
+
+# Step 3: attach block assignments (from define_haplotype_blocks() or a file)
+meta <- attach_block_info(meta, block_map_df)
+profile <- geno_meta_views(meta)
+```
+
+### Using a pre-defined block map file
+
+```r
+block_map <- fread("my_block_map.txt", header = FALSE)
+colnames(block_map) <- c("Chrom","Marker","Block")
+meta <- build_geno_meta(geno_mat, map_df, blocks = block_map)
+```
+
+### Multi-trait catalogue
+
+```r
+effect_list <- list(
+  Yield    = read_effect_file("effects/yield.GS.Eff"),
+  Protein  = read_effect_file("effects/protein.GS.Eff"),
+  Maturity = read_effect_file("effects/maturity.GS.Eff")
+)
+
+results <- run_haplotype_catalogue(
+  geno_meta   = meta,
+  effect_list = effect_list,
+  trait_names = names(effect_list),
+  output_dir  = "catalogue_output"
+)
+```
+
+### Persist, reload, and re-encode a GenoMeta
+
+```r
+# Save / load the whole object (genotypes, map, blocks, sample_info, effects)
+save_geno_meta(meta, "my_geno_meta.rds")
+meta <- load_geno_meta("my_geno_meta.rds")   # validated on load
+
+# Subset by samples, markers, blocks, or chromosome regions (one function)
+sub  <- filter_geno_meta(meta, keep_samples = c("S1","S2"),
+                         chromosomes = list(list(chr = "1")))
+
+# Convert allele encoding (SelectionTools numeric <-> nucleotide letters)
+meta_nuc <- recode_geno_meta(meta, to_type = "nucleotide")
+```
+
+---
+
+## Getting Help
+
+- **Function reference:** `?geno_meta_views`, `?run_haplotype_catalogue`, etc.
+- **Container spec:** `docs/geno_meta_structure.md`
+- **Version history:** `docs/CHANGELOG.md`
+- **Issues:** https://github.com/uq-bioinformatics/haploStack/issues
