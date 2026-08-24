@@ -124,6 +124,9 @@
 #'   \code{"negative"}. Sets \code{nPreferred} only.
 #' @param samples,blocks,chromosomes Optional subsets, passed to
 #'   \code{\link{compute_profile_localgebv}}.
+#' @param center        Centring mode applied to the allele effects:
+#'   \code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
+#'   \code{\link{compute_profile_localgebv}} for what each preserves.
 #' @param center_by_freq Logical; mean-centre allele effects by population
 #'   frequency before summing per block. Default \code{TRUE} (see above).
 #' @param fill_na Value for (block, copy) cells with no effect information.
@@ -183,11 +186,15 @@ count_favourable_blocks <- function(geno_meta,
                                     samples        = NULL,
                                     blocks         = NULL,
                                     chromosomes    = NULL,
-                                    center_by_freq = TRUE,
+                                    center         = NULL,
+                                    center_by_freq = NULL,
                                     fill_na        = 0,
                                     plot           = TRUE,
                                     output_file    = NULL) {
 
+  center <- .resolve_center(center, center_by_freq,
+                            "count_favourable_blocks",
+                            default = "allele_freq")
   prefer <- match.arg(prefer)
   if (!is_geno_meta(geno_meta))
     stop("count_favourable_blocks: 'geno_meta' is not a valid GenoMeta.")
@@ -196,7 +203,7 @@ count_favourable_blocks <- function(geno_meta,
   lg <- compute_profile_localgebv(
     geno_meta, effect_df = effect_df, trait = trait,
     samples = samples, blocks = blocks, chromosomes = chromosomes,
-    level = "haplotype", center_by_freq = center_by_freq, fill_na = fill_na)
+    level = "haplotype", center = center, fill_na = fill_na)
   lg <- as.data.table(lg)
 
   hap_cols <- setdiff(names(lg), "Block")

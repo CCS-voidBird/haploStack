@@ -15,7 +15,8 @@ analyze_block_catalogue(
   normalize = c("none", "zscore", "minmax", "rank"),
   value_source = c("raw", "normalized"),
   trait_weights = NULL,
-  center_by_freq = TRUE,
+  center = NULL,
+  center_by_freq = NULL,
   output_dir = NULL,
   write_outputs = TRUE,
   plots = c("rectangular", "manhattan", "density", "heatmap", "circos"),
@@ -53,7 +54,7 @@ the cross-trait selection sum (it no longer does the cross-trait combine):
 Default \code{1}.}
 
 \item{normalize}{Per-trait scale transform applied \strong{within each trait}:
-\code{"none"} (default — no rescaling; \code{N == S} in raw units),
+\co\code{"none"} (default — no rescaling; \code{N == S} in raw units),
 \code{"zscore"}, \code{"minmax"}, \code{"rank"}, or a function
 \code{function(numeric) -> numeric}. \code{"zscore"} is a \strong{true
 standard score} \code{(x - mean)/sd} — it centres and scales, so a normalised
@@ -80,6 +81,10 @@ the cross-trait selection sum — \strong{not} a composite metric. \code{NULL}
 (default) uses equal unit weights (\code{1}); a negative weight flips a
 lower-is-better trait so its subtypes are summed in the intended direction.
 When supplied it must be named and cover every trait.}
+
+\item{center}{Centring mode applied to the allele effects:
+�\code{"none"}, �\code{"locus_mean"} or �\code{"allele_freq"}. See
+�\code{\link{compute_profile_localgebv}} for what each preserves.}
 
 \item{center_by_freq}{Passed to \code{\link{compute_block_catalogue}} on the
 compute path. Default \code{TRUE}.}
@@ -122,7 +127,7 @@ local-GEBV matrices (used by the top-block heatmap).}
 \item{\code{value_source}}{The \code{value_source} used, so the plot layer
 fills by the same value.}
 \item{\code{normalize}}{The transform actually applied
-(\code{"none"} by default, or \code{"custom"} for a function), so the plot
+(\co\code{"none"} by default, or \code{"custom"} for a function), so the plot
 layer can label \code{N} honestly rather than assuming a standard score.}
 }
 }
@@ -173,7 +178,7 @@ combination, not a population average.
 \item \strong{Rescale within each trait}, if asked: transform every subtype's
 effect \code{S(subtype,t)} with \code{normalize} to \code{N(subtype,t)}
 (\code{"zscore"} = a true standard score). Under the default
-\code{"none"} this is the identity, so \code{N == S} and the analysis runs
+\co\code{"none"} this is the identity, so \code{N == S} and the analysis runs
 entirely on raw effects.
 \item \strong{Select one subtype per block} shared across traits:
 \code{selected(b) = argmax_subtype Σ_t w_t · value(subtype, t)}, where

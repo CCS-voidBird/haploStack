@@ -152,18 +152,51 @@ save_geno_meta <- function(geno_meta, path) {
 
 #' Load a GenoMeta object from an RDS file
 #'
+#' @section Containers saved before 0.6.0:
+#' Since 0.6.0 a missing allele inside a \code{GenoMeta} is \code{NA} and
+#' nothing else. A file saved earlier can still hold the source token
+#' (PLINK's \code{"0"}, \code{"N"}, \code{"."}, \code{"-"}) as an allele, which
+#' shifts marker effects and frequency-centred local GEBVs. Loading one says so
+#' and names \code{\link{repair_geno_meta}} — and \strong{does not rewrite the
+#' file}. Repairing what you saved without being asked would be the same class
+#' of silent decision the invariant exists to remove, so the repair is yours to
+#' make and yours to persist:
+#'
+#' \preformatted{meta <- load_geno_meta("panel.rds")
+#' meta <- repair_geno_meta(meta)
+#' save_geno_meta(meta, "panel.rds")}
+#'
 #' @param path Path to an RDS file saved by \code{\link{save_geno_meta}}.
 #'
-#' @return A \code{GenoMeta} list.
+#' @return A \code{GenoMeta} list, exactly as stored.
 #'
-#' @seealso \code{\link{save_geno_meta}}
+#' @seealso \code{\link{save_geno_meta}}, \code{\link{repair_geno_meta}}
 #' @export
 load_geno_meta <- function(path) {
   if (!file.exists(path))
     stop("load_geno_meta: File not found: ", path)
   geno_meta <- readRDS(path)
-  if (!is_geno_meta(geno_meta))
+
+  # Report the missing-token condition against the file it came from, so muffle
+  # the generic is_geno_meta() warning and issue the path-aware one below. Under
+  # options(haploStack.strict_missing = TRUE) is_geno_meta() errors instead, and
+  # that error is left to propagate.
+  ok <- withCallingHandlers(
+    is_geno_meta(geno_meta),
+    haploStack_missing_token = function(w) invokeRestart("muffleWarning"))
+  if (!ok)
     stop("load_geno_meta: Not a valid GenoMeta.")
+
+  rep <- .missing_token_report(geno_meta)
+  if (!is.null(rep))
+    message("load_geno_meta: '", path, "' holds ", rep$n_cells,
+            " allele cell(s) across ", rep$n_markers, " marker(s) as a missing ",
+            "token (", paste0("\"", rep$tokens, "\"", collapse = ", "),
+            ") rather than NA — it predates the 0.6.0 invariant. The file has ",
+            "NOT been modified. Repair the loaded object with ",
+            "repair_geno_meta(), then save_geno_meta() it if you want the file ",
+            "updated.")
+
   geno_meta
 }
 
@@ -176,27 +209,92 @@ load_geno_meta <- function(path) {
 #' \code{\link{REVERSED_ENCODING_DICT}}, and updates \code{metadata$char_dict}
 #' and \code{metadata$encoding}.
 #'
+#' @section Both ends are declared:
+#' A transform needs to know what it is converting \emph{from} as well as
+#' \emph{to}. Before 0.6.0 only \code{to_type} was an argument and the source
+#' was taken from \code{metadata$encoding} as an early-return guard, so a
+#' container recorded as \code{"numeric"} sailed past the guard and had its
+#' dosages pushed through the nucleotide dictionary — \code{1 -> "A"},
+#' \code{2 -> "C"}, \code{0 -> NA} — with no warning (INDEX discrepancy 16,
+#' item 4).
+#'
+#' \code{from_type} now names the source explicitly. It defaults to the recorded
+#' provenance, but the recorded value is \strong{validated against the data}
+#' rather than trusted, and a dosage source with an allele target is refused
+#' outright: recoding a vocabulary and reinterpreting a scale are different
+#' operations, and the defect was one masquerading as the other.
+#'
+#' @section Rendering missing back out (\code{na_as}):
+#' Inside a \code{GenoMeta} a missing allele is \code{NA}. Converting one back
+#' to a character is possible, and irreversible in the direction that matters:
+#' the character the \emph{source file} wrote there is gone the moment the
+#' container was built, so \code{na_as} produces a new rendering, never a
+#' recovery. Recoding a PED-derived container with \code{na_as = "-"} does not
+#' give you back the \code{"0"} the PED had, and nothing in the package can.
+#'
+#' \code{na_as = NULL} (the default) keeps \code{NA} and preserves the
+#' invariant. Supplying a string writes it in place of every missing allele —
+#' useful when the target is a file format with its own absence code
+#' (\code{"-"} for the nucleotide dictionary, \code{"-1"} for SelectionTools).
+#' The result is then, deliberately, \strong{not} a normalised container:
+#' \code{\link{is_geno_meta}} will say so, and \code{\link{repair_geno_meta}}
+#' undoes the rendering. Treat it as an export step, not a storage format.
+#'
 #' @param geno_meta A valid \code{GenoMeta} list.
 #' @param to_type   Target encoding: \code{"nucleotide"} or
 #'   \code{"selectiontools"}.
+#' @param from_type Source encoding. \code{NULL} (default) uses
+#'   \code{metadata$encoding}, or detects it when that is absent; either way the
+#'   value is checked against the alleles actually present.
+#' @param na_as     Optional string to write in place of every missing allele.
+#'   \code{NULL} (default) keeps \code{NA}. See \emph{Rendering missing back
+#'   out}.
 #'
 #' @return A new \code{GenoMeta} with recoded \code{geno_arrays}.
 #'
+#' @seealso \code{\link{repair_geno_meta}}, \code{\link{use_missing_chars}}
 #' @export
-recode_geno_meta <- function(geno_meta, to_type = "nucleotide") {
+recode_geno_meta <- function(geno_meta, to_type = "nucleotide",
+                             from_type = NULL, na_as = NULL) {
   if (!is_geno_meta(geno_meta))
     stop("recode_geno_meta: 'geno_meta' is not a valid GenoMeta.")
   to_type <- match.arg(to_type, c("nucleotide", "selectiontools"))
 
-  cur <- geno_meta$metadata$encoding
+  if (!is.null(na_as)) {
+    if (!is.character(na_as) || length(na_as) != 1L || is.na(na_as) ||
+        !nzchar(na_as))
+      stop("recode_geno_meta: 'na_as' must be a single non-empty string, ",
+           "or NULL to keep NA.")
+  }
+
+  # ---- Resolve and validate the source encoding -----------------------------
+  cur <- from_type %||% geno_meta$metadata$encoding
   if (is.null(cur))
     cur <- detect_genotype_encoding(.meta_to_allele_matrix(geno_meta))
-  if (identical(cur, to_type)) return(geno_meta)
+  cur <- .encode_arg(cur, "recode_geno_meta",
+                     allowed = c("selectiontools", "nucleotide", "numeric",
+                                 "allele"),
+                     strict  = FALSE)
+
+  # A dosage scale is not an allele vocabulary. Refuse rather than translate.
+  if (cur %in% c("numeric", "allele"))
+    stop("recode_geno_meta: source encoding '", cur, "' is a dosage scale, ",
+         "not an allele vocabulary — its values count copies of an allele, ",
+         "they do not name one. Recoding it to '", to_type, "' would read ",
+         "those counts as dictionary keys (1 -> \"A\", 2 -> \"C\"), which is a ",
+         "reinterpretation, not a recode. Convert the dosage to alleles at ",
+         "read time instead.")
+
+  .validate_recode_source(geno_meta$geno_arrays, cur)
+
+  if (identical(cur, to_type) && is.null(na_as)) return(geno_meta)
 
   arr  <- geno_meta$geno_arrays
   vals <- as.character(arr)
 
-  if (to_type == "nucleotide") {
+  if (identical(cur, to_type)) {
+    recoded <- vals                       # na_as-only pass, no vocabulary change
+  } else if (to_type == "nucleotide") {
     recoded <- unname(REVERSED_ENCODING_DICT[vals])
   } else {
     fwd     <- setNames(as.character(unlist(DEFAULT_ENCODING_DICT)),
@@ -204,10 +302,18 @@ recode_geno_meta <- function(geno_meta, to_type = "nucleotide") {
     recoded <- unname(fwd[vals])
   }
 
+  # ---- Render missing, if asked ---------------------------------------------
+  n_rendered <- 0L
+  if (!is.null(na_as)) {
+    n_rendered <- sum(is.na(recoded))
+    recoded[is.na(recoded)] <- na_as
+  }
+
   arr2 <- array(recoded, dim = dim(arr), dimnames = dimnames(arr))
 
   # Rebuild char_dict for the new encoding from the alleles actually present
   present <- unique(stats::na.omit(as.character(arr2)))
+  if (!is.null(na_as)) present <- setdiff(present, na_as)
   if (to_type == "nucleotide") {
     keep      <- intersect(names(DEFAULT_ENCODING_DICT), present)
     char_dict <- unlist(DEFAULT_ENCODING_DICT[keep])
@@ -218,16 +324,58 @@ recode_geno_meta <- function(geno_meta, to_type = "nucleotide") {
   new_meta               <- geno_meta$metadata
   new_meta$char_dict     <- char_dict
   new_meta$encoding      <- to_type
+  # The old stamp described the old vocabulary; drop it so the portal restamps
+  # against the target one.
+  new_meta$missing_tokens <- NULL
 
-  new_geno_meta(
+  if (n_rendered > 0L)
+    message("recode_geno_meta: rendered ", n_rendered,
+            " missing allele(s) as \"", na_as, "\". The result is no longer a ",
+            "normalised container — repair_geno_meta() undoes the rendering, ",
+            "but the source file's own missing code is not recoverable.")
+
+  out <- new_geno_meta(
     geno_arrays           = arr2,
     map_info              = geno_meta$map_info,
     block_info            = geno_meta$block_info,
     block_marker_map_info = geno_meta$block_marker_map_info,
     metadata              = new_meta,
     sample_info           = geno_meta$sample_info,
-    marker_effects        = geno_meta$marker_effects
+    marker_effects        = geno_meta$marker_effects,
+    source_format         = to_type
   )
+
+  # A deliberate rendering must survive the portal it just passed through.
+  if (!is.null(na_as)) {
+    out$geno_arrays <- arr2
+    out$metadata$missing_tokens <- NULL
+  }
+  out
+}
+
+
+# Internal: check a declared source encoding against the alleles actually
+# present, so a stale or wrong metadata$encoding fails loudly instead of being
+# translated through the wrong dictionary. Only impossible combinations are
+# refused — "1" and "2" are legal under more than one vocabulary, so ambiguity
+# is left alone rather than guessed at.
+.validate_recode_source <- function(arr, from_type) {
+  present <- unique(stats::na.omit(as.character(arr)))
+  present <- setdiff(present, .missing_tokens(from_type))
+  if (length(present) == 0L) return(invisible(TRUE))
+
+  alpha <- grepl("[A-Za-z]", present)
+  if (identical(from_type, "selectiontools") && any(alpha))
+    stop("recode_geno_meta: source declared 'selectiontools' but the container ",
+         "holds alphabetic allele(s): ",
+         paste0("\"", utils::head(present[alpha], 5L), "\"", collapse = ", "),
+         ". Pass from_type = \"nucleotide\", or fix metadata$encoding.")
+  if (identical(from_type, "nucleotide") && !any(alpha))
+    stop("recode_geno_meta: source declared 'nucleotide' but no allele in the ",
+         "container is alphabetic (present: ",
+         paste0("\"", utils::head(present, 5L), "\"", collapse = ", "),
+         "). Pass from_type = \"selectiontools\", or fix metadata$encoding.")
+  invisible(TRUE)
 }
 
 

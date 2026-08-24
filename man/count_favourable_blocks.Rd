@@ -12,7 +12,8 @@ count_favourable_blocks(
   samples = NULL,
   blocks = NULL,
   chromosomes = NULL,
-  center_by_freq = TRUE,
+  center = NULL,
+  center_by_freq = NULL,
   fill_na = 0,
   plot = TRUE,
   output_file = NULL
@@ -34,6 +35,10 @@ position. \code{NULL} (default) uses \code{geno_meta$marker_effects} (see
 
 \item{samples, blocks, chromosomes}{Optional subsets, passed to
 \code{\link{compute_profile_localgebv}}.}
+
+\item{center}{Centring mode applied to the allele effects:
+�\code{"none"}, �\code{"locus_mean"} or �\code{"allele_freq"}. See
+�\code{\link{compute_profile_localgebv}} for what each preserves.}
 
 \item{center_by_freq}{Logical; mean-centre allele effects by population
 frequency before summing per block. Default \code{TRUE} (see above).}

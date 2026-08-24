@@ -12,7 +12,9 @@ new_geno_meta(
   metadata,
   sample_info = NULL,
   marker_effects = NULL,
-  phenotype = NULL
+  phenotype = NULL,
+  source_format = NULL,
+  extra_na = NULL
 )
 }
 \arguments{
@@ -44,10 +46,17 @@ column); normalised on construction to the named-list form.}
 \item{phenotype}{Optional data.frame of sample-level trait values
 (\code{Sample} + numeric trait columns), or \code{NULL} (default). Aligned to
 the genotype sample set on construction (see \code{\link{attach_phenotype}}).}
-}
-\value{
-A plain named list of class \code{"list"}. Access fields directly
-with \code{$}.
+
+\item{source_format}{Allele vocabulary of the source being parsed
+(\code{"nucleotide"}, \code{"selectiontools"}, \code{"numeric"}), used to
+normalise the missing alleles. Defaults to \code{metadata$encoding}.
+Declare it whenever the format is known rather than detected: a 1/2-coded
+PED, for instance, looks like dosage once split, and under the dosage rule
+its \code{"0"} would then be kept as a real genotype.}
+
+\item{extra_na}{Optional character vector of additional missing
+sentinels this particular source uses. For a rule that should apply to
+every read in a session, use \code{\link{use_missing_chars}} instead.}
 }
 \description{
 A \strong{GenoMeta} is a plain named list that consolidates all genotype
@@ -97,7 +106,36 @@ samples by \code{\link{filter_geno_meta}}. Attach via
 \code{ploidy} (int), \code{char_dict} (named char vector),
 \code{n_samples} (int), \code{n_markers} (int),
 \code{source_format} (character), and \code{encoding} (auto-detected
-when absent).}
+when absent). Optionally \code{missing_tokens} (character): the
+missing-allele vocabulary this container was normalised against, written
+wherever normalisation ran (see \code{\link{repair_geno_meta}},
+\code{\link{use_missing_chars}}). Absent on containers built before
+0.6.0, and on any container that has not been normalised.}
 }
+}
+
+\section{The normalisation portal}{
+
+Since 0.6.0 this function is where a missing allele becomes \code{NA}, and it
+is the \strong{only} such place. That is a property of the call graph rather
+than a convention: \code{\link{read_plink_ped}},
+\code{\link{read_dart_genotype}} and \code{\link{read_vcf_genotype}} bypass
+\code{\link{build_geno_meta}} and construct here directly, as do the internal
+transforms, so every route from a source file to a container passes through
+this one function. Normalisation runs after the encoding is resolved and
+before anything is returned, so no consumer can observe a container that has
+not been through it.
+
+The vocabulary used is recorded in \code{metadata$missing_tokens}. A
+container that already carries a stamp covering the vocabulary in force is
+left alone rather than re-scanned, which is what keeps a derived container (a
+filter, a block swap, a crossing generation) cheap.
+
+\strong{Normalisation is one-way.} Once a container exists, the source
+token that a given \code{NA} came from is gone — \code{NA} is the only
+representation left, and no function can tell which character the file wrote
+there. \code{\link{recode_geno_meta}} can render missing back out as a
+character of your choosing, but that is a new rendering, not a recovery of
+the original file.
 }
 

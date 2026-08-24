@@ -85,13 +85,30 @@ compute_segment_ibs <- function(seg1, seg2, block_length = NULL,
 # Internal — missing-allele tokens (encoding-aware)
 # ---------------------------------------------------------------------------
 
-# Allele strings to treat as missing (excluded from IBS comparisons and MAF).
-# "0" is the PLINK missing code and is dropped for nucleotide data, but is a
-# valid allele under numeric / selectiontools encodings, so it is kept there.
+# Allele strings to treat as missing (keyed on the source allele vocabulary).
+# The rule is per ALLELE, so a diploid cell written "00" or "--" is a missing
+# genotype by consequence — both copies land in this set — while a half-called
+# cell ("A0") keeps its observed allele and marks only the absent copy.
+#
+# For nucleotide data BOTH "0" (PLINK's missing code) and "-" (the canonical
+# missing character of DEFAULT_ENCODING_DICT, and HS_FILL_NA_DEFAULT) are
+# missing; "-" comes from the encoding-independent base set. Since 0.6.0 "0" is
+# missing for selectiontools too, where a 1/2/3/4-coded file writes it for an
+# absent call and never as a real allele code (Q21.a). It is kept for
+# numeric/dosage data, where 0 is a real genotype (homozygous reference) — that
+# exclusion is load-bearing, see normalise_missing_alleles().
+#
+# use_missing_chars() extends this per mode for the session (R/alphabet.R); the
+# built-in set below cannot be removed, only added to.
+#
+# Since 0.6.0 a container built by the package is already normalised, so this
+# set is legacy compatibility for hand-built or pre-0.6.0 containers, not the
+# mechanism that decides what is missing.
 .missing_tokens <- function(encoding) {
   base <- c("", "NA", "N", "n", ".", "-")
-  if (identical(encoding, "nucleotide")) base <- c(base, "0")
-  base
+  if (identical(encoding, "nucleotide") ||
+      identical(encoding, "selectiontools")) base <- c(base, "0")
+  unique(c(base, .extra_missing_chars(encoding)))
 }
 
 

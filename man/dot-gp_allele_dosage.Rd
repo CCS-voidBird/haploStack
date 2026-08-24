@@ -11,7 +11,7 @@
 (\code{"selectiontools"} or \code{"nucleotide"}).}
 
 \item{impute}{\code{"mean"} (default) mean-imputes missing dosages per
-marker; \code{"none"} leaves them as \code{NA}.}
+marker; \co\code{"none"} leaves them as \code{NA}.}
 }
 \value{
 A list with elements \code{M} (numeric matrix, rows = samples and

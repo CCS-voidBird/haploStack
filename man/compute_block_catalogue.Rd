@@ -9,7 +9,8 @@ compute_block_catalogue(
   effect_df = NULL,
   trait = NULL,
   block_info = NULL,
-  center_by_freq = TRUE,
+  center = NULL,
+  center_by_freq = NULL,
   group_by = c("effect", "signature"),
   .core = NULL,
   .signatures = NULL
@@ -31,6 +32,10 @@ per-trait \code{geno_meta$marker_effects} list when \code{effect_df} is
 \code{\link{build_block_location_info}}'s \code{block_info}: \code{Chrom},
 \code{Block}, \code{Start}, \code{End}, \code{Pos}, \code{Num_SNPs},
 \code{Block_length}). Recomputed from \code{geno_meta} when \code{NULL}.}
+
+\item{center}{Centring mode applied to the allele effects:
+�\code{"none"}, �\code{"locus_mean"} or �\code{"allele_freq"}. See
+�\code{\link{compute_profile_localgebv}} for what each preserves.}
 
 \item{center_by_freq}{Logical. Mean-centre allele effects by population
 frequency before summing per block (matches the catalogue pipeline).

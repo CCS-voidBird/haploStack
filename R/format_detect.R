@@ -55,6 +55,16 @@ detect_genotype_encoding <- function(geno_data) {
     stop("detect_genotype_encoding: No non-NA genotype values found.")
   }
 
+  # Classify on the calls, not the absences. A cell whose every allele is a
+  # missing token ("00", "--", "0/0", "./.") says nothing about which
+  # vocabulary the file is written in, and on a panel with a high missing rate
+  # enough of them will dilute the ratios below to misclassify it — a
+  # heavily-missing PED reads as "numeric" without this filter. The union of
+  # every mode's missing set is used because the mode is what we are trying to
+  # determine; the filter only ever *removes* candidates, and if it removes
+  # everything the unfiltered values are used instead.
+  all_vals <- .drop_all_missing_cells(all_vals)
+
   set.seed(42L)
   sampled <- sample(all_vals, min(100L, length(all_vals)))
 
@@ -84,6 +94,39 @@ detect_genotype_encoding <- function(geno_data) {
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
+
+# Internal: drop genotype cells whose every allele is a missing token.
+#
+# Works on the unique values rather than the full vector — an allele vocabulary
+# is tiny next to a 20-million-cell panel, so this is one small loop plus one
+# %in%. A cell splits on "/" when it has one and into characters otherwise,
+# which is the same pair of writings split_haplotypes() accepts.
+#
+# Returns the input unchanged when the filter would empty it (an all-missing
+# marker set, or a dosage panel that happens to be all zeros).
+# @keywords internal
+.drop_all_missing_cells <- function(vals) {
+  if (length(vals) == 0L) return(vals)
+
+  miss <- unique(c(.missing_tokens("nucleotide"),
+                   .missing_tokens("selectiontools"),
+                   .missing_tokens("numeric")))
+
+  u <- unique(vals)
+  all_missing <- vapply(u, function(v) {
+    if (v %in% miss) return(TRUE)
+    parts <- if (grepl("/", v, fixed = TRUE))
+               strsplit(v, "/", fixed = TRUE)[[1L]]
+             else
+               strsplit(v, "", fixed = TRUE)[[1L]]
+    length(parts) > 0L && all(parts %in% miss)
+  }, logical(1L), USE.NAMES = FALSE)
+
+  if (!any(all_missing)) return(vals)
+  keep <- vals[!vals %in% u[all_missing]]
+  if (length(keep) == 0L) vals else keep
+}
+
 
 #' Detect whether rows are samples or markers
 #'

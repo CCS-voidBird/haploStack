@@ -264,6 +264,301 @@ resolve_geno_format <- function(preset        = NULL,
 
 
 # ---------------------------------------------------------------------------
+# Missing-allele normalisation (MAN, 0.6.0)
+# ---------------------------------------------------------------------------
+
+#' Normalise a source format's missing tokens to NA (internal)
+#'
+#' Inside a \code{GenoMeta} a missing allele is \code{NA} and nothing else. This
+#' is the primitive that enforces the invariant: it maps every missing token of
+#' the format being \emph{parsed} to \code{NA_character_} in an allele array.
+#'
+#' @section Why the argument is a source format:
+#' The token set is keyed on the format the caller is parsing, supplied by the
+#' caller — \strong{not} read back out of a container's \code{metadata$encoding}.
+#' \code{metadata$encoding} is a record of provenance, not an instruction
+#' consumers follow to decide what an allele means. Normalisation therefore
+#' happens once, at the boundary where the raw tokens and the format that
+#' explains them are both in hand; after that no layer needs to be
+#' encoding-aware to know what is missing.
+#'
+#' @section The dosage rule:
+#' \code{"0"} is a missing code for \code{"nucleotide"} and
+#' \code{"selectiontools"} sources, and is \strong{never} missing for a
+#' dosage/\code{"numeric"} source, where \code{0} is a real genotype
+#' (homozygous reference). The rule is enforced here even against an explicit
+#' \code{extra_na}, because corrupting a dosage panel would be a worse failure
+#' than the bug this function exists to fix.
+#'
+#' @section Per allele, and what that means for a genotype:
+#' Normalisation acts on the \strong{allele} array, after the reader has split
+#' each genotype cell into its copies. For a nucleotide source both \code{"0"}
+#' and \code{"-"} are missing, so a diploid cell written \code{"00"} or
+#' \code{"--"} arrives here as two missing alleles and becomes a missing
+#' genotype by consequence. A half-called cell (\code{"A0"}, \code{"A-"}) keeps
+#' its observed allele: only the absent copy becomes \code{NA}, the \code{A}
+#' still counts toward allele frequencies, and whether the cell is usable is
+#' decided later by the NA-any policy at consumption
+#' (\code{\link{count_block_subtypes}}).
+#'
+#' Characters registered with \code{\link{use_missing_chars}} join the set for
+#' their mode and are honoured here like any built-in one.
+#'
+#' @param arr           Allele array (any dimension) or matrix. Non-character
+#'   input is returned unchanged — a numeric dosage array carries no tokens.
+#' @param source_format Allele vocabulary of the source being parsed:
+#'   \code{"nucleotide"}, \code{"selectiontools"}, or \code{"numeric"}. Any
+#'   other value falls back to the encoding-independent token set
+#'   (\code{""}, \code{"NA"}, \code{"N"}, \code{"n"}, \code{"."}, \code{"-"}).
+#' @param extra_na      Optional character vector of additional sentinels the
+#'   caller knows its own format uses (e.g. \code{read_plink_ped()} declares
+#'   \code{"0"}).
+#'
+#' @return Named list: \code{array} (the normalised array, dimensions and
+#'   dimnames preserved) and \code{n_changed} (integer count of cells set to
+#'   \code{NA}). The count is returned rather than reported so callers can
+#'   state what they changed instead of mutating silently.
+#'
+#' @seealso \code{\link{repair_geno_meta}}, \code{\link{is_geno_meta}}
+#' @keywords internal
+normalise_missing_alleles <- function(arr, source_format, extra_na = NULL) {
+  n_zero <- list(array = arr, n_changed = 0L)
+  if (is.null(arr) || length(arr) == 0L) return(n_zero)
+  # A numeric/integer array holds no tokens to map — nothing to do, and nothing
+  # to risk.
+  if (!is.character(arr)) return(n_zero)
+
+  is_dosage <- identical(source_format, "numeric")
+  tokens    <- .missing_tokens(source_format)
+
+  if (!is.null(extra_na)) {
+    extra_na <- as.character(extra_na)
+    extra_na <- extra_na[!is.na(extra_na)]
+    if (is_dosage && "0" %in% extra_na)
+      warning("normalise_missing_alleles: extra_na = \"0\" ignored for a ",
+              "dosage ('numeric') source — 0 is a real genotype there.")
+    tokens <- unique(c(tokens, extra_na))
+  }
+  # Load-bearing: the token set never carries "0" for a dosage source.
+  if (is_dosage) tokens <- setdiff(tokens, "0")
+
+  hit <- !is.na(arr) & trimws(arr) %in% tokens
+  n   <- sum(hit)
+  if (n > 0L) arr[hit] <- NA_character_
+
+  list(array = arr, n_changed = as.integer(n))
+}
+
+
+# Internal: the single normalisation portal, called from new_geno_meta() and
+# from nowhere else.
+#
+# Why one portal and why this one: read_plink_ped(), read_dart_genotype() and
+# read_vcf_genotype() bypass build_geno_meta() and construct directly, so
+# build_geno_meta() is not a chokepoint — new_geno_meta() is the only function
+# every route to a container passes through, including the internal transforms
+# (filter_geno_meta(), .replace_block_in_meta(), recode_geno_meta(), the
+# simulation and crossing paths). "100 % of source-file -> GenoMeta passes a
+# normalisation" is a property of the call graph, not of a convention.
+#
+# The vocabulary is keyed on `source_format` when the caller declares one (a
+# reader knows the format it parsed) and otherwise on the encoding the
+# constructor just resolved. Both are the caller's declaration at construction
+# time, which is what Q21.d asks for; what Q21.d forbids is a *consumer* reading
+# metadata$encoding later to decide what an allele means.
+#
+# The stamp makes the portal cheap. A container whose metadata$missing_tokens
+# already covers the vocabulary in force has been normalised against it, so a
+# derived container (a filter, a block swap, a crossing generation) skips the
+# scan instead of re-walking a 20-million-cell array to change nothing.
+.normalise_at_portal <- function(arr, metadata, source_format = NULL,
+                                 extra_na = NULL, caller = "new_geno_meta") {
+  src <- source_format %||% metadata$encoding
+
+  extra_na <- if (is.null(extra_na)) character(0L)
+              else as.character(extra_na)[!is.na(as.character(extra_na))]
+
+  effective <- unique(c(.missing_tokens(src), extra_na))
+  # The dosage rule, restated at the portal: 0 is a genotype, never an absence.
+  if (identical(src, "numeric") || identical(src, "allele"))
+    effective <- setdiff(effective, "0")
+
+  stamp <- metadata$missing_tokens
+  stamp <- if (is.character(stamp)) unique(stamp[!is.na(stamp)]) else NULL
+
+  # Already normalised against at least this vocabulary — nothing to do.
+  if (!is.null(stamp) && length(setdiff(effective, stamp)) == 0L) {
+    metadata$missing_tokens <- stamp
+    return(list(array = arr, metadata = metadata, n_changed = 0L))
+  }
+
+  res <- normalise_missing_alleles(arr, src, extra_na = extra_na)
+  if (res$n_changed > 0L)
+    message(caller, ": normalised ", res$n_changed,
+            " missing allele cell(s) to NA (source format '",
+            src %||% "unknown", "').")
+
+  metadata$missing_tokens <- unique(c(stamp, effective))
+  list(array = res$array, metadata = metadata, n_changed = res$n_changed)
+}
+
+# Internal: report the missing tokens a container still carries as alleles.
+#
+# Legacy compatibility, not the mechanism (Q21.d): a container built by 0.6.0 or
+# later is normalised at the portal, so this returns NULL. It exists so a
+# hand-built container, or one restored from a pre-0.6.0 .rds, is detected
+# rather than silently mis-counted.
+#
+# The token set is keyed on the recorded provenance (metadata$encoding), which
+# for this one purpose is the best available statement of what the source file
+# meant. A dosage container never has "0" in its set — see .missing_tokens().
+#
+# It is the UNION of that set and metadata$missing_tokens, the vocabulary the
+# container records having been normalised against (written wherever
+# normalisation runs). A detector should be more sensitive, not less: the union
+# catches both a token this session has registered and one a past session did.
+# The dosage exclusion survives the union.
+#
+# Returns NULL when clean, else list(tokens, n_cells, n_markers, markers).
+.missing_token_report <- function(x, source_format = NULL) {
+  arr <- x$geno_arrays
+  if (is.null(arr) || !is.character(arr) || length(arr) == 0L) return(NULL)
+
+  enc    <- source_format %||% x$metadata$encoding
+  tokens <- .missing_tokens(enc)
+  stamp  <- x$metadata$missing_tokens
+  if (is.character(stamp)) tokens <- unique(c(tokens, stamp[!is.na(stamp)]))
+  if (identical(enc, "numeric") || identical(enc, "allele"))
+    tokens <- setdiff(tokens, "0")
+
+  # Cheap first pass: the allele vocabulary is tiny next to the array.
+  present <- unique(as.vector(arr))
+  hit_tok <- intersect(present[!is.na(present)], tokens)
+  if (length(hit_tok) == 0L) return(NULL)
+
+  hit      <- !is.na(arr) & arr %in% hit_tok
+  dim(hit) <- dim(arr)
+  by_mk    <- apply(hit, 2L, any)
+  markers  <- dimnames(arr)[[2L]]
+  if (is.null(markers)) markers <- as.character(seq_along(by_mk))
+
+  list(tokens    = hit_tok,
+       n_cells   = as.integer(sum(hit)),
+       n_markers = as.integer(sum(by_mk)),
+       markers   = markers[by_mk])
+}
+
+
+# Internal: the FR4 notice. Warns by default, errors under
+# options(haploStack.strict_missing = TRUE). The warning carries the class
+# "haploStack_missing_token" so a caller that reports the condition its own way
+# (load_geno_meta) can muffle it without muffling anything else.
+.notify_missing_tokens <- function(rep, caller) {
+  if (is.null(rep)) return(invisible(FALSE))
+  msg <- paste0(
+    caller, ": ", rep$n_cells, " allele cell(s) across ", rep$n_markers,
+    " marker(s) hold a missing token (",
+    paste0("\"", rep$tokens, "\"", collapse = ", "),
+    ") instead of NA. Inside a GenoMeta a missing allele is NA and nothing ",
+    "else; a container that predates 0.6.0 (or was built by hand) can still ",
+    "carry the source token, which shifts marker effects and frequency-centred ",
+    "GEBVs. Repair it with repair_geno_meta().")
+  if (isTRUE(getOption("haploStack.strict_missing", FALSE)))
+    stop(msg, call. = FALSE)
+  warning(structure(
+    class   = c("haploStack_missing_token", "warning", "condition"),
+    list(message = paste0(msg, "\n"), call = NULL)))
+  invisible(TRUE)
+}
+
+
+#' Normalise the missing alleles of an existing GenoMeta
+#'
+#' The migration path for containers built before 0.6.0, when a missing allele
+#' could be stored as the source file's token (PLINK's \code{"0"}, \code{"N"},
+#' \code{"."}, \code{"-"}) rather than as \code{NA}. Maps every such token to
+#' \code{NA_character_} and returns the repaired container.
+#'
+#' Containers built by 0.6.0 or later are normalised at construction, so
+#' repairing one is a no-op and says so.
+#'
+#' @section What it does not do:
+#' It does not touch the file a container was loaded from —
+#' \code{\link{load_geno_meta}} never rewrites what you saved. Persist the
+#' repair yourself with \code{\link{save_geno_meta}}. It is also not imputation:
+#' a missing allele is marked missing, not filled.
+#'
+#' @section The vocabulary it repairs against:
+#' The union of the built-in set for the source format (see
+#' \code{\link{use_missing_chars}} for the table), anything registered in this
+#' session, and \code{metadata$missing_tokens} if the container carries one — so
+#' a character registered in the session that \emph{built} a container is still
+#' honoured when it is repaired somewhere else. The dosage exclusion survives
+#' the union: \code{"0"} is never removed from a \code{"numeric"} container.
+#'
+#' On return, \code{metadata$missing_tokens} records the vocabulary the
+#' container has been cleaned against, which is what keeps it self-describing in
+#' a session where nothing is registered.
+#'
+#' @param meta          A valid \code{GenoMeta} list.
+#' @param verbose       Logical. When \code{TRUE} (default), report how many
+#'   cells changed.
+#' @param source_format Allele vocabulary of the container's source
+#'   (\code{"nucleotide"}, \code{"selectiontools"}, \code{"numeric"}). Defaults
+#'   to the recorded provenance \code{metadata$encoding}. Supply it explicitly
+#'   when that record is absent or wrong — \code{"0"} is a missing code for
+#'   nucleotide and SelectionTools sources and a \strong{real genotype} for a
+#'   dosage one.
+#'
+#' @return The \code{GenoMeta} with \code{geno_arrays} normalised.
+#'
+#' @examples
+#' \dontrun{
+#' meta <- load_geno_meta("panel.rds")   # warns if it predates 0.6.0
+#' meta <- repair_geno_meta(meta)
+#' save_geno_meta(meta, "panel.rds")     # your call, not the loader's
+#' }
+#'
+#' @seealso \code{\link{is_geno_meta}}, \code{\link{load_geno_meta}}
+#' @export
+repair_geno_meta <- function(meta, verbose = TRUE, source_format = NULL) {
+  if (!is.list(meta) || is.null(meta$geno_arrays))
+    stop("repair_geno_meta: 'meta' is not a GenoMeta (no 'geno_arrays').")
+
+  enc <- source_format %||% meta$metadata$encoding
+  if (is.null(enc) && isTRUE(verbose))
+    message("repair_geno_meta: no recorded encoding — using the ",
+            "encoding-independent token set only (\"0\" is left alone).")
+
+  # Repair against the union of this session's vocabulary and whatever the
+  # container records having been normalised against, so a rule registered in
+  # the session that built it is not lost when it is repaired in another.
+  stamp <- meta$metadata$missing_tokens
+  stamp <- if (is.character(stamp)) unique(stamp[!is.na(stamp)]) else character(0L)
+  if (identical(enc, "numeric") || identical(enc, "allele"))
+    stamp <- setdiff(stamp, "0")
+
+  res <- normalise_missing_alleles(meta$geno_arrays, enc, extra_na = stamp)
+  meta$geno_arrays <- res$array
+
+  # Stamp the vocabulary this container has now been cleaned against. Written
+  # here because this is where normalisation actually runs; the constructors and
+  # readers stamp it too once they normalise (plan stage 3).
+  meta$metadata$missing_tokens <- unique(c(.missing_tokens(enc), stamp))
+
+  if (isTRUE(verbose)) {
+    if (res$n_changed == 0L)
+      message("repair_geno_meta: already normalised — no cells changed.")
+    else
+      message("repair_geno_meta: normalised ", res$n_changed,
+              " missing allele cell(s) to NA.")
+  }
+  meta
+}
+
+
+
+# ---------------------------------------------------------------------------
 # GenoMeta structure
 # ---------------------------------------------------------------------------
 
@@ -315,7 +610,11 @@ resolve_geno_format <- function(preset        = NULL,
 #'     \code{ploidy} (int), \code{char_dict} (named char vector),
 #'     \code{n_samples} (int), \code{n_markers} (int),
 #'     \code{source_format} (character), and \code{encoding} (auto-detected
-#'     when absent).}
+#'     when absent). Optionally \code{missing_tokens} (character): the
+#'     missing-allele vocabulary this container was normalised against, written
+#'     wherever normalisation ran (see \code{\link{repair_geno_meta}},
+#'     \code{\link{use_missing_chars}}). Absent on containers built before
+#'     0.6.0, and on any container that has not been normalised.}
 #' }
 #'
 #' @param geno_arrays         3-D array \code{[n_samples × n_markers × ploidy]}.
@@ -339,9 +638,38 @@ resolve_geno_format <- function(preset        = NULL,
 #' @param phenotype          Optional data.frame of sample-level trait values
 #'   (\code{Sample} + numeric trait columns), or \code{NULL} (default). Aligned to
 #'   the genotype sample set on construction (see \code{\link{attach_phenotype}}).
+#' @param source_format      Allele vocabulary of the source being parsed
+#'   (\code{"nucleotide"}, \code{"selectiontools"}, \code{"numeric"}), used to
+#'   normalise the missing alleles. Defaults to \code{metadata$encoding}.
+#'   Declare it whenever the format is known rather than detected: a 1/2-coded
+#'   PED, for instance, looks like dosage once split, and under the dosage rule
+#'   its \code{"0"} would then be kept as a real genotype.
+#' @param extra_na           Optional character vector of additional missing
+#'   sentinels this particular source uses. For a rule that should apply to
+#'   every read in a session, use \code{\link{use_missing_chars}} instead.
 #'
-#' @return A plain named list of class \code{"list"}. Access fields directly
-#'   with \code{$}.
+#' @section The normalisation portal:
+#' Since 0.6.0 this function is where a missing allele becomes \code{NA}, and it
+#' is the \strong{only} such place. That is a property of the call graph rather
+#' than a convention: \code{\link{read_plink_ped}},
+#' \code{\link{read_dart_genotype}} and \code{\link{read_vcf_genotype}} bypass
+#' \code{\link{build_geno_meta}} and construct here directly, as do the internal
+#' transforms, so every route from a source file to a container passes through
+#' this one function. Normalisation runs after the encoding is resolved and
+#' before anything is returned, so no consumer can observe a container that has
+#' not been through it.
+#'
+#' The vocabulary used is recorded in \code{metadata$missing_tokens}. A
+#' container that already carries a stamp covering the vocabulary in force is
+#' left alone rather than re-scanned, which is what keeps a derived container (a
+#' filter, a block swap, a crossing generation) cheap.
+#'
+#' \strong{Normalisation is one-way.} Once a container exists, the source
+#' token that a given \code{NA} came from is gone — \code{NA} is the only
+#' representation left, and no function can tell which character the file wrote
+#' there. \code{\link{recode_geno_meta}} can render missing back out as a
+#' character of your choosing, but that is a new rendering, not a recovery of
+#' the original file.
 #'
 #' @export
 new_geno_meta <- function(geno_arrays,
@@ -351,7 +679,9 @@ new_geno_meta <- function(geno_arrays,
                            metadata,
                            sample_info             = NULL,
                            marker_effects          = NULL,
-                           phenotype               = NULL) {
+                           phenotype               = NULL,
+                           source_format           = NULL,
+                           extra_na                = NULL) {
 
   # ---- Validate required fields ----------------------------------------
   if (!is.array(geno_arrays) || length(dim(geno_arrays)) != 3L)
@@ -479,6 +809,20 @@ new_geno_meta <- function(geno_arrays,
       error = function(e) NULL
     )
   }
+
+  # ---- Normalise missing alleles — THE portal (FR3) --------------------------
+  # Every route from a source file to a GenoMeta ends here: build_geno_meta(),
+  # read_plink_ped(), read_dart_genotype() and read_vcf_genotype() all construct
+  # through this function, and so does every internal transform. Putting the
+  # normalisation anywhere else would leave a way in that skips it.
+  #
+  # It runs AFTER the encoding is resolved and BEFORE anything is returned, so
+  # the vocabulary is known when the mapping is applied and no consumer can
+  # observe a container that has not been through it.
+  norm <- .normalise_at_portal(geno_arrays, metadata, source_format, extra_na,
+                               caller = "new_geno_meta")
+  geno_arrays <- norm$array
+  metadata    <- norm$metadata
 
   # ---- Coerce Chrom / Marker / Block columns to character --------------------
   map_info$Chrom  <- as.character(map_info$Chrom)
@@ -708,12 +1052,26 @@ new_geno_meta <- function(geno_arrays,
 #' When the check fails and \code{verbose = TRUE}, a \code{message()} describing
 #' the first failing condition is emitted before \code{FALSE} is returned.
 #'
+#' @section The missing-allele invariant:
+#' Since 0.6.0, one content invariant is checked alongside the structural ones:
+#' inside a \code{GenoMeta} a missing allele is \code{NA} and nothing else. A
+#' container that still carries a source token as an allele (PLINK's \code{"0"},
+#' \code{"N"}, \code{"."}, \code{"-"}) is \strong{structurally valid} — the
+#' function still returns \code{TRUE} — but a \code{warning()} names the token,
+#' the number of markers affected, and \code{\link{repair_geno_meta}}. Only
+#' containers built before 0.6.0, or by hand, can trigger it.
+#'
+#' A pipeline that wants a hard gate instead can set
+#' \code{options(haploStack.strict_missing = TRUE)}, which turns that warning
+#' into an error.
+#'
 #' @param x       Any R object.
 #' @param verbose Logical. When \code{TRUE} (default), emit a diagnostic
 #'   \code{message()} explaining why \code{x} is not a valid GenoMeta.
 #' @return \code{TRUE} if \code{x} appears to be a valid GenoMeta;
 #'   \code{FALSE} otherwise.
 #'
+#' @seealso \code{\link{repair_geno_meta}}
 #' @export
 is_geno_meta <- function(x, verbose = TRUE) {
   fail <- function(msg) {
@@ -796,6 +1154,14 @@ is_geno_meta <- function(x, verbose = TRUE) {
                          paste(utils::head(bad_p, 5L), collapse = ", "),
                          if (length(bad_p) > 5L) " ..." else "", ".")))
   }
+
+  # The container is structurally valid. One content invariant is checked here
+  # because this is the one function every entry point already calls: a missing
+  # allele is NA and nothing else (FR4). A container that predates 0.6.0 can
+  # still carry the source token, so this warns and names the repair rather than
+  # refusing — erroring by default would make the fix a worse failure than the
+  # bug. options(haploStack.strict_missing = TRUE) turns it into an error.
+  .notify_missing_tokens(.missing_token_report(x), "is_geno_meta")
 
   TRUE
 }
@@ -888,6 +1254,15 @@ read_plink_ped <- function(ped_file, map_file, block_file = NULL,
   obs <- obs[!is.na(obs) & obs != "0"]
   char_dict <- setNames(seq_along(obs), obs)
 
+  # Declare the format rather than letting it be detected (FR3). A PED holds
+  # alleles — letters, or PLINK's 1/2/3/4 codes — and never dosages, so the
+  # choice is between the two allele vocabularies and "0" is a missing call in
+  # both. This matters: a 1/2-coded PED splits into single digits, which
+  # detection would read as "numeric", and under the dosage rule "0" would then
+  # be kept as a real genotype. Declaring the format closes that route.
+  ped_encoding <- if (any(grepl("[ACGTacgt]", obs))) "nucleotide"
+                  else "selectiontools"
+
   blocks <- if (!is.null(block_file)) .read_block_file(block_file, map_df) else list()
 
   # PED columns 1-5 are the FAM fields (FID, IID, father, mother, sex) — feed
@@ -911,9 +1286,15 @@ read_plink_ped <- function(ped_file, map_file, block_file = NULL,
       char_dict     = char_dict,
       n_samples     = n_samples,
       n_markers     = n_markers,
-      source_format = "plink_ped"
+      source_format = "plink_ped",
+      encoding      = ped_encoding
     ),
-    sample_info = fam_si
+    sample_info   = fam_si,
+    source_format = ped_encoding,
+    # Belt and braces: "0" is already missing under both allele vocabularies,
+    # and declaring it here says the reader knows its own sentinel rather than
+    # inheriting one.
+    extra_na      = "0"
   )
 }
 
@@ -1050,6 +1431,9 @@ read_plink_ped <- function(ped_file, map_file, block_file = NULL,
 #' @param ploidy     Integer ploidy level (default \code{2}).
 #' @param pos_unit   Position unit in \code{map_file}: \code{"bp"} (default) or
 #'   \code{"mbp"}.
+#' @param extra_na   Optional character vector of additional missing sentinels
+#'   this file uses, passed through to the normalisation portal (see
+#'   \code{\link{build_geno_meta}}).
 #'
 #' @return A valid \code{GenoMeta} list.
 #'
@@ -1066,7 +1450,8 @@ read_genotype <- function(geno_file,
                           split_char = NULL,
                           encoding   = NULL,
                           ploidy     = 2L,
-                          pos_unit   = "bp") {
+                          pos_unit   = "bp",
+                          extra_na   = NULL) {
 
   spec  <- resolve_geno_format(preset, presets = presets,
                                split_char = split_char, encoding = encoding)
@@ -1087,7 +1472,8 @@ read_genotype <- function(geno_file,
     split_char    = spec$split_char,
     encoding      = spec$encoding,
     source_format = spec$source_format,
-    pos_unit      = pos_unit
+    pos_unit      = pos_unit,
+    extra_na      = extra_na
   )
 }
 
@@ -1101,14 +1487,17 @@ read_genotype <- function(geno_file,
 #' @param map_file   Optional path to a map file (\code{name | chr | pos}).
 #' @param block_file Optional path to a block coordinate or block-marker file.
 #' @param pos_unit   Position unit: \code{"bp"} (default) or \code{"mbp"}.
+#' @param extra_na   Optional character vector of additional missing sentinels
+#'   this file uses (see \code{\link{build_geno_meta}}).
 #'
 #' @return A valid \code{GenoMeta} list.
 #'
 #' @export
 read_st_genotype <- function(file, map_file = NULL, block_file = NULL,
-                              pos_unit = "bp") {
+                              pos_unit = "bp", extra_na = NULL) {
   read_genotype(file, map_file = map_file, preset = "ST",
-                block_file = block_file, pos_unit = pos_unit)
+                block_file = block_file, pos_unit = pos_unit,
+                extra_na = extra_na)
 }
 
 
@@ -1121,14 +1510,17 @@ read_st_genotype <- function(file, map_file = NULL, block_file = NULL,
 #' @param map_file   Optional path to a map file (\code{name | chr | pos}).
 #' @param block_file Optional path to a block coordinate or block-marker file.
 #' @param pos_unit   Position unit: \code{"bp"} (default) or \code{"mbp"}.
+#' @param extra_na   Optional character vector of additional missing sentinels
+#'   this file uses (see \code{\link{build_geno_meta}}).
 #'
 #' @return A valid \code{GenoMeta} list.
 #'
 #' @export
 read_gs_genotype <- function(file, map_file = NULL, block_file = NULL,
-                              pos_unit = "bp") {
+                              pos_unit = "bp", extra_na = NULL) {
   read_genotype(file, map_file = map_file, preset = "GS",
-                block_file = block_file, pos_unit = pos_unit)
+                block_file = block_file, pos_unit = pos_unit,
+                extra_na = extra_na)
 }
 
 
@@ -1397,8 +1789,13 @@ read_dart_genotype <- function(file,
       char_dict     = char_dict,
       n_samples     = n_samples,
       n_markers     = n_markers,
-      source_format = "dart_seq"
-    )
+      source_format = "dart_seq",
+      encoding      = "nucleotide"
+    ),
+    # A DArT report is dosage on disk, but the reader has already converted it
+    # to "A"/"B" alleles by this point, so the container is an allele one and
+    # its vocabulary is the allele vocabulary (FR3).
+    source_format = "nucleotide"
   )
 }
 
@@ -1596,8 +1993,12 @@ read_vcf_genotype <- function(file,
       char_dict     = list("A" = 1L, "B" = 2L),
       n_samples     = n_smp,
       n_markers     = n_mk_final,
-      source_format = "vcf"
-    )
+      source_format = "vcf",
+      encoding      = "nucleotide"
+    ),
+    # As for DArT: GT fields are converted to "A"/"B" alleles before this call,
+    # so the container carries an allele vocabulary (FR3).
+    source_format = "nucleotide"
   )
 }
 
@@ -1652,6 +2053,37 @@ read_vcf_genotype <- function(file,
 #'   \code{"nucleotide"}. \code{NULL} (default) auto-detects.
 #' @param source_format Label stored in \code{metadata$source_format}.
 #'   Default \code{"user_supplied"}.
+#' @param extra_na     Optional character vector of additional missing
+#'   sentinels this file uses, passed through to the normalisation portal in
+#'   \code{\link{new_geno_meta}}. This is the per-read escape hatch for a source
+#'   whose absence code the package does not know — including a dosage panel
+#'   that writes a digit such as \code{"9"} for missing, which
+#'   \code{\link{use_missing_chars}} deliberately refuses to register globally.
+#'
+#' @section Building from a dosage source:
+#' A dosage matrix (0/1/2 counts, \code{encoding = "numeric"}) records \emph{how
+#' many} copies of an allele a sample carries, not \emph{which} copy sits on
+#' which chromosome. The container built from one therefore carries \strong{no
+#' strand resolution}: per-slot output from it is not a haplotype, and
+#' \code{level = "haplotype"} in \code{\link{compute_profile_localgebv}} should
+#' not be read as one.
+#'
+#' Two consequences worth knowing before you build:
+#'
+#' \itemize{
+#'   \item A dosage source built at \code{ploidy = 2} produces a second ploidy
+#'     layer that is entirely \code{NA}, so \code{\link{compute_marker_stats}}
+#'     reports \code{Call_rate} 0.5 on every marker and
+#'     \code{\link{detect_genotype_encoding}} fails on the reconstructed allele
+#'     matrix. The local-GEBV path survives it (the absent layer contributes 0
+#'     at genotype level and is dropped at haplotype level), but the container
+#'     is describing half its data as missing. Tracked as INDEX discrepancy 25;
+#'     fixing the shape changes \code{Call_rate} on every dosage panel and is
+#'     scoped separately.
+#'   \item For LD estimation and block definition on a dosage frame, prefer
+#'     \strong{HapSelect}, which works on dosage natively and never claims
+#'     strands, over converting to alleles first.
+#' }
 #'
 #' @return A valid \code{GenoMeta} list (see \code{\link{new_geno_meta}}).
 #'
@@ -1692,7 +2124,8 @@ build_geno_meta <- function(geno_2d,
                              split_char    = "/",
                              pos_unit      = "bp",
                              encoding      = NULL,
-                             source_format = "user_supplied") {
+                             source_format = "user_supplied",
+                             extra_na      = NULL) {
 
   # ---- Validate genotype matrix (FIXED sample × marker orientation) ----------
   if (!is.matrix(geno_2d) && !is.data.frame(geno_2d))
@@ -1825,7 +2258,11 @@ build_geno_meta <- function(geno_2d,
       source_format = source_format,
       encoding      = enc
     ),
-    sample_info = fam_si   # NULL → dummy FAM auto-built in new_geno_meta()
+    sample_info   = fam_si,  # NULL → dummy FAM auto-built in new_geno_meta()
+    # `enc` is the vocabulary this call just resolved — the caller's
+    # declaration at construction time, which is what the portal keys on.
+    source_format = enc,
+    extra_na      = extra_na
   )
 
   # ---- Attach blocks if provided ---------------------------------------------
@@ -2140,7 +2577,13 @@ filter_geno_meta <- function(meta, keep_markers = NULL, keep_samples = NULL,
     # Auto: minor allele = least frequent OBSERVED allele per marker (ties broken
     # alphabetically, matching names(sort(table(obs)))[1L]). Detection is in R;
     # counting is the marker_allele_counts kernel.
-    counts <- .marker_allele_counts(arr)
+    #
+    # `na_vals` is defence-in-depth (FR7): a no-op on a container that came
+    # through the portal, and on a legacy one it stops a missing code being
+    # picked as the minor allele — which would make the dosage a count of
+    # missingness.
+    counts <- .marker_allele_counts(
+      arr, na_vals = .missing_tokens(geno_meta$metadata$encoding))
     levs   <- colnames(counts)
     target_alleles <- vapply(seq_len(n_markers), function(m) {
       cj <- counts[m, ]

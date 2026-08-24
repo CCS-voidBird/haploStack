@@ -26,3 +26,21 @@ the full structure.
 When the check fails and \code{verbose = TRUE}, a \code{message()} describing
 the first failing condition is emitted before \code{FALSE} is returned.
 }
+\section{The missing-allele invariant}{
+
+Since 0.6.0, one content invariant is checked alongside the structural ones:
+inside a \code{GenoMeta} a missing allele is \code{NA} and nothing else. A
+container that still carries a source token as an allele (PLINK's \code{"0"},
+\code{"N"}, \code{"."}, \code{"-"}) is \strong{structurally valid} — the
+function still returns \code{TRUE} — but a \code{warning()} names the token,
+the number of markers affected, and \code{\link{repair_geno_meta}}. Only
+containers built before 0.6.0, or by hand, can trigger it.
+
+A pipeline that wants a hard gate instead can set
+\code{options(haploStack.strict_missing = TRUE)}, which turns that warning
+into an error.
+}
+
+\seealso{
+\code{\link{repair_geno_meta}}
+}

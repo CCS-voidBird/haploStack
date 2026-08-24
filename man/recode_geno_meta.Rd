@@ -4,13 +4,26 @@
 \alias{recode_geno_meta}
 \title{Recode a GenoMeta object to a different allele encoding}
 \usage{
-recode_geno_meta(geno_meta, to_type = "nucleotide")
+recode_geno_meta(
+  geno_meta,
+  to_type = "nucleotide",
+  from_type = NULL,
+  na_as = NULL
+)
 }
 \arguments{
 \item{geno_meta}{A valid \code{GenoMeta} list.}
 
 \item{to_type}{Target encoding: \code{"nucleotide"} or
 \code{"selectiontools"}.}
+
+\item{from_type}{Source encoding. \code{NULL} (default) uses
+\code{metadata$encoding}, or detects it when that is absent; either way the
+value is checked against the alleles actually present.}
+
+\item{na_as}{Optional string to write in place of every missing allele.
+\code{NULL} (default) keeps \code{NA}. See \emph{Rendering missing back
+out}.}
 }
 \value{
 A new \code{GenoMeta} with recoded \code{geno_arrays}.
@@ -21,4 +34,42 @@ Converts the allele values in \code{geno_arrays} between
 using \code{\link{DEFAULT_ENCODING_DICT}} /
 \code{\link{REVERSED_ENCODING_DICT}}, and updates \code{metadata$char_dict}
 and \code{metadata$encoding}.
+}
+\section{Both ends are declared}{
+
+A transform needs to know what it is converting \emph{from} as well as
+\emph{to}. Before 0.6.0 only \code{to_type} was an argument and the source
+was taken from \code{metadata$encoding} as an early-return guard, so a
+container recorded as \code{"numeric"} sailed past the guard and had its
+dosages pushed through the nucleotide dictionary — \code{1 -> "A"},
+\code{2 -> "C"}, \code{0 -> NA} — with no warning (INDEX discrepancy 16,
+item 4).
+
+\code{from_type} now names the source explicitly. It defaults to the recorded
+provenance, but the recorded value is \strong{validated against the data}
+rather than trusted, and a dosage source with an allele target is refused
+outright: recoding a vocabulary and reinterpreting a scale are different
+operations, and the defect was one masquerading as the other.
+}
+
+\section{Rendering missing back out (\code{na_as})}{
+
+Inside a \code{GenoMeta} a missing allele is \code{NA}. Converting one back
+to a character is possible, and irreversible in the direction that matters:
+the character the \emph{source file} wrote there is gone the moment the
+container was built, so \code{na_as} produces a new rendering, never a
+recovery. Recoding a PED-derived container with \code{na_as = "-"} does not
+give you back the \code{"0"} the PED had, and nothing in the package can.
+
+\code{na_as = NULL} (the default) keeps \code{NA} and preserves the
+invariant. Supplying a string writes it in place of every missing allele —
+useful when the target is a file format with its own absence code
+(\code{"-"} for the nucleotide dictionary, \code{"-1"} for SelectionTools).
+The result is then, deliberately, \strong{not} a normalised container:
+\code{\link{is_geno_meta}} will say so, and \code{\link{repair_geno_meta}}
+undoes the rendering. Treat it as an export step, not a storage format.
+}
+
+\seealso{
+\code{\link{repair_geno_meta}}, \code{\link{use_missing_chars}}
 }

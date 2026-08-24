@@ -81,6 +81,9 @@
 #'   subtypes and \code{sum(Count)} within a block is \code{n_samples * ploidy}.
 #'   \code{"genotype"} counts distinct samples carrying the subtype on at least
 #'   one copy, so a homozygote counts once.
+#' @param center        Centring mode applied to the allele effects:
+#'   \code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
+#'   \code{\link{compute_profile_localgebv}} for what each preserves.
 #' @param center_by_freq Passed to \code{\link{compute_block_catalogue}} when
 #'   \code{trait} is given; centres allele effects by population frequency before
 #'   summing. Ignored when \code{trait} is \code{NULL}. Default \code{TRUE}.
@@ -136,10 +139,13 @@ count_block_subtypes <- function(geno_meta,
                                  blocks         = NULL,
                                  trait          = NULL,
                                  count_by       = c("haplotype", "genotype"),
-                                 center_by_freq = TRUE,
+                                 center         = NULL,
+                                 center_by_freq = NULL,
                                  output_file    = NULL,
                                  fill_na        = NULL,
                                  .signatures    = NULL) {
+  center <- .resolve_center(center, center_by_freq, "count_block_subtypes",
+                            default = "allele_freq")
 
   count_by <- match.arg(count_by)
   if (!is_geno_meta(geno_meta))
@@ -201,7 +207,7 @@ count_block_subtypes <- function(geno_meta,
     # The UNFILTERED signature table is injected: compute_block_catalogue()
     # labels every block, and a pre-filtered table would leave the rest NA.
     cat_dt <- compute_block_catalogue(geno_meta, trait = trait,
-                                      center_by_freq = center_by_freq,
+                                      center         = center,
                                       group_by       = "signature",
                                       .signatures    = sigs)
     cnt[, Effect := NA_real_]
@@ -508,7 +514,7 @@ count_subtype_carriage <- function(geno_meta, subtypes,
 # so "favourable" means precisely what it means in analyze_block_catalogue().
 # @keywords internal
 .resolve_top_subtypes <- function(catalogue, geno_meta, trait, fitness_fn,
-                                  min_count, center_by_freq, fill_na,
+                                  min_count, center, fill_na,
                                   caller = "count_favourable_subtypes") {
 
   # ── An analysis result: the blocks are already chosen. ────────────────────
@@ -552,7 +558,7 @@ count_subtype_carriage <- function(geno_meta, subtypes,
     if (is.null(geno_meta))
       stop(caller, ": supply a 'catalogue', or a 'geno_meta' carrying effects.")
     long <- compute_block_catalogue(geno_meta, trait = trait,
-                                    center_by_freq = center_by_freq,
+                                    center   = center,
                                     group_by = "signature")
     long <- data.table::as.data.table(long)
     long[, Trait := as.character(trait %||% "Trait")]
@@ -630,6 +636,9 @@ count_subtype_carriage <- function(geno_meta, subtypes,
 #' @param count_by \code{"haplotype"} (default) counts matching copies per
 #'   sample; \code{"genotype"} counts each sample once per target carried. See
 #'   \code{\link{count_subtype_carriage}}.
+#' @param center        Centring mode applied to the allele effects:
+#'   \code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
+#'   \code{\link{compute_profile_localgebv}} for what each preserves.
 #' @param center_by_freq Passed to \code{\link{compute_block_catalogue}} when the
 #'   catalogue is computed here. Default \code{TRUE}.
 #' @param fill_na Placeholder for an unobserved allele. Default \code{NULL} (the
@@ -680,17 +689,21 @@ count_favourable_subtypes <- function(geno_meta,
                                       min_count      = 1,
                                       top_n          = NULL,
                                       count_by       = c("haplotype", "genotype"),
-                                      center_by_freq = TRUE,
+                                      center         = NULL,
+                                      center_by_freq = NULL,
                                       fill_na        = NULL,
                                       output_file    = NULL) {
 
+  center <- .resolve_center(center, center_by_freq,
+                            "count_favourable_subtypes",
+                            default = "allele_freq")
   if (!is.function(fitness_fn)) fitness_fn <- match.arg(fitness_fn)
   count_by <- match.arg(count_by)
   if (!is_geno_meta(geno_meta))
     stop("count_favourable_subtypes: 'geno_meta' is not a valid GenoMeta.")
 
   ref <- .resolve_top_subtypes(catalogue, geno_meta, trait, fitness_fn,
-                               min_count, center_by_freq, fill_na)
+                               min_count, center, fill_na)
 
   # Rank blocks by the selected subtype's effect, following the fitness
   # direction, so top_n keeps the strongest under either sense of "strong".

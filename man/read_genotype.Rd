@@ -13,7 +13,8 @@ read_genotype(
   split_char = NULL,
   encoding = NULL,
   ploidy = 2L,
-  pos_unit = "bp"
+  pos_unit = "bp",
+  extra_na = NULL
 )
 }
 \arguments{
@@ -42,6 +43,10 @@ or \code{NULL} for the \code{default} layout. See
 
 \item{pos_unit}{Position unit in \code{map_file}: \code{"bp"} (default) or
 \code{"mbp"}.}
+
+\item{extra_na}{Optional character vector of additional missing sentinels
+this file uses, passed through to the normalisation portal (see
+�\code{\link{build_geno_meta}}).}
 }
 \value{
 A valid \code{GenoMeta} list.

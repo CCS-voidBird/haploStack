@@ -10,11 +10,27 @@ load_geno_meta(path)
 \item{path}{Path to an RDS file saved by \code{\link{save_geno_meta}}.}
 }
 \value{
-A \code{GenoMeta} list.
+A \code{GenoMeta} list, exactly as stored.
 }
 \description{
 Load a GenoMeta object from an RDS file
 }
+\section{Containers saved before 0.6.0}{
+
+Since 0.6.0 a missing allele inside a \code{GenoMeta} is \code{NA} and
+nothing else. A file saved earlier can still hold the source token
+(PLINK's \code{"0"}, \code{"N"}, \code{"."}, \code{"-"}) as an allele, which
+shifts marker effects and frequency-centred local GEBVs. Loading one says so
+and names \code{\link{repair_geno_meta}} — and \strong{does not rewrite the
+file}. Repairing what you saved without being asked would be the same class
+of silent decision the invariant exists to remove, so the repair is yours to
+make and yours to persist:
+
+\preformatted{meta <- load_geno_meta("panel.rds")
+meta <- repair_geno_meta(meta)
+save_geno_meta(meta, "panel.rds")}
+}
+
 \seealso{
-\code{\link{save_geno_meta}}
+\code{\link{save_geno_meta}}, \code{\link{repair_geno_meta}}
 }

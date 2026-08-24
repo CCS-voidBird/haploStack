@@ -162,7 +162,15 @@
   setDT(long_core)
   long_core[, Allele := as.character(Allele)]
   long_core[, Marker := as.character(Marker)]
-  long_core <- long_core[!is.na(Allele) & nchar(trimws(Allele)) > 0L]
+  # The third of the three missing-detection idioms this release removes. It
+  # now uses the shared token set rather than its own `nzchar(trimws())` rule
+  # (FR7). On a container that came through the portal the two agree exactly —
+  # the portal already normalises whitespace-only cells — so this is a no-op.
+  # On a legacy container it stops a retained token being counted in
+  # `MarkerTotal` below, which is what deflated every real allele's frequency
+  # and shifted local GEBVs under `center_by_freq = TRUE`.
+  .core_miss <- .missing_tokens(prof$encoding)
+  long_core  <- long_core[!is.na(Allele) & !trimws(Allele) %chin% .core_miss]
 
   blk_map <- prof$marker_meta[, .(Marker = marker, Block = block_id)]
   long_core[, Block := NA_character_]
@@ -236,25 +244,98 @@
 # Per-block haplotype effects (the dispatched hot loop)
 # ---------------------------------------------------------------------------
 
+
+# ---------------------------------------------------------------------------
+# Centring vocabulary (CEN, 0.6.0)
+# ---------------------------------------------------------------------------
+
+# The three centrings a local GEBV can be computed under. They are different
+# operations, not settings of one:
+#
+#   "none"        contrib(a) = Effect(a)
+#   "locus_mean"  contrib(a) = Effect(a) - mean_i,  mean_i = sum_a p_a * e_a
+#                 ONE value per marker, subtracted from every allele there. A
+#                 pure location shift: the A-vs-B contrast is preserved and
+#                 block variance is unchanged. Reproduces HapSelect's
+#                 mean_adjust = TRUE value for value.
+#   "allele_freq" contrib(a) = Effect(a) * (1 - p_a)
+#                 Each allele centred by ITS OWN frequency, so the contrast
+#                 moves from e_A - e_B to q*e_A - p*e_B. A reweighting: block
+#                 variances change (median factor ~3 on the barley panel).
+HS_CENTER_MODES <- c("none", "locus_mean", "allele_freq")
+
+# One-time-per-session deprecation notice for the retired logical.
+.hs_center_warned <- new.env(parent = emptyenv())
+
+# Resolve the centring from the new argument and the deprecated logical.
+# `default` is what applies when the caller supplies neither — it differs by
+# entry point, which is the disagreement CEN removes.
+.resolve_center <- function(center = NULL, center_by_freq = NULL,
+                            caller = "compute_profile_localgebv",
+                            default = "none") {
+  if (!is.null(center) && !is.null(center_by_freq))
+    stop(caller, ": supply either 'center' or the deprecated 'center_by_freq', ",
+         "not both. 'center_by_freq = TRUE' is 'center = \"allele_freq\"' and ",
+         "'FALSE' is 'center = \"none\"'.", call. = FALSE)
+
+  if (!is.null(center_by_freq)) {
+    if (!is.logical(center_by_freq) || length(center_by_freq) != 1L ||
+        is.na(center_by_freq))
+      stop(caller, ": 'center_by_freq' must be TRUE or FALSE.", call. = FALSE)
+    if (is.null(.hs_center_warned$done)) {
+      .hs_center_warned$done <- TRUE
+      message("'center_by_freq' is deprecated and will be removed in a future ",
+              "release; use center = \"allele_freq\" (TRUE) or ",
+              "center = \"none\" (FALSE). A third mode, center = \"locus_mean\", ",
+              "preserves the allele contrast and leaves block variance ",
+              "unchanged - see ?compute_profile_localgebv.")
+    }
+    return(if (isTRUE(center_by_freq)) "allele_freq" else "none")
+  }
+
+  if (is.null(center)) return(default)
+  if (is.logical(center))
+    stop(caller, ": 'center' takes a mode name, not a logical. Use ",
+         "center = \"allele_freq\" or center = \"none\".", call. = FALSE)
+  match.arg(as.character(center)[1L], HS_CENTER_MODES)
+}
+
+# Per-marker locus mean:  mean_i = sum_a AlleleFreq(a) * Effect(a).
+# Built from the same frequency table "allele_freq" uses, aggregated one level
+# up (per marker rather than per allele). Alleles with no supplied effect count
+# as effect 0, matching the effect join everywhere else.
+.locus_means <- function(freq_dt, eff) {
+  lm_dt <- data.table::copy(as.data.table(freq_dt))
+  lm_dt[, Effect := NA_real_]
+  lm_dt[eff, on = .(Marker, Allele), Effect := i.Effect]
+  lm_dt[is.na(Effect), Effect := 0]
+  lm_dt[, .(LocusMean = sum(AlleleFreq * Effect, na.rm = TRUE)), by = Marker]
+}
+
 # Pure-R path: reuse the archived update-join + grouped-sum on a COPY of the
 # cached long table (so the shared core is never mutated). Identical arithmetic
 # and grouping/summation order to the pre-refactor .compute_effect_size().
-.hap_effects_r <- function(core, eff, center_by_freq) {
+.hap_effects_r <- function(core, eff, center) {
   .compute_effect_size(data.table::copy(core$long_core), eff,
-                       center_by_freq, freq_dt = core$freq_core)
+                       center = center, freq_dt = core$freq_core)
 }
 
 # Rcpp path: build a per-(marker, code) contribution matrix in R (this is where
 # encoding is resolved), scatter-sum it per block in C++, then reshape to the
 # same (Sample, Haplotype_idx, Block, HapEffect) long form the pure-R path emits.
-.hap_effects_rcpp <- function(core, eff, center_by_freq) {
+.hap_effects_rcpp <- function(core, eff, center) {
   ld <- data.table::copy(core$contrib_levels)
   ld[eff, on = .(Marker, Allele), Effect := i.Effect]
   ld[is.na(Effect), Effect := 0]
-  if (isTRUE(center_by_freq)) {
+  if (identical(center, "allele_freq")) {
     ld[core$freq_core, on = .(Marker, Allele), AlleleFreq := i.AlleleFreq]
     ld[is.na(AlleleFreq), AlleleFreq := 0]
     ld[, contrib := Effect * (1 - AlleleFreq)]          # == Eff - freq*Eff
+  } else if (identical(center, "locus_mean")) {
+    ld[.locus_means(core$freq_core, eff), on = "Marker",
+       LocusMean := i.LocusMean]
+    ld[is.na(LocusMean), LocusMean := 0]
+    ld[, contrib := Effect - LocusMean]
   } else {
     ld[, contrib := Effect]
   }
@@ -277,9 +358,9 @@
   hap_dt[paste0(Sample, ".", Haplotype_idx) %in% core$present_copies]
 }
 
-.hap_effects <- function(core, eff, center_by_freq, use_rcpp) {
-  if (isTRUE(use_rcpp)) .hap_effects_rcpp(core, eff, center_by_freq)
-  else                  .hap_effects_r(core, eff, center_by_freq)
+.hap_effects <- function(core, eff, center, use_rcpp) {
+  if (isTRUE(use_rcpp)) .hap_effects_rcpp(core, eff, center)
+  else                  .hap_effects_r(core, eff, center)
 }
 
 
@@ -330,22 +411,25 @@
 #'
 #' @param core     A \code{\link{.catalogue_core}} result.
 #' @param eff      Standardised effect data.table (Marker, Allele, Effect).
-#' @param center_by_freq Logical; mean-centre by population allele frequency.
+#' @param center   Centring mode: \code{"none"}, \code{"locus_mean"} or
+#'   \code{"allele_freq"} (see \code{HS_CENTER_MODES}). Already resolved by the
+#'   caller — the engine does not read the deprecated logical.
 #' @param level    \code{"genotype"} or \code{"haplotype"}.
 #' @param fill_na  Fill value for absent (Block, Sample) cells.
 #' @param keep_blocks Optional character vector restricting output blocks.
 #' @keywords internal
-.local_gebv_engine <- function(core, eff, center_by_freq,
+.local_gebv_engine <- function(core, eff, center = "none",
                                level = c("genotype", "haplotype"),
                                fill_na = 0, keep_blocks = NULL) {
-  level <- match.arg(level)
+  level  <- match.arg(level)
+  center <- match.arg(as.character(center)[1L], HS_CENTER_MODES)
   if (isTRUE(core$empty)) return(data.table(Block = character(0L)))
   # The Rcpp path emits a dense [copy x block] result, so absent (copy, block)
   # cells read as 0; that matches the pure-R fill ONLY when fill_na == 0. For any
   # other fill value (a non-default direct call), use the pure-R path which omits
   # absent cells and lets dcast fill them. Requires the kernel + coded core.
   use_rcpp <- .use_rcpp() && fill_na == 0 && !is.null(core$code_mat)
-  hap_dt   <- .hap_effects(core, eff, center_by_freq, use_rcpp)
+  hap_dt   <- .hap_effects(core, eff, center, use_rcpp)
   if (nrow(hap_dt) == 0L) return(data.table(Block = character(0L)))
   .assemble_localgebv_wide(hap_dt, core, level, fill_na, keep_blocks)
 }

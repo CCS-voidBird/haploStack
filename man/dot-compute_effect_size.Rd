@@ -4,7 +4,7 @@
 \alias{.compute_effect_size}
 \title{Attach effects and compute haplotype-level GEBV per block}
 \usage{
-.compute_effect_size(long_dt, eff, center_by_freq = FALSE, freq_dt = NULL)
+.compute_effect_size(long_dt, eff, center = "none", freq_dt = NULL)
 }
 \arguments{
 \item{long_dt}{Long-format \code{data.table} with columns
@@ -14,14 +14,18 @@
 \item{eff}{Standardised effect \code{data.table} with columns
 \code{Marker}, \code{Allele}, \code{Effect}.}
 
-\item{center_by_freq}{Logical; centre effects by population allele frequency
-before summing.}
+\item{center}{Centring mode applied to the allele effects:
+�\code{"none"}, �\code{"locus_mean"} or �\code{"allele_freq"}. See
+�\code{\link{compute_profile_localgebv}} for what each preserves.}
 
 \item{freq_dt}{Optional pre-computed allele-frequency table (Marker, Allele,
 AlleleFreq). When \code{NULL} (default) it is derived from \code{long_dt}, as
 before. The catalogue engine injects the core's cached table so the
 frequency pass is not repeated per trait; the values are identical because
 the cached table is built from the same long-format data.}
+
+\item{center_by_freq}{Logical; centre effects by population allele frequency
+before summing.}
 }
 \value{
 \code{data.table} with columns \code{Sample}, \code{Haplotype_idx},

@@ -9,7 +9,8 @@ count_block_subtypes(
   blocks = NULL,
   trait = NULL,
   count_by = c("haplotype", "genotype"),
-  center_by_freq = TRUE,
+  center = NULL,
+  center_by_freq = NULL,
   output_file = NULL,
   fill_na = NULL,
   .signatures = NULL
@@ -31,6 +32,10 @@ counts haplotype copies, so a heterozygous carrier contributes to two
 subtypes and \code{sum(Count)} within a block is \code{n_samples * ploidy}.
 \code{"genotype"} counts distinct samples carrying the subtype on at least
 one copy, so a homozygote counts once.}
+
+\item{center}{Centring mode applied to the allele effects:
+�\code{"none"}, �\code{"locus_mean"} or �\code{"allele_freq"}. See
+�\code{\link{compute_profile_localgebv}} for what each preserves.}
 
 \item{center_by_freq}{Passed to \code{\link{compute_block_catalogue}} when
 \code{trait} is given; centres allele effects by population frequency before

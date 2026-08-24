@@ -112,6 +112,109 @@ placeholder-code missing alleles (`HS_FILL_NA_DEFAULT` = `"-"`, overridable with
 `options(haploStack.fill_na = )` or a per-call `fill_na=`) instead of dropping
 them — dropping made distinct allele combinations collide, fixed in 0.5.2.
 
+
+### The missing-allele invariant (0.6.0)
+
+> **Inside a `GenoMeta`, a missing allele is `NA`. Nothing else — regardless of
+> the source encoding.**
+
+Enforced at **one portal**, `new_geno_meta()`, which every route to a container
+passes through: `build_geno_meta()`, `read_plink_ped()`, `read_dart_genotype()`,
+`read_vcf_genotype()` and every internal transform construct there. (The
+readers named after the first bypass `build_geno_meta()` entirely, which is why
+the portal is the constructor and not the builder.) Normalisation runs after the
+encoding is resolved and before anything is returned, so no consumer can observe
+a container that has not been through it.
+
+**The vocabulary, per allele:**
+
+| source format | missing characters |
+|---|---|
+| `nucleotide` | `""`, `"NA"`, `"N"`, `"n"`, `"."`, **`"-"`**, **`"0"`** |
+| `selectiontools` | the same set — `"0"` added in 0.6.0 (a 1/2/3/4-coded file writes it for an absent call) |
+| `numeric` / dosage | the same **minus `"0"`** — there `0` is a real genotype |
+
+Because the rule is per allele, a diploid cell written `"00"`, `"--"`, `"0/0"`
+or `"-/-"` is a missing **genotype** by consequence: the reader splits the cell
+into copies before normalisation sees it. A half-called cell (`"A0"`) keeps its
+observed allele and marks only the absent copy; whether that cell is usable is
+then decided by the NA-any rule above, at consumption.
+
+`use_missing_chars("#", mode = "nucleotide")` registers an extra missing
+character for the session (`missing_chars()` to inspect, `reset_missing_chars()`
+to clear). `mode` is required, one character only, and never a real allele of
+that mode — any digit is refused for `numeric`. A source whose absence code the
+package does not know can also declare it per read: `extra_na = "9"`.
+
+**`metadata$missing_tokens`** records the vocabulary a container was normalised
+against, so it stays self-describing in a later session. Detection
+(`is_geno_meta()`) and repair (`repair_geno_meta()`) take the union of that
+stamp and the current session's set.
+
+**Normalisation is one-way.** Once a container exists, the character the *source
+file* wrote for a missing allele is gone — `NA` is the only representation left.
+`recode_geno_meta(na_as = "-")` can render missing back out as a character of
+your choosing for export, but that is a new rendering, not a recovery: it cannot
+tell you the file said `"0"`. A container carrying a rendered placeholder is
+deliberately outside the invariant, `is_geno_meta()` says so, and
+`repair_geno_meta()` returns it to `NA`.
+
+**Containers saved before 0.6.0** may still hold a source token as an allele.
+`load_geno_meta()` says so and names `repair_geno_meta()`; it never rewrites the
+file. `options(haploStack.strict_missing = TRUE)` turns the warning into an
+error for pipelines that want a hard gate.
+
+### Centring: the two that change the answer, and the one that does not
+
+Local GEBVs are sums of allele effects, and what is subtracted from those
+effects before summing is a choice with three named values
+(`center = "none" | "locus_mean" | "allele_freq"`). They are **different
+operations**, not settings of one. With `e_a` an allele's effect, `p_a` its
+population frequency and `mean_i = sum_a p_a * e_a` the locus mean of marker `i`:
+
+| mode | contribution | allele contrast | block variance | reproduces |
+|---|---|---|---|---|
+| `"none"` | `e_a` | `e_A - e_B` | reference | — |
+| `"locus_mean"` | `e_a - mean_i` | **preserved** | **unchanged** | HapSelect `mean_adjust = TRUE`, value for value |
+| `"allele_freq"` | `e_a * (1 - p_a)` | becomes `q*e_A - p*e_B` | changed (median factor ~3 on barley) | haploStack ≤ 0.5.5 catalogue output |
+
+`locus_mean` subtracts **one** value per marker from every allele at it — a pure
+location shift, so the A-vs-B contrast survives and every block variance is
+identical to the uncentred one. It is also invariant to adding a constant to
+both alleles' effects at a marker, which is the property 0.5.3 wanted when it
+chose frequency centring for the selection path; `allele_freq` does not have it.
+The identity behind the HapSelect agreement is
+
+```
+d*e_A + (ploidy - d)*e_B - ploidy*mean_i  ==  (d - ploidy*p_A) * (e_A - e_B)
+```
+
+whose right-hand side is exactly HapSelect's `(d - mean_d) * beta`.
+
+`allele_freq` centres each allele by **its own** frequency, so the two alleles
+of a marker are weighted differently — a reweighting, not a shift. Block
+variances change and rankings can move with them.
+
+**Which to use.** `"none"` is the default of `run_haplotype_catalogue()` and
+`compute_profile_localgebv()` from 0.6.0 (before that the two disagreed).
+`"locus_mean"` is the one to use for selection and for any cross-package
+comparison. `"allele_freq"` is what reproduces catalogue output published with
+0.5.5 or earlier — name it explicitly in any file that uses it, because the two
+are not comparable and neither is wrong.
+
+**A comparison is only like-for-like when the level matches too.**
+`level = "genotype"` sums over every ploidy copy; `level = "haplotype"` is a
+single copy. Across levels the factor is between `ploidy` and `ploidy^2`, a
+population property that cannot be divided out. A genotype-level figure from
+another package must be compared against `level = "genotype"`.
+
+**`level = "haplotype"` is a slot, not phase.** It reports the genotype matrix's
+copies in the order the reader wrote them. For an unphased source a genotype
+field is unordered by definition, so a heterozygote's alleles are written in one
+fixed order — on the GRDC barley panel every heterozygote is written `AT` and
+none `TA` (7,584,722 vs 0), making slot 1 the A-strand panel-wide. Nothing in
+the package checks this and no warning fires.
+
 ## `sample_info` column spec (positional FAM)
 
 | idx | canonical name | meaning | missing / dummy |
@@ -204,6 +307,7 @@ untouched, because every transform copies the list forward and edits named keys.
 | `n_markers` | ✅ | integer scalar | reader / builder | same as `n_samples` |
 | `source_format` | ✅ | character scalar (free-text provenance label) | reader / builder | — |
 | `encoding` | filled automatically | character scalar | the builder, else `new_geno_meta()` by `detect_genotype_encoding()` | `recode_geno_meta()` |
+| `missing_tokens` | filled automatically (0.6.0+) | character vector | `new_geno_meta()` — the missing-allele vocabulary this container was normalised against | `repair_geno_meta()`; cleared and re-stamped by `recode_geno_meta()` |
 | `family_history` | optional | named list of `data.table(FID, IID, Label)`, one per generation | `attach_family_history()` | replaced by the next `attach_family_history()` |
 | `signal_selection` | optional | list of 4 (`score`, `n`, `n_blocks`, `date`) | `attach_signal_markers()` | replaced by the next `attach_signal_markers()` |
 
@@ -319,10 +423,25 @@ Any other string reaches the field if a caller passes
 
 ### `encoding`
 
+> **0.6.0 — `encoding` is provenance, not an interpreter switch.** It records
+> **which format the data came from**. It is not an instruction consumers read
+> to decide what an allele in `geno_arrays` means, because after the portal
+> there is only one representation of missing left (`NA`) and nothing
+> downstream needs to be encoding-aware to find it. Transforms follow their
+> **own parameter**: `recode_geno_meta()` takes an explicit `from_type` and
+> validates it against the data rather than trusting this field, which is what
+> closed the defect where a container recorded as `"numeric"` had its dosages
+> pushed through the nucleotide dictionary (`1 -> "A"`, `2 -> "C"`,
+> `0 -> NA`). A stale value is now harmless where it used to be silent and
+> wrong.
+
 How allele tokens in `geno_arrays` should be read. Set by the builder when it
 knows; otherwise `new_geno_meta()` fills it from
 `detect_genotype_encoding()` — and if detection *fails*, the assignment is
 `NULL`, so the key is simply **absent** and every consumer re-detects on demand.
+Since 0.6.0 detection classifies on the **calls**, ignoring cells whose every
+allele is a missing token, so a heavily-missing panel is no longer misread
+(a PED full of `"00"` used to classify as `"numeric"`).
 
 Since **0.5.1** there is one vocabulary, `HS_ENCODINGS`
 (`R/format_detect.R`): `"selectiontools"`, `"nucleotide"`, `"allele"`. Note the

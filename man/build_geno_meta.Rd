@@ -13,7 +13,8 @@ build_geno_meta(
   split_char = "/",
   pos_unit = "bp",
   encoding = NULL,
-  source_format = "user_supplied"
+  source_format = "user_supplied",
+  extra_na = NULL
 )
 }
 \arguments{
@@ -49,6 +50,13 @@ attachment.}
 
 \item{source_format}{Label stored in \code{metadata$source_format}.
 Default \code{"user_supplied"}.}
+
+\item{extra_na}{Optional character vector of additional missing
+sentinels this file uses, passed through to the normalisation portal in
+\code{\link{new_geno_meta}}. This is the per-read escape hatch for a source
+whose absence code the package does not know — including a dosage panel
+that writes a digit such as \code{"9"} for missing, which
+\code{\link{use_missing_chars}} deliberately refuses to register globally.}
 }
 \value{
 A valid \code{GenoMeta} list (see \code{\link{new_geno_meta}}).
@@ -88,6 +96,33 @@ be sample IDs and column names must be marker IDs. Orientation is
 
 Marker and sample name intersections are resolved internally with informative
 warnings when names are dropped.
+}
+
+\section{Building from a dosage source}{
+
+A dosage matrix (0/1/2 counts, \code{encoding = "numeric"}) records \emph{how
+many} copies of an allele a sample carries, not \emph{which} copy sits on
+which chromosome. The container built from one therefore carries \strong{no
+strand resolution}: per-slot output from it is not a haplotype, and
+\code{level = "haplotype"} in \code{\link{compute_profile_localgebv}} should
+not be read as one.
+
+Two consequences worth knowing before you build:
+
+\itemize{
+\item A dosage source built at \code{ploidy = 2} produces a second ploidy
+layer that is entirely \code{NA}, so \code{\link{compute_marker_stats}}
+reports \code{Call_rate} 0.5 on every marker and
+\code{\link{detect_genotype_encoding}} fails on the reconstructed allele
+matrix. The local-GEBV path survives it (the absent layer contributes 0
+at genotype level and is dropped at haplotype level), but the container
+is describing half its data as missing. Tracked as INDEX discrepancy 25;
+fixing the shape changes \code{Call_rate} on every dosage panel and is
+scoped separately.
+\item For LD estimation and block definition on a dosage frame, prefer
+\strong{HapSelect}, which works on dosage natively and never claims
+strands, over converting to alleles first.
+}
 }
 
 \examples{

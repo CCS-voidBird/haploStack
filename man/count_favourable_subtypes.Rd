@@ -12,7 +12,8 @@ count_favourable_subtypes(
   min_count = 1,
   top_n = NULL,
   count_by = c("haplotype", "genotype"),
-  center_by_freq = TRUE,
+  center = NULL,
+  center_by_freq = NULL,
   fill_na = NULL,
   output_file = NULL
 )
@@ -46,6 +47,10 @@ the selected subtype's effect (ascending under \code{"min_effect"}). Default
 \item{count_by}{\code{"haplotype"} (default) counts matching copies per
 sample; \code{"genotype"} counts each sample once per target carried. See
 \code{\link{count_subtype_carriage}}.}
+
+\item{center}{Centring mode applied to the allele effects:
+�\code{"none"}, �\code{"locus_mean"} or �\code{"allele_freq"}. See
+�\code{\link{compute_profile_localgebv}} for what each preserves.}
 
 \item{center_by_freq}{Passed to \code{\link{compute_block_catalogue}} when the
 catalogue is computed here. Default \code{TRUE}.}

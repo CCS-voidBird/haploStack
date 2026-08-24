@@ -7,7 +7,7 @@
 .local_gebv_engine(
   core,
   eff,
-  center_by_freq,
+  center = "none",
   level = c("genotype", "haplotype"),
   fill_na = 0,
   keep_blocks = NULL
@@ -18,7 +18,9 @@
 
 \item{eff}{Standardised effect data.table (Marker, Allele, Effect).}
 
-\item{center_by_freq}{Logical; mean-centre by population allele frequency.}
+\item{center}{Centring mode: \code{"none"}, \code{"locus_mean"} or
+\code{"allele_freq"} (see \code{HS_CENTER_MODES}). Already resolved by the
+caller — the engine does not read the deprecated logical.}
 
 \item{level}{\code{"genotype"} or \code{"haplotype"}.}
 

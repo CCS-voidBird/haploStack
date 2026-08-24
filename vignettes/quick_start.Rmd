@@ -40,11 +40,11 @@ no external files required.
 
 ```{r}
 # From GitHub
-remotes::install_github("uq-bioinformatics/haploStack")
+remotes::install_github("CCS-voidBird/haploStack")
 ```
 ```{r}
 # Or from a release source tarball
-install.packages("haploStack_0.5.5.tar.gz", repos = NULL, type = "source")
+install.packages("haploStack_0.6.0.tar.gz", repos = NULL, type = "source")
 ```
 ```{r}
 # Or from a local clone, with devtools
@@ -420,4 +420,4 @@ meta_nuc <- recode_geno_meta(meta, to_type = "nucleotide")
 - **Function reference:** `?geno_meta_views`, `?run_haplotype_catalogue`, etc.
 - **Container spec:** `docs/geno_meta_structure.md`
 - **Version history:** `docs/CHANGELOG.md`
-- **Issues:** https://github.com/uq-bioinformatics/haploStack/issues
+- **Issues:** https://github.com/CCS-voidBird/haploStack/issues

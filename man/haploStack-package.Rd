@@ -11,13 +11,13 @@ A toolkit for haplotype block definition, catalogue construction, and breeding-c
 \seealso{
 Useful links:
 \itemize{
-  \item \url{https://github.com/uq-bioinformatics/haploStack}
-  \item Report bugs at \url{https://github.com/uq-bioinformatics/haploStack/issues}
+  \item \url{https://github.com/CCS-voidBird/haploStack}
+  \item Report bugs at \url{https://github.com/CCS-voidBird/haploStack/issues}
 }
 
 }
 \author{
-\strong{Maintainer}: University of Queensland Bioinformatics \email{ccsconnet@gmail.com}
+\strong{Maintainer}: Chensong Chen \email{chensong.chen@uq.edu.au}
 
 }
 \keyword{internal}

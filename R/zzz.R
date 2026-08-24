@@ -41,6 +41,18 @@
 # the setter validates, so a bad order fails at the call the user can see rather
 # than inside the next figure. Precedence everywhere: per-call argument > this
 # option > the figure's default, matching haploStack.fill_na.
+#
+# haploStack.missing_chars — extra missing-allele characters, registered per
+# source format for the session (list(nucleotide = "#", ...)). Read via
+# .extra_missing_chars() inside .missing_tokens(), so one registration reaches
+# every consumer at once. Deliberately UNSET by default and deliberately not
+# persisted: it is a statement about a file being read, not about the package,
+# and a character that means "absent" in one vocabulary can be a genotype in
+# another. Set it with use_missing_chars(), not options(): the setter validates
+# (single character, never a real allele of that mode), so a bad registration
+# fails at the call the user can see rather than inside the next read. A
+# container normalised while one was active records the vocabulary in
+# metadata$missing_tokens.
 # ---------------------------------------------------------------------------
 .onLoad <- function(libname, pkgname) {
   if (is.null(getOption("haploStack.use_rcpp")))

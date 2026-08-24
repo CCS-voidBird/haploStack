@@ -4,16 +4,408 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com), and the project adheres to
 semantic versioning.
 
+> **Reorganised 2026-07-21 (documentation-management pass, two edits).**
+> *First edit:* a `## [0.4.7]` section was added below for the marker-stats /
+> block-allele-sheet release (previously undocumented here), and the prior single
+> `## [Unreleased]` block was relabelled as development history. *Second edit:*
+> explicit `## [0.4.5]` (2026-07-07) and `## [0.4.6]` (2026-07-13) sections were
+> **reconstructed from evidence** — diffing the archived
+> `ready_to_use/haploStack_0.4.5.tar.gz` and `_0.4.6.tar.gz` builds (source dates,
+> `NAMESPACE` export deltas, and file presence). The two 2026-07-07-dated blocks
+> (encoding/fitness fixes, block-catalogue revision) were confirmed present in the
+> 0.4.5 build and moved under `[0.4.5]`; the 0.4.6 export delta (simulation-data
+> generators + helpers) became `[0.4.6]`. Existing entry **text** was not altered,
+> only regrouped under version headings; remaining older content sits under
+> `## [≤ 0.4.4]`. Boundaries **below 0.4.5 are not recoverable** from the sources,
+> so that block stays coarse. Pre-edit original: verbatim at
+> [`docs/CHANGELOG.md.orig`](CHANGELOG.md.orig); version lineage table in
+> [`docs/project_record/INDEX.md`](project_record/INDEX.md) (Release history) and
+> [`docs/project_record/threads/ready-to-use-workflow.md`](project_record/threads/ready-to-use-workflow.md).
+
+> **Updated 2026-07-22.** Added the `[0.4.9]` alignment-plot-performance section
+> (Rcpp `collapse_genotype_sorted_cpp`), and **reconstructed a `[0.4.8]` section
+> from the tarball diff** (`ready_to_use/haploStack_0.4.7.tar.gz` vs `_0.4.8.tar.gz`):
+> 0.4.8 was shipped without a changelog entry — no export change, an internal
+> catalogue-output column-ordering pass. Pre-consolidation baseline still at
+> [`docs/CHANGELOG.md.orig`](CHANGELOG.md.orig).
+
+> **Updated 2026-07-28.** Added the `[0.4.11]` signal-marker-selection section,
+> and **reconstructed a `[0.4.10]` section from the code** — 0.4.10 was in
+> `DESCRIPTION` but had no changelog entry, thread, or tarball (the newest build
+> is still `ready_to_use/haploStack_0.4.9.tar.gz`). Evidence for the
+> reconstruction is cited inside that section. Pre-consolidation baseline still
+> at [`docs/CHANGELOG.md.orig`](CHANGELOG.md.orig).
+
+> **Updated 2026-07-29.** Added the `[0.5.0]` alignment-chromosome-sub-panels
+> section. Note that 0.5.0 was previously pencilled in for the stacking-simulation
+> rebuild (#013) and the genomicSimulation persistent session (GSPS); those are
+> still in progress and are **re-targeted to 0.5.x** — see INDEX discrepancy 13.
+
+> **Updated 2026-07-29 (second pass).** Added `[0.5.1]` — the encoding-vocabulary
+> unification. It closes two long-standing INDEX discrepancies (12: the broken
+> `@examples` that had been failing `R CMD check` since ≤ 0.4.9; 15: both items).
+
+> **Updated 2026-08-13.** Second documentation-only pass over
+> `docs/geno_meta_structure.md`, re-verifying it against the 0.5.5 source
+> (`[Unreleased]` → *Documentation (2026-08-13)*). Three new boundary findings
+> open as INDEX discrepancy **20**; no code changed and the version stays 0.5.5.
+> The same pass added the source-only `ready_to_use/genoMetaBuild/` deliverable
+> (`[Unreleased]` → *Deliverable (2026-08-13)*), which is verbatim copies of the
+> container-layer sources — again no package code change.
+
+> **Updated 2026-08-17.** Added `[Unreleased]` → *Distribution (2026-08-17)* —
+> the GitHub release assets for 0.5.5 in `ready_to_use/release_v0.5.5/`, the
+> first release to ship a Windows binary beside the portable source tarball.
+> Appended to thread [#026](project_record/threads/026-distribution-build.md).
+> No code changed; the version stays 0.5.5. The dev-tree vs published-repo
+> `DESCRIPTION` identity split found during the build is open as INDEX
+> discrepancy **21**.
+
+> **Updated 2026-08-17 (second pass).** Added `[Unreleased]` → *Metadata
+> (2026-08-17)* — the canonical `DESCRIPTION` identity corrected to match the
+> published repo (author **Chensong Chen**, `chensong.chen@uq.edu.au`,
+> `CCS-voidBird/haploStack`), with `man/haploStack-package.Rd` regenerated. This
+> **closes the identity half of discrepancy 21**. No code changed; the version
+> stays 0.5.5.
+
+> **Updated 2026-08-19.** Added `[Unreleased]` → *Prototype (2026-08-19)* — the
+> **HapSelect bridge** in `dev/hapselect_bridge/`, a GenoMeta entry point for
+> the package that can replace the SelectionTools blocking route. New dev-tree
+> files only; **no package code, no export, no dependency** (HapSelect is
+> deliberately absent from `DESCRIPTION`), version stays 0.5.5. Thread
+> [#028](project_record/threads/028-hapselect-bridge.md); opens INDEX
+> discrepancy **22**.
+
+> **Updated 2026-08-21.** Added `[Unreleased]` → *Analysis (2026-08-21)* — the
+> first **real-panel** exercise of the HapSelect bridge (GRDC barley, 1107 x 9856),
+> which found that the PLINK missing code can capture a marker's trait effect.
+> No package code changed; version stays 0.5.5. Thread
+> [#028](project_record/threads/028-hapselect-bridge.md); opens INDEX
+> discrepancy **23**.
+
+> **Updated 2026-08-21 (second pass).** Raised **MAN** —
+> `dev/PRD_missing_allele_normalisation.md` + its upgrade plan, targeting
+> **0.6.0**: one representation of a missing allele inside a `GenoMeta`.
+> Scoped, not implemented; decisions open as **Q21**. Registered under
+> `[Unreleased]` -> *Proposed*.
+
+> **Updated 2026-08-24.** **MAN and CEN shipped as `[0.6.0]`** — all five MAN
+> stages and the whole CEN track, in one day. The two `[Unreleased]` sections
+> that tracked the work in progress (*Proposed*, 2026-08-21, and *In progress*,
+> 2026-08-24) are struck through and kept as the spec-level and staged records;
+> the release-facing account, with both migration notes, is under `[0.6.0]`.
+> Thread [#029](project_record/threads/029-missing-allele-normalisation.md);
+> tarball `ready_to_use/haploStack_0.6.0.tar.gz`, verified by installing into a
+> throwaway library.
+
 ## [Unreleased]
 
 _The remaining roadmap items (stacking-simulation rebuild #013, genomicSimulation
-persistent session GSPS) are re-targeted to **v0.5.x**. An opening PRD for the
-remaining input formats (allelic DArT, VCF) exists upstream — questions only,
-nothing scoped._
+persistent session GSPS) are re-targeted to **v0.5.x** and tracked in
+[`docs/project_record/INDEX.md`](project_record/INDEX.md). An opening PRD for the
+remaining input formats (allelic DArT, VCF) is at
+`dev/PRD_input_formats_dart_vcf.md` — questions only, nothing scoped._
+
+### ~~In progress (2026-08-24)~~ — **SHIPPED as [0.6.0]** the same day
+
+> Kept as the staged record of how the release was built: stages 1 and 2 landed
+> first, additive and numerically inert, and the inventory below is what they
+> produced. Stages 3-5 and the CEN track followed on the same day — see
+> **[0.6.0]** for the release-facing account, including the migration notes.
+
+#### MAN stages 1-2, additive, no numeric change
+
+First code for **MAN** (`dev/PRD_missing_allele_normalisation.md`, plan stages 1
+and 2). Both stages are additive by design, so **no numeric output moves yet** —
+the behaviour change is stage 3. Version stays **0.5.5**; the bump to 0.6.0 is
+stage 5. Thread [#029](project_record/threads/029-missing-allele-normalisation.md).
+
+**Added**
+
+- `normalise_missing_alleles(arr, source_format, extra_na = NULL)` (internal,
+  `R/format_helper.R`) — **FR1**, the primitive that maps a source format's
+  missing tokens to `NA_character_` and returns the array plus a count of cells
+  changed. The argument is the format being *parsed*, supplied by the caller,
+  not a value read back out of a container (**Q21.d**). Nothing calls it yet.
+- `repair_geno_meta(meta, verbose = TRUE, source_format = NULL)` — **FR5**,
+  **exported**. The migration path for containers already on disk. Explicit and
+  opt-in; it never touches the file. `source_format` overrides the recorded
+  provenance for a container whose `metadata$encoding` is absent or wrong.
+- `options(haploStack.strict_missing = TRUE)` — **FR4/Q21.b**, hidden option
+  that turns the new warning into an error for pipelines wanting a hard gate.
+- `use_missing_chars()`, `missing_chars()`, `reset_missing_chars()` (**FR2b**,
+  all **exported**, `R/alphabet.R`) — see the amendment below.
+- `tests/testthat/test-missing-normalisation.R` — 127 assertions covering **V2**
+  (a dosage source keeps its `0`), **V8** (a `selectiontools` source loses it),
+  **V5**, **V9**, **V10**, **V18-V20** (FR2b), and **`read_plink_ped()`'s first
+  tests ever** (dimensions, ploidy detection, FAM columns, MAP parsing, error
+  paths).
+
+**Changed**
+
+- `.missing_tokens()` gains `"0"` for `selectiontools` — **FR2/Q21.a**. A
+  1/2/3/4-coded PLINK file read as ST wrote `"0"` for a missing call and kept it
+  as a real allele code. `"0"` is still **never** missing for `numeric`/dosage
+  data, where it is a real genotype; the primitive enforces that even against an
+  explicit `extra_na`, because that is the one failure worse than the bug.
+- `is_geno_meta()` now checks one **content** invariant beside the structural
+  ones — a missing allele is `NA` and nothing else (**FR4**). A container
+  carrying a source token stays *valid* (still returns `TRUE`) but warns, naming
+  the token, the affected marker count and `repair_geno_meta()`. The warning
+  carries the condition class `haploStack_missing_token`.
+- `load_geno_meta()` **mentions, never repairs** (**FR6/Q21.c**): loading a
+  pre-0.6.0 container reports what it holds, names `repair_geno_meta()`, and
+  leaves the file on disk byte-identical. Auto-repair would silently change what
+  the user saved.
+
+**Migration inventory** (stage 2 gate) —
+`dev/missing_normalisation_check/inventory.tsv` + `README.md`, produced by
+`inventory_scan.R`. 26 `.rds` files scanned, 12 hold a container, **4 need
+repair** — and the finding is that **the token in the wild is `"-"`, not
+`"0"`**: `GRDC_project/AGG_CV_geno_meta.rds` (1,462,492 cells, 9,759 of 10,128
+markers), `output/geno_meta.rds` and `output/geno_meta_0.5_t0.rds` (1,365,084
+cells, 11,312 of 11,386 markers each), `catalogue_output/geno_meta_0.5_t0.rds`
+(49,780 cells). The four barley/HapSelect containers are clean **because stage
+01's workaround already removes PLINK's `"0"`** — which is the evidence V6 will
+retire. `repair_geno_meta()` handles `"-"` with no source-format argument.
+
+**Amended the same day — FR2b, the missing vocabulary stated and made
+extensible** (PRD decisions **j-n**). Still additive; suite still identical to
+baseline.
+
+- **The default rule is now written down.** For a `nucleotide` source **both**
+  `"0"` (PLINK's code) and `"-"` are missing, and the rule is **per allele** —
+  so a cell written `"00"`, `"--"`, `"0/0"` or `"-/-"` is a missing *genotype*
+  by consequence, while a half-called cell (`"A0"`) keeps its observed allele
+  and marks only the absent copy. Neither token is new; the statement is.
+  Stated in `?normalise_missing_alleles`, `?use_missing_chars` and beside
+  `.missing_tokens()`.
+- **`use_missing_chars(chars, mode)`** (**exported**) registers an extra
+  missing character for the session — `use_missing_chars("#", mode =
+  "nucleotide")` — with `missing_chars()` to inspect the effective set and
+  `reset_missing_chars()` to clear. It is read inside `.missing_tokens()`, so
+  one registration reaches the readers, the `is_geno_meta()` check,
+  `repair_geno_meta()` and the legacy frequency/IBS/clustering paths at once.
+  Named for `use_sample_order()`, the package's existing "validate, then set a
+  global option" precedent; the option is `haploStack.missing_chars`.
+- **`mode` is required, and a registration can never be a real allele of it.**
+  There is no package-wide default because a character that means "absent" in
+  one vocabulary is a genotype in another. Refused: anything longer than one
+  character (missing is decided per allele), blank/whitespace (already missing
+  everywhere), A/C/G/T for `nucleotide`, the codes 1-4 for `selectiontools`, and
+  **any digit** for `numeric` — a dosage panel that genuinely writes `9` for
+  missing declares it on the read (`extra_na = "9"`), where the caller owns the
+  risk. A malformed option cannot change what is missing.
+- **`metadata$missing_tokens`** — a container now records the vocabulary it was
+  normalised against, so it stays self-describing in a session where nothing is
+  registered. Written by `repair_geno_meta()`; the constructors and readers will
+  write it too once they normalise (stage 3). Detection and repair take the
+  **union** of the stamp and the current set — more sensitive is the safe
+  direction for a detector — and the dosage exclusion survives the union.
+
+Gates **V18-V20**; `tests/testthat/test-missing-normalisation.R` is now 127
+assertions.
+
+**Verification.** Full suite green with the skip and warning list **identical to
+the pre-change baseline**; `run_examples()` exit 0. No existing test fixture
+carries a missing token, so the stage-3 no-op claim has a clean starting point.
+
+### Investigation (2026-08-21, no code change)
+
+**Why haploStack and HapSelect report different block effects** —
+[`docs/block_effect_semantics_haploStack_vs_hapselect.md`](block_effect_semantics_haploStack_vs_hapselect.md),
+raised as a follow-up to **Q21.e**. Neither package is wrong, and the recorded
+suspicion (genotype- vs haplotype-based computation) is **not** the cause — both
+figures are genotype-level.
+
+- The ~2.5x gap is **`center_by_freq`**: the catalogue centres by population
+  allele frequency (its default), the HapSelect run did not. Ratio 2.5197 against
+  the centred figure, 0.9807 against the uncentred one.
+- The residual ~2% is the **missing-data policy** (HapSelect mean-imputes,
+  haploStack scores a missing allele as effect 0). Proven rather than argued: on
+  the **737 blocks with no missing data the ratio is 1.000000 exactly**, and
+  across all 7604 blocks it correlates -0.383 with the block's missing rate.
+- Both tables are internally exact against their own definitions (max abs
+  difference 0 and 4.34e-19), so this is a reporting problem — the two published
+  tables were never like-for-like and neither names its setting.
+- **Side finding (upstream, HapSelect):** `Num_Uniq_Hap` counts missing as a
+  haplotype state — `Num_Uniq_Hap == dosage classes + 1 when the block has
+  missing` holds for **6181 of 6181** single-marker blocks, so 4630 biallelic
+  SNPs report four haplotypes. It feeds `Unique_Haplo_Block_Var`, which
+  `select_top_blocks()` can rank on; `Block_Var` is unaffected.
+
+Explicitly **not** a MAN requirement: normalisation makes *what* is missing
+unambiguous, but the *policy* for missing stays a per-function choice on both
+sides.
+
+**Amended the same day** with three additions:
+
+- **Level semantics.** `.assemble_localgebv_wide()` makes `level = "genotype"`
+  the sum over **every ploidy copy** (2 strands diploid, 4 tetraploid) and
+  `level = "haplotype"` a **single strand whatever the ploidy**. Verified:
+  `max |genotype - (hap1 + hap2)| = 0` over 500 blocks x 1107 samples. So
+  HapSelect's `Block_Var` (genotype-level) may only be compared against
+  `level = "genotype"`; across levels the factor is between x ploidy and
+  x ploidy^2, a population property that cannot be divided out.
+- **`mean_adjust` is a location shift, not a mirror of `center_by_freq`.**
+  Both of its branches mean-impute, so they differ by the constant
+  `sum(mean * beta)` — identical `var_haplo_effects` to 12 significant figures,
+  difference sd 1.3e-16. **HapSelect has no setting that reaches
+  `center_by_freq`**, so alignment has exactly one direction:
+  `center_by_freq = FALSE` on the haploStack side. Adopted for the re-run
+  (plan stage 5, V6).
+- **Caveat on unphased input:** the barley PED writes every heterozygote as `AT`
+  and never `TA` (7,584,722 vs 0), so strand 1 is the A-strand panel-wide and
+  `level = "haplotype"` reports field order rather than phase. Nothing in
+  haploStack checks this and no warning fires.
+
+### ~~Proposed (2026-08-21)~~ — MAN + CEN, **shipped as [0.6.0]** on 2026-08-24
+
+> Kept as the spec-level record of what was proposed and why, including the
+> solution selection and the four measured consequences. Everything below was
+> implemented; the release-facing account is under **[0.6.0]**.
+
+**One representation of missing.** `dev/PRD_missing_allele_normalisation.md`
+(plan: `dev/UPGRADE_PLAN_missing_allele_normalisation.md`; decisions: **Q21**)
+proposes that inside a `GenoMeta` a missing allele is **`NA` and nothing else**,
+normalised at construction where the encoding is known, validated by a
+`is_geno_meta()` warning, with an exported `repair_geno_meta()` for containers
+already on disk. Closes INDEX discrepancy **23** and the effect half of **18**.
+
+The container currently permits three representations — `NA`, a reader token
+such as PLINK's `"0"`, and the `fill_na` placeholder `"-"` — and three different
+idioms decide which is which (`na_vals`, `strip_blank`,
+`!is.na & nzchar(trimws())`). Four consequences were measured, not inferred:
+marker effects estimated for the missing code (8751 of 9856 markers mis-coded on
+the barley panel, 34 outright); **catalogue local GEBVs shifted under
+`center_by_freq = TRUE`, the default** (max abs difference 0.318 on a fixture;
+exactly 0 with `center_by_freq = FALSE`, isolating the frequency denominator as
+the mechanism); signature strings labelled `A0A` instead of `A-A`, ignoring
+`options(haploStack.fill_na)`; and a container that reports call rate 0.70 while
+listing `0` as an allele.
+
+**The solution was selected, not assumed.** Patching the four offending call
+sites is rejected as insufficient — it leaves two legal representations of
+missing and does not reach the catalogue filter or the signature layer — and a
+central read seam is rejected because `geno_arrays` is documented public, so
+user code reading it directly would still see the token. Normalisation must be
+**encoding-aware**, because `0` is missing for nucleotide but a **real genotype**
+for a dosage container, which is what fixes its home at the constructor and the
+readers. **0.6.0 rather than 0.5.6** because published marker effects and
+default-setting catalogue GEBVs change; LD, blocks, MAF, call rate and
+`center_by_freq = FALSE` GEBVs are verified unchanged.
+
+**Second workstream in the same release — centring semantics (CEN).** Decisions:
+**Q22**; same PRD, *Second workstream*. haploStack's only centring
+(`center_by_freq = TRUE`, the catalogue default) weights each allele by **its
+own** frequency, which moves the A-vs-B contrast from `e_A - e_B` to
+`q*e_A - p*e_B` and changes block variance — median factor **3.03** on the barley
+panel. HapSelect's `mean_adjust` is the other kind, a pure location shift that
+cannot change variance at all, so neither package could reach the other's
+setting.
+
+- **The catalogue's centring default flips to `"none"`**, matching
+  `compute_profile_localgebv()`, which already defaulted that way. **Changes
+  published catalogue block variances**; `center = "allele_freq"` reproduces the
+  old numbers.
+- **A new `center = "locus_mean"` mode**: every allele at a locus is centred by
+  the *shared* locus mean `sum_a AlleleFreq(a) * Effect(a)`. It preserves the
+  allele contrast, leaves block variance identical to uncentred (a per-block
+  constant `ploidy * sum_i mean_i`), and reproduces HapSelect's
+  `mean_adjust = TRUE` **value for value** — verified **6.94e-18** max absolute
+  difference across 300 barley blocks, variance difference **2.71e-20**. It is
+  also invariant to adding a constant to both alleles' effects, which is the
+  property 0.5.3 wanted from `center_by_freq` and did not get.
+- `center_by_freq` is retained as a deprecated logical
+  (`TRUE -> "allele_freq"`, `FALSE -> "none"`).
+- **Statements, not behaviour changes:** `level = "haplotype"` is a slot
+  assignment in reader order, not phase — correct behaviour for an unordered
+  genotype matrix, now to be documented (INDEX discrepancy 24 **demoted** to a
+  docs requirement). Dosage sources get told they carry no strand resolution, and
+  pointed at HapSelect for LD/blocking.
+- **Found while scoping that:** INDEX discrepancy **25** — a dosage container is
+  built ploidy-2 with an entirely `NA` second layer, so `compute_marker_stats()`
+  reports `Call_rate` **0.5** on every marker and `detect_genotype_encoding()`
+  errors on the collapsed matrix. Documented, **not** fixed in 0.6.0: the fix
+  changes `Call_rate` on every dosage panel and needs its own spec.
+
+### Analysis (2026-08-21, no code change)
+
+**GRDC barley run — the HapSelect bridge on a real panel.** Story:
+[`docs/stories/2026-08-21_barley_hapselect_run.md`](stories/2026-08-21_barley_hapselect_run.md);
+thread [#028](project_record/threads/028-hapselect-bridge.md). Pipeline and
+outputs live outside the package, in `analysis/barley_hapselect/`, and are
+delivered to `GRDC_project/hapSelect_/`.
+
+- The bridge carried 1107 samples x 9856 markers x 2 through
+  `HapSelect::pairwise_ld()` (7,180,212 within-chromosome pairs, 13.9 min on 15
+  workers), `def_blocks()` and back into the container. The catalogue then ran
+  **unchanged** on HapSelect-defined blocks — the claim #028 was built to test,
+  now demonstrated on real data rather than a simulated panel.
+- **Found: the missing code can capture a marker's trait effect** — INDEX
+  discrepancy **23**, documented not fixed. `.gp_allele_dosage()`
+  (`R/genomic_prediction.R:83`) counts alleles without the missing-token set that
+  `compute_marker_stats()` passes (`R/marker_stats.R:231`), so PLINK's `"0"` ranks
+  as an allele. On this panel it warned for **8751 of 9856** markers and put the
+  estimated effect on `Allele == "0"` for **34** of them. `.meta_to_dosage_matrix()`
+  has the same gap (`R/format_helper.R:2143`). NA-ing the missing code at build
+  time removes the warning and moves every effect onto a real allele, leaving LD
+  and blocks bit-identical. The reach is **panel-wide, not just those 34**: the
+  run fits the same rrBLUP model through both packages and compares them, and
+  cross-package effect agreement goes from **r = 0.936 / 0.928 before the fix to
+  r = 1.000000000000000 after** (max |diff| ~1e-9) — so every one of the 8751
+  warned markers carried a slightly wrong effect.
+- Two `hapselect_blocks_to_meta(preserve_fields = TRUE)` restorations fired on the
+  real container (`phenotype`, `sample_info`), confirming discrepancy 20 bites in
+  practice and that the bridge's guard is load-bearing rather than defensive.
+
+### Prototype (2026-08-19, no code change)
+
+**HapSelect bridge — a GenoMeta entry point for the SelectionTools
+replacement.** Story:
+[`docs/stories/2026-08-19_hapselect_bridge.md`](stories/2026-08-19_hapselect_bridge.md);
+thread [#028](project_record/threads/028-hapselect-bridge.md).
+
+- `dev/hapselect_bridge/hapselect_bridge.R` — **new**, converts between the
+  GenoMeta container and [HapSelect](https://github.com/wrshf7/HapSelect) 0.1.0
+  (LD → haploblocks → localGEBV → GA parent selection). Every function is
+  prefixed `hapselect_`; `hapselect_inputs(meta, trait)` is the entry point and
+  `hapselect_blocks_to_meta()` the return path. The join is HapSelect's **first**
+  stage: it needs a dosage frame + map, haploStack needs back the
+  `(Chrom, Marker, Block)` table `attach_block_info()` already takes — the same
+  shape `define_haplotype_blocks()` returns — so **nothing downstream of
+  `attach_block_info()` changes**, which is what makes it a drop-in for the
+  SelectionTools route (roadmap #002, never installable here).
+- The conversion that matters: haploStack effects are **per allele**, HapSelect
+  effects are **per marker on a dosage scale**, so the bridge emits the **allele
+  substitution effect** `eff(counted) − eff(other)`. The two models then differ
+  by a per-block constant only — block variances and sample spread, which is
+  everything selection reads, are identical. Verified rather than asserted:
+  difference-sd ≤ 3.22e-16, per-block correlation 1.000000000000, block-variance
+  difference ≤ 4.44e-16 over 49 blocks × 60 samples.
+- `dev/hapselect_bridge/run_hapselect_bridge_demo.R` — **new**, 22 checks over
+  the whole route on a **simulated** founder-haplotype panel (a local simulator
+  was needed: `sim_geno_matrix()` draws alleles independently, so a
+  `sim_dataset()` container has no LD and `def_blocks()` returns only
+  singletons). **22/22 pass**, including `run_haplotype_catalogue()` running
+  unchanged on HapSelect-defined blocks. Exits non-zero on failure.
+- **No package code changed.** Nothing in `R/`, `NAMESPACE`, `DESCRIPTION` or
+  any existing file; **HapSelect is deliberately not a declared dependency** (not
+  Imports, not Suggests) — the bridge is `source()`d and guards itself with
+  `hapselect_require()`. Promotion to `R/` would mean adding it to `Suggests`.
+- Two findings, both **documented not fixed** — INDEX discrepancy **22** for the
+  first, discrepancy 20 for the second: `compute_marker_stats()` reports the
+  **same allele as `Major` and `Minor` at exactly MAF 0.5** (`which.max` and
+  `which.min` both take the first tied index), which silently zeroes a
+  substitution effect — 3 markers in 90 here, dropping cross-package correlation
+  to 0.956 before the bridge stopped relying on it; and `attach_block_info()`
+  dropping `marker_effects`/`phenotype`, which the bridge restores by default.
 
 ### Documentation (2026-07-29, no code change)
 
-Maintenance pass. The four findings below are documented, not fixed.
+Maintenance pass — story:
+[`docs/stories/2026-07-29_geno_meta_metadata_doc.md`](stories/2026-07-29_geno_meta_metadata_doc.md);
+the four findings below are open as INDEX discrepancy **16**.
 
 - `docs/geno_meta_structure.md` — new **`metadata` keys** section documenting
   every key the container can carry (`ploidy`, `char_dict`, `n_samples`,
@@ -42,8 +434,9 @@ Maintenance pass. The four findings below are documented, not fixed.
 
 Second maintenance pass over the container manual, re-verifying
 `docs/geno_meta_structure.md` against the **0.5.5** source (it was last checked at
-0.5.1, before four releases of new field consumers). The three findings below are
-documented, not fixed.
+0.5.1, before four releases of new field consumers). Story:
+[`docs/stories/2026-08-13_geno_meta_carryover_doc.md`](stories/2026-08-13_geno_meta_carryover_doc.md);
+the three findings below are open as INDEX discrepancy **20**.
 
 - `docs/geno_meta_structure.md` — new **"What each transform carries forward"**
   section: a per-transform matrix of which optional fields (`sample_info`,
@@ -124,7 +517,247 @@ installed. No package code changed — the fork's `R/` files are verbatim copies
 - Verified on **R 4.4.3 and R 4.2.0**, identical on both: **109** functions
   defined, `codetools::checkUsageEnv()` clean apart from the three now-unreachable
   Rcpp kernel names, all 13 copied files byte-identical (SHA-256) to their
-  parents, and the guide knits end to end.
+  parents, and the guide knits end to end. Recorded in thread
+  [RTU](project_record/threads/ready-to-use-workflow.md) (caution 6);
+  `ready_to_use/README.md` points at it.
+
+### Distribution (2026-08-17) — GitHub release assets for 0.5.5
+
+The first **tagged GitHub release** of the package, cut from the published repo
+`CCS-voidBird/haploStack` (main @ `0073898`). No package code changed and the
+version stays **0.5.5** — this is a packaging event, recorded in thread
+[#026](project_record/threads/026-distribution-build.md).
+
+- **`ready_to_use/release_v0.5.5/`** (new folder) — `haploStack_0.5.5.tar.gz`
+  (423 KB, 249 files, portable source), `haploStack_0.5.5.zip` (1.47 MB, Windows
+  binary for R 4.4.x x86_64) and `RELEASE_NOTES.md` (the release description,
+  with SHA-256 sums for both assets).
+- **A Windows binary is now shipped for the first time**, alongside — never
+  instead of — the source tarball. It exists so Windows users without Rtools can
+  install; the source tarball remains the portable, all-platform artefact and the
+  standing convention. The binary was built **from the tarball**
+  (`R CMD INSTALL --build`), so the two assets are provably the same code.
+- The flat lineage archive `ready_to_use/haploStack_*.tar.gz` is **untouched** —
+  the 2026-07-31 `haploStack_0.5.5.tar.gz` built from the dev tree is still there
+  as the record's evidence baseline. The new tarball is a **different build of
+  the same code**: it carries the published repo's `DESCRIPTION` identity
+  (Chensong Chen, `CCS-voidBird/haploStack`), its GitHub `README.md` and its
+  `quick_start.Rmd`, which is why it does not overwrite that slot. This
+  identity split between the dev tree and the published repo is open as INDEX
+  discrepancy **21**.
+- Verified as a recipient would: the binary was installed into a throwaway
+  library and the package's **own test suite run against the installed build** —
+  **1641 pass, 0 fail, 0 error**, 12 skips (optional deps absent: `vcfR`,
+  `future.apply`, and two guards that skip *because* `circlize` /
+  `genomicSimulation` are present). All six Rcpp kernels register.
+- Still open from #026 and unchanged: no Linux/macOS install has been observed,
+  and `devtools::check()` remains un-run (0.5.2–0.5.5) for want of pandoc.
+
+### Metadata (2026-08-17) — canonical package identity corrected
+
+The dev tree's `DESCRIPTION` named the author as
+`person("University of Queensland", "Bioinformatics", …)` with a personal Gmail
+maintainer address, and pointed `URL` / `BugReports` at
+`github.com/uq-bioinformatics/haploStack` — an org that was never confirmed to
+exist and does **not** host the package. It is now the same identity the
+published repo ships:
+
+| Field | Was | Now |
+|---|---|---|
+| `Authors@R` | University of Queensland Bioinformatics | **Chensong Chen** |
+| maintainer email | `ccsconnet@gmail.com` | **`chensong.chen@uq.edu.au`** |
+| `URL` | `uq-bioinformatics/haploStack` | **`CCS-voidBird/haploStack`** |
+| `BugReports` | `uq-bioinformatics/haploStack/issues` | **`CCS-voidBird/haploStack/issues`** |
+
+- `man/haploStack-package.Rd` regenerated (`devtools::document()`, roxygen2
+  7.3.3 — matching `RoxygenNote`). **It was the only `.Rd` of 150 to change** and
+  `NAMESPACE` is byte-identical, so the regeneration introduced nothing else.
+  `Authors@R` re-parses and derives `Author: Chensong Chen [aut, cre]` /
+  `Maintainer: Chensong Chen <chensong.chen@uq.edu.au>`, matching the published
+  copy exactly.
+- **No code, tests, exports or `Version` changed** — the version stays **0.5.5**,
+  and the 2026-08-17 release assets need no rebuild: they were cut from the
+  published clone, which already carried this identity. This is the dev tree
+  catching up to them.
+- Closes the identity half of INDEX discrepancy **21** and settles the
+  personal-Gmail item left open under `dev/questions_sheet.md` **Q20.f**. Still
+  open there: whether `BugReports` should name `/issues` at all (Q20.f.1 decided
+  Issues stay **off**, so that URL may not resolve), the `LICENSE` two-line stub
+  form, and the missing `CITATION.cff`. `LICENSE` is untouched — its copyright
+  holder is still "University of Queensland", which is a rights statement, not an
+  authorship one, and it already matches the published copy byte for byte.
+
+## [0.6.0] - 2026-08-24 — One representation of missing, one centring vocabulary
+
+Two workstreams, one release, for the same reason: both change numeric output
+that has already been published, and both were found by the same investigation
+(`docs/block_effect_semantics_haploStack_vs_hapselect.md`). Spec:
+`dev/PRD_missing_allele_normalisation.md`; plan:
+`dev/UPGRADE_PLAN_missing_allele_normalisation.md`; thread
+[#029](project_record/threads/029-missing-allele-normalisation.md).
+
+### ⚠ Migration — MAN: a missing allele is `NA`, and normalisation is one-way
+
+> **Inside a `GenoMeta`, a missing allele is `NA`. Nothing else — regardless of
+> the source encoding.**
+
+Enforced at **one portal**, `new_geno_meta()`. That is a property of the call
+graph rather than a convention: `read_plink_ped()`, `read_dart_genotype()` and
+`read_vcf_genotype()` all bypass `build_geno_meta()` and construct directly, so
+the constructor is the only function every route passes through. Normalisation
+runs after the encoding is resolved and before anything is returned.
+
+**What changes for you.** On any panel with missing calls, read through any
+reader:
+
+- **marker effects move** — the missing code no longer ranks as an allele, so
+  `fit_genomic_prediction()` stops estimating an effect for missingness (on the
+  barley panel that warning fired for 8751 of 9856 markers, and 34 had their
+  effect keyed to `Allele == "0"`);
+- **local GEBVs at `center_by_freq = TRUE` move** — a retained token inflated
+  `MarkerTotal` and deflated every real allele's frequency;
+- **block signatures move**, `A0A` → `A-A`, and now respond to
+  `options(haploStack.fill_na)`.
+
+**Unchanged, and verified so on a paired fixture:** MAF, `Major`/`Minor`, call
+rate, block definitions, and local GEBVs at `center = "none"`. A dosage
+(`"numeric"`) container is untouched — `0` is a real genotype there and the
+token map never carries it.
+
+**Containers saved before 0.6.0** may still hold a source token.
+`load_geno_meta()` says so and names `repair_geno_meta()`; it never rewrites
+your file. `is_geno_meta()` warns (the container stays *valid*), and
+`options(haploStack.strict_missing = TRUE)` turns that into an error.
+
+```r
+meta <- load_geno_meta("panel.rds")   # warns if it predates 0.6.0
+meta <- repair_geno_meta(meta)
+save_geno_meta(meta, "panel.rds")     # your call, not the loader's
+```
+
+**Normalisation is one-way.** Once a container exists, the character the source
+file wrote for a missing allele is gone. `recode_geno_meta(na_as = "-")` renders
+missing back out for export, but that is a new rendering, not a recovery.
+
+### ⚠ Migration — CEN: `run_haplotype_catalogue()` no longer centres by default
+
+`center_by_freq = TRUE` was its default and `compute_profile_localgebv()`
+already defaulted to no centring, so the two entry points to the same engine
+disagreed about what the default answer was. They now agree, at
+`center = "none"`.
+
+**This changes published catalogue block variances** — median factor ~3 on the
+barley panel, 3.9 (range 1.8–8.8) on the release fixture
+(`dev/missing_normalisation_check/cen_parity.tsv`).
+**`center = "allele_freq"` reproduces the 0.5.5 numbers exactly.**
+
+### Added
+
+- **`use_missing_chars(chars, mode)`**, `missing_chars()`,
+  `reset_missing_chars()` — register an extra missing character for the session
+  when a panel marks absent calls with something the package does not know
+  (`use_missing_chars("#", mode = "nucleotide")`). Read inside
+  `.missing_tokens()`, so one registration reaches the readers, the
+  `is_geno_meta()` check, `repair_geno_meta()` and the frequency/IBS/clustering
+  paths at once. `mode` is required; one character only; never a real allele of
+  that mode (A/C/G/T; the codes 1–4; **any digit** for `numeric`). Option:
+  `haploStack.missing_chars`.
+- **`repair_geno_meta(meta, verbose, source_format)`** — the migration path for
+  containers already on disk.
+- **`center = c("none", "locus_mean", "allele_freq")`** on
+  `compute_profile_localgebv()`, `compute_block_catalogue()`,
+  `run_haplotype_catalogue()`, `count_block_subtypes()`,
+  `count_favourable_subtypes()`, `count_favourable_blocks()`,
+  `analyze_block_catalogue()` and `predict_gebv()`.
+  **`"locus_mean"` is new**: every allele at a locus is centred by the *shared*
+  locus mean `sum_a p_a * e_a`. It preserves the allele contrast, leaves block
+  variance identical to uncentred, is invariant to adding a constant to both
+  alleles' effects, and reproduces HapSelect's `mean_adjust = TRUE`
+  **value for value** — the identity
+  `d*e_A + (ploidy-d)*e_B - ploidy*mean_i == (d - ploidy*p_A)*(e_A - e_B)`,
+  checked to 1e-12 in `test-centring-modes.R`. It is the mode to use for
+  selection and for any cross-package comparison.
+- `metadata$missing_tokens` — the vocabulary a container was normalised
+  against, so it stays self-describing in a later session. Detection and repair
+  take the union of it and the session's set.
+- `extra_na=` on `build_geno_meta()`, `read_genotype()`, `read_st_genotype()`,
+  `read_gs_genotype()` and `new_geno_meta()` — the per-read escape hatch for a
+  source whose absence code is not in the vocabulary, including a dosage panel
+  that writes a digit for missing.
+- `normalise_missing_alleles()` (internal) — the primitive.
+- `tests/testthat/test-missing-normalisation.R` (165 assertions, V1–V5, V8–V10,
+  V18–V20, and **`read_plink_ped()`'s first tests ever**) and
+  `tests/testthat/test-centring-modes.R` (22, V12–V16 + C2).
+
+### Changed
+
+- `.missing_tokens()` gains `"0"` for `selectiontools` — a 1/2/3/4-coded file
+  writes it for an absent call, never as a real allele code. Never for
+  `numeric`.
+- **`detect_genotype_encoding()` classifies on the calls, not the absences.**
+  Cells whose every allele is a missing token are set aside before the
+  vocabulary is decided. This fixes a latent misdetection: a heavily-missing PED
+  used to read as `"numeric"`, and `read_plink_ped()` now declares its format
+  outright so a 1/2-coded PED cannot be taken for dosage (which would have kept
+  its `"0"` as a genotype).
+- **`recode_geno_meta()` declares both ends.** New `from_type` defaults to the
+  recorded provenance but is **validated against the data** rather than trusted,
+  and a dosage source with an allele target is refused. This closes the defect
+  where a container recorded as `"numeric"` had its dosages pushed through the
+  nucleotide dictionary to `1 -> "A"`, `2 -> "C"`, `0 -> NA` with no warning
+  (discrepancy 16, item 4). New `na_as` renders missing back out for export.
+- **`metadata$encoding` is provenance, not an interpreter switch** — a record of
+  the source format, not an instruction consumers read to decide what an allele
+  means. A stale value is now harmless where it used to be silently wrong.
+- `center_by_freq` is **deprecated** (one release) with a one-time message;
+  `TRUE` → `"allele_freq"`, `FALSE` → `"none"`. Supplying both it and `center`
+  is an error. Every existing call keeps working and keeps its numbers.
+- Defence-in-depth (no-ops on any 0.6.0 container, correctness on a legacy one):
+  `.gp_allele_dosage()` and `.meta_to_dosage_matrix()` pass the token set, and
+  `.catalogue_core()`'s filter uses the shared set instead of a third
+  `nzchar(trimws())` idiom. The three disagreeing missing-detection idioms are
+  now one.
+
+### Fixed
+
+- INDEX discrepancy **23** (the missing code capturing a marker's trait effect)
+  and the effect half of **18**; item 4 of **16** via `recode_geno_meta()`.
+
+### Distribution
+
+- `ready_to_use/haploStack_0.6.0.tar.gz` — portable source, 468 KB, no `.o` or
+  `.dll`; verified by installing into a throwaway library (kernels live, 127
+  exports, the portal and all three centring modes exercised from the installed
+  copy).
+- **The GitHub mirror `ready_to_use/haploStack/` is synced to 0.6.0.** It is an
+  extracted release tarball plus a curated `docs/` and its own README, so it was
+  re-seeded from the tarball: package content is byte-identical to what shipped.
+  `docs/CHANGELOG.md` and `docs/geno_meta_structure.md` refreshed, the new I/O
+  sheet added, and the README given an upgrade warning naming both migration
+  settings. `.git`, `.gitignore`, `.gitattributes` and the mirror's own
+  `.Rbuildignore` untouched. **Not committed or pushed.**
+- `docs/haploStack_io_reference_0.6.0.md` — the per-release I/O sheet: what a
+  missing allele is under each source mode, the new registry and repair path,
+  why normalisation is one-way, what each centring mode preserves, and a
+  migration checklist.
+
+### Verification
+
+- Full suite green with the skip and warning lists **identical to the
+  pre-change baseline** at every stage; `run_examples()` exit 0.
+- **Stage-3 parity table** (`dev/missing_normalisation_check/parity/`): on
+  paired token/NA/dosage fixtures, every output the plan says must move did, and
+  every output that must not did not — including `center = "none"` GEBVs, MAF
+  and block definitions byte-identical, and a dosage container untouched
+  throughout. Stage 4's four edits are byte-identical no-ops on top of stage 3.
+- **V6 on the real GRDC barley panel** (1107 × 9856, 198,375 missing cells):
+  with the stage-01 workaround **removed**, the container built from the raw PED
+  is byte-identical to the workaround build *and* to the stored 2026-08-21
+  container; 396,750 NA alleles, no token surviving
+  (`dev/missing_normalisation_check/v6_barley_workaround.R`). The workaround has
+  been deleted from `analysis/barley_hapselect/scripts/01_build_geno_meta.R`.
+  **Not run here:** V6's cross-package half (LD, 7604 blocks, effect agreement
+  r = 1.0) — HapSelect is not installed on this machine.
 
 ## [0.5.5] - 2026-07-31 — One row order for every figure
 
@@ -948,6 +1581,7 @@ I/O guide: [`docs/haploStack_io_reference_0.4.7.md`](haploStack_io_reference_0.4
 > These features carry no dated entry above but are **present in the 0.4.5
 > tarball**; their exact introduction version (0.4.5 or an earlier 0.4.x) is not
 > recoverable, so they are recorded against the earliest build that proves them.
+> See `docs/project_record/threads/016-rcpp-optimization.md` and `017-stacking-metrics.md`.
 
 - **Rcpp round 2 kernels** (`src/format_cells.cpp`, `src/marker_stats.cpp`):
   `split_genotype_cpp()` / `combine_haplotype_cpp()` (per-cell genotype split /

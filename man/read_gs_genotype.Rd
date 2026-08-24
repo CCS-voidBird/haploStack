@@ -4,7 +4,13 @@
 \alias{read_gs_genotype}
 \title{Read a genomicSimulation genotype file into a GenoMeta object}
 \usage{
-read_gs_genotype(file, map_file = NULL, block_file = NULL, pos_unit = "bp")
+read_gs_genotype(
+  file,
+  map_file = NULL,
+  block_file = NULL,
+  pos_unit = "bp",
+  extra_na = NULL
+)
 }
 \arguments{
 \item{file}{Path to the genomicSimulation genotype file.}
@@ -14,6 +20,9 @@ read_gs_genotype(file, map_file = NULL, block_file = NULL, pos_unit = "bp")
 \item{block_file}{Optional path to a block coordinate or block-marker file.}
 
 \item{pos_unit}{Position unit: \code{"bp"} (default) or \code{"mbp"}.}
+
+\item{extra_na}{Optional character vector of additional missing sentinels
+this file uses (see �\code{\link{build_geno_meta}}).}
 }
 \value{
 A valid \code{GenoMeta} list.

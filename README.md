@@ -5,6 +5,27 @@
 Developed for the GRDC Barley Phase 2 project at the University of Queensland.
 Generalised for use with any biparental or multiparental diploid breeding programme.
 
+> ### ⚠ 0.6.0 changes numbers — read this before upgrading a running analysis
+>
+> Two contracts changed, and both move output you may already have published.
+>
+> **A missing allele is now `NA`, and nothing else.** Every reader normalises the
+> source file's missing code (PLINK's `"0"`, `"N"`, `"."`, `"-"`) on the way in,
+> at a single portal. On a panel with missing calls this moves **marker effects**,
+> **frequency-centred local GEBVs** and **block signatures** — because the missing
+> code could previously rank as a real allele and take a marker's effect. MAF,
+> call rate, block definitions, LD, uncentred GEBVs and dosage containers are
+> unchanged. A container saved by an earlier version still loads; it warns and
+> names `repair_geno_meta()`, and your file is never rewritten for you.
+>
+> **`center_by_freq` is replaced by `center`**, with three named modes, and
+> `run_haplotype_catalogue()` no longer centres by default. This **changes
+> published catalogue block variances**. `center = "allele_freq"` reproduces the
+> old numbers exactly; the deprecated logical still works for one release.
+>
+> Full detail, with a migration checklist:
+> [`docs/haploStack_io_reference_0.6.0.md`](docs/haploStack_io_reference_0.6.0.md).
+
 ---
 
 ## Quick Start
@@ -13,13 +34,13 @@ Generalised for use with any biparental or multiparental diploid breeding progra
 
 ```r
 # From GitHub
-remotes::install_github("uq-bioinformatics/haploStack")
+remotes::install_github("CCS-voidBird/haploStack")
 
 # From a local clone of this repository
 devtools::install("path/to/haploStack")
 
 # From a release source tarball
-install.packages("haploStack_0.5.5.tar.gz", repos = NULL, type = "source")
+install.packages("haploStack_0.6.0.tar.gz", repos = NULL, type = "source")
 
 library(haploStack)
 ```
@@ -133,7 +154,8 @@ haploStack/
 └── docs/
     ├── CHANGELOG.md             Version history
     ├── geno_meta_structure.md   GenoMeta container reference
-    └── haploStack_io_reference_0.5.5.md   I/O contract for the current release
+    ├── haploStack_io_reference_0.6.0.md   I/O contract for the current release
+    └── haploStack_io_reference_0.5.5.md   (and earlier releases)
 ```
 
 ---
@@ -229,8 +251,11 @@ testthat::test_file("tests/testthat/test-catalogue.R")
 - [`docs/CHANGELOG.md`](docs/CHANGELOG.md) — version history and release notes
 - [`docs/geno_meta_structure.md`](docs/geno_meta_structure.md) — full `GenoMeta`
   element / provenance reference
+- [`docs/haploStack_io_reference_0.6.0.md`](docs/haploStack_io_reference_0.6.0.md) —
+  I/O contract for the current release: what a missing allele is, and what each
+  centring mode preserves
 - [`docs/haploStack_io_reference_0.5.5.md`](docs/haploStack_io_reference_0.5.5.md) —
-  I/O contract for the current release
+  and the sheets for earlier releases beside it
 - `vignettes/` — worked examples; start with `quick_start.Rmd`
 
 ---

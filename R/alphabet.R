@@ -222,3 +222,222 @@ make_allele_color_map <- function(allele_values, encoding) {
   }
   cm
 }
+
+
+# ---------------------------------------------------------------------------
+# Missing-allele vocabulary (MAN, 0.6.0)
+# ---------------------------------------------------------------------------
+
+# The three source-allele vocabularies a missing character can be registered
+# against. These are source *formats* (what a file's alleles mean), which is the
+# same vocabulary normalise_missing_alleles() takes — not the container's
+# provenance record. "allele" is accepted as an alias of "numeric" because
+# .detect_minor_alleles() uses it for dosage (the split is DVF Q3, still open).
+HS_MISSING_MODES <- c("nucleotide", "selectiontools", "numeric")
+
+# Characters that are REAL alleles in a mode and can therefore never be
+# registered as missing there. The numeric row is the load-bearing one: 0/1/2
+# are genotypes, not absences. Digits 5-9 are barred there too — a dosage panel
+# that genuinely writes 9 for missing should declare it per read
+# (`extra_na = "9"`), where the caller owns the risk, rather than package-wide.
+.hs_reserved_alleles <- function(mode) {
+  switch(mode,
+    nucleotide     = c("A", "C", "G", "T", "a", "c", "g", "t"),
+    selectiontools = as.character(unlist(DEFAULT_ENCODING_DICT)),
+    numeric        = as.character(0:9),
+    character(0L))
+}
+
+.hs_missing_mode <- function(mode, caller) {
+  if (missing(mode) || is.null(mode))
+    stop(caller, ": 'mode' is required — name the source format the character ",
+         "belongs to: ", paste0('"', HS_MISSING_MODES, '"', collapse = ", "),
+         ". A missing character is only ever missing for the format that ",
+         "writes it; \"0\" is an absence in a PED and a genotype in a dosage ",
+         "matrix.", call. = FALSE)
+  if (!is.character(mode) || length(mode) != 1L || is.na(mode))
+    stop(caller, ": 'mode' must be a single non-NA string.", call. = FALSE)
+  if (identical(mode, "allele")) mode <- "numeric"     # dosage alias
+  if (!mode %in% HS_MISSING_MODES)
+    stop(caller, ': unknown mode "', mode, '". Use one of ',
+         paste0('"', HS_MISSING_MODES, '"', collapse = ", "), ".", call. = FALSE)
+  mode
+}
+
+# Read the session registry for one mode. Returns character(0) when nothing is
+# attached, when the mode is NULL/unknown, or when the option holds something
+# unexpected — a malformed option must not be able to change what is missing.
+# @keywords internal
+.extra_missing_chars <- function(mode) {
+  if (is.null(mode) || !is.character(mode) || length(mode) != 1L || is.na(mode))
+    return(character(0L))
+  if (identical(mode, "allele")) mode <- "numeric"
+  reg <- getOption("haploStack.missing_chars")
+  if (!is.list(reg) || is.null(reg[[mode]])) return(character(0L))
+  x <- reg[[mode]]
+  if (!is.character(x)) return(character(0L))
+  unique(x[!is.na(x) & nchar(x) == 1L])
+}
+
+
+#' Register an extra missing-allele character for a source format
+#'
+#' Attaches one or more characters to the package's missing-allele vocabulary
+#' for the duration of the session, so a panel that marks absent calls with a
+#' character haploStack does not know about — \code{"#"}, \code{"?"}, \code{"*"}
+#' — is read as missing rather than as a fifth allele.
+#'
+#' @section The default vocabulary:
+#' Missing is decided \strong{per allele}, and the defaults are:
+#'
+#' \tabular{lll}{
+#'   \strong{mode} \tab \strong{missing characters} \tab \strong{notes} \cr
+#'   \code{"nucleotide"} \tab \code{"" "NA" "N" "n" "." "-" "0"} \tab
+#'     \strong{both} \code{"0"} (PLINK's code) and \code{"-"} \cr
+#'   \code{"selectiontools"} \tab \code{"" "NA" "N" "n" "." "-" "0"} \tab
+#'     \code{"0"} since 0.6.0 — a 1/2/3/4 file writes it for an absent call \cr
+#'   \code{"numeric"} \tab \code{"" "NA" "N" "n" "." "-"} \tab
+#'     \strong{never} \code{"0"} — that is a real genotype
+#' }
+#'
+#' Because the rule is per allele, a diploid genotype cell written \code{"00"}
+#' or \code{"--"} is a missing \emph{genotype}: both copies normalise to
+#' \code{NA}. A half-called cell (\code{"A0"}, \code{"A-"}) keeps its observed
+#' allele and marks only the absent copy — the observed \code{A} still counts
+#' toward frequencies, and the NA-any policy at consumption
+#' (\code{\link{count_block_subtypes}}) is what decides whether the cell is
+#' usable.
+#'
+#' @section What is refused:
+#' A registered character must be a \strong{single} character, and must not be a
+#' real allele of that mode: A/C/G/T for \code{"nucleotide"}, the codes 1-4 for
+#' \code{"selectiontools"}, and \strong{any digit} for \code{"numeric"}. A
+#' dosage panel that really does write \code{9} for missing should declare it on
+#' the read that parses it (\code{extra_na = "9"}), where the caller owns the
+#' risk, rather than package-wide.
+#'
+#' @section Scope and lifetime:
+#' The registration is a session option (\code{haploStack.missing_chars}) and is
+#' gone on restart — deliberately, because it is a statement about a file being
+#' read, not about the package. It applies everywhere at once: the readers, the
+#' \code{\link{is_geno_meta}} check, \code{\link{repair_geno_meta}}, and the
+#' frequency/IBS/clustering paths that still resolve missing themselves.
+#'
+#' A container normalised while a registration was active records the vocabulary
+#' it was cleaned against in \code{metadata$missing_tokens}, so it stays
+#' self-describing in a later session where nothing is attached.
+#'
+#' @param chars Character vector of single characters to register.
+#' @param mode  Source format the characters belong to: \code{"nucleotide"},
+#'   \code{"selectiontools"} or \code{"numeric"}. \strong{Required} — there is
+#'   no package-wide default, because a character that means "absent" in one
+#'   vocabulary can be a genotype in another.
+#'
+#' @return Invisibly, the full effective missing set for \code{mode}.
+#'
+#' @examples
+#' old <- getOption("haploStack.missing_chars")
+#' use_missing_chars("#", mode = "nucleotide")
+#' missing_chars("nucleotide")
+#' missing_chars("numeric")          # unaffected
+#' reset_missing_chars()
+#' options(haploStack.missing_chars = old)
+#'
+#' @seealso \code{\link{missing_chars}}, \code{\link{reset_missing_chars}},
+#'   \code{\link{repair_geno_meta}}, \code{\link{HS_FILL_NA_DEFAULT}}
+#' @export
+use_missing_chars <- function(chars, mode) {
+  mode <- .hs_missing_mode(mode, "use_missing_chars")
+
+  if (!is.character(chars) || length(chars) == 0L)
+    stop("use_missing_chars: 'chars' must be a non-empty character vector.",
+         call. = FALSE)
+  if (anyNA(chars))
+    stop("use_missing_chars: 'chars' must not contain NA — NA is already the ",
+         "one representation of missing inside a GenoMeta.", call. = FALSE)
+
+  bad_len <- chars[nchar(chars) != 1L]
+  if (length(bad_len) > 0L)
+    stop("use_missing_chars: each character must be exactly one character; ",
+         "got ", paste0('"', bad_len, '"', collapse = ", "),
+         ". Missing is decided per allele, so a multi-character token would ",
+         "never match a single allele.", call. = FALSE)
+
+  blank <- chars[!nzchar(trimws(chars))]
+  if (length(blank) > 0L)
+    stop("use_missing_chars: blank and whitespace-only cells are already ",
+         "missing under every mode — nothing to register.", call. = FALSE)
+
+  reserved <- intersect(chars, .hs_reserved_alleles(mode))
+  if (length(reserved) > 0L)
+    stop("use_missing_chars: ", paste0('"', reserved, '"', collapse = ", "),
+         if (length(reserved) > 1L) " are real alleles of " else " is a real allele of ",
+         '"', mode, '" and cannot mean missing there.',
+         if (identical(mode, "numeric"))
+           " For a dosage panel that genuinely writes a digit for an absent call, declare it on the read instead (extra_na=), where the caller owns the risk."
+         else "", call. = FALSE)
+
+  reg <- getOption("haploStack.missing_chars")
+  if (!is.list(reg)) reg <- list()
+  reg[[mode]] <- unique(c(.extra_missing_chars(mode), chars))
+  options(haploStack.missing_chars = reg)
+
+  message("use_missing_chars: ", paste0('"', chars, '"', collapse = ", "),
+          " now read as missing for '", mode, "' (session only). Effective set: ",
+          paste0('"', .missing_tokens(mode), '"', collapse = " "), ".")
+  invisible(.missing_tokens(mode))
+}
+
+
+#' The effective missing-allele characters for a source format
+#'
+#' @param chars_only Logical. \code{FALSE} (default) returns the full effective
+#'   set — the built-in vocabulary plus anything registered with
+#'   \code{\link{use_missing_chars}}. \code{TRUE} returns only what was
+#'   registered this session, which is what \code{\link{reset_missing_chars}}
+#'   clears.
+#' @inheritParams use_missing_chars
+#'
+#' @return Character vector.
+#'
+#' @examples
+#' missing_chars("nucleotide")
+#' missing_chars("numeric")
+#'
+#' @seealso \code{\link{use_missing_chars}}
+#' @export
+missing_chars <- function(mode, chars_only = FALSE) {
+  mode <- .hs_missing_mode(mode, "missing_chars")
+  if (isTRUE(chars_only)) .extra_missing_chars(mode) else .missing_tokens(mode)
+}
+
+
+#' Clear registered missing-allele characters
+#'
+#' Removes what \code{\link{use_missing_chars}} registered. The built-in
+#' vocabulary is not affected and cannot be cleared.
+#'
+#' @param mode Source format to clear, or \code{NULL} (default) to clear every
+#'   mode.
+#'
+#' @return Invisibly, the registry as it stands after clearing.
+#'
+#' @examples
+#' use_missing_chars("#", mode = "nucleotide")
+#' reset_missing_chars("nucleotide")
+#' missing_chars("nucleotide", chars_only = TRUE)
+#'
+#' @seealso \code{\link{use_missing_chars}}
+#' @export
+reset_missing_chars <- function(mode = NULL) {
+  if (is.null(mode)) {
+    options(haploStack.missing_chars = NULL)
+    return(invisible(list()))
+  }
+  mode <- .hs_missing_mode(mode, "reset_missing_chars")
+  reg  <- getOption("haploStack.missing_chars")
+  if (!is.list(reg)) reg <- list()
+  reg[[mode]] <- NULL
+  options(haploStack.missing_chars = reg)
+  invisible(reg)
+}

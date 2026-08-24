@@ -13,7 +13,8 @@ compute_profile_localgebv(
   chromosomes = NULL,
   markers = NULL,
   level = c("genotype", "haplotype"),
-  center_by_freq = FALSE,
+  center = NULL,
+  center_by_freq = NULL,
   fill_na = 0,
   .core = NULL
 )
@@ -45,12 +46,17 @@ several, \code{trait} (or an explicit \code{effect_df}) is required.}
 \item{markers}{Optional character vector of marker names to include.}
 
 \item{level}{Output resolution. \code{"genotype"} (default) sums
-both haplotypes per sample; \code{"haplotype"} keeps them separate with
-column names \code{"<Sample>.<haplotype_idx>"}.}
+\strong{every ploidy copy} per sample (2 for a diploid, 4 for a tetraploid);
+\code{"haplotype"} keeps them separate with column names
+\code{"<Sample>.<haplotype_idx>"}. See \emph{What a haplotype slot is}.}
 
-\item{center_by_freq}{Logical. When \code{TRUE}, each allele effect is
-mean-centred using the population allele frequency observed within the
-filtered data (catalogue-style centering). Default \code{FALSE}.}
+\item{center}{Centring mode applied to the allele effects:
+�\code{"none"}, �\code{"locus_mean"} or �\code{"allele_freq"}. See
+�\code{\link{compute_profile_localgebv}} for what each preserves.}
+
+\item{center_by_freq}{\strong{Deprecated} logical, kept for one release:
+\code{TRUE} maps to \code{center = "allele_freq"} and \code{FALSE} to
+\code{center = "none"}. Supplying both this and \code{center} is an error.}
 
 \item{fill_na}{Numeric. Value for (Block, Sample) cells with no
 effect information. Default \code{0}.}
@@ -91,6 +97,61 @@ attaching Effect and Block columns to the long-format allele table. This
 prevents the column-structure drift bug present in an earlier version of the
 catalogue pipeline where \code{Sample} drifted to an unexpected position.
 }
+\section{Centring}{
+
+The three modes are different operations, not settings of one. Writing
+\code{e_a} for an allele's effect and \code{p_a} for its population
+frequency, and \code{mean_i = sum_a p_a * e_a} for the locus mean of marker
+\code{i}:
+
+\tabular{llll}{
+\strong{mode} \tab \strong{contribution} \tab \strong{allele contrast} \tab \strong{block variance} \cr
+\co\code{"none"} \tab \code{e_a} \tab \code{e_A - e_B} \tab reference \cr
+\co\code{"locus_mean"} \tab \code{e_a - mean_i} \tab \strong{preserved} \tab \strong{unchanged} \cr
+\co\code{"allele_freq"} \tab \code{e_a * (1 - p_a)} \tab becomes \code{q*e_A - p*e_B} \tab changed
+}
+
+\co\code{"locus_mean"} subtracts \strong{one} value per marker from every allele
+at it, so it is a pure location shift: the A-vs-B contrast survives and every
+block variance is identical to the uncentred one. It is also invariant to
+adding a constant to both alleles' effects at a marker — the property 0.5.3
+wanted from centring — and it reproduces HapSelect's
+\code{mean_adjust = TRUE} \strong{value for value}, because
+\code{d*e_A + (ploidy - d)*e_B - ploidy*mean_i} is exactly
+\code{(d - ploidy*p_A) * (e_A - e_B)}.
+
+\co\code{"allele_freq"} centres each allele by \strong{its own} frequency, so
+the two alleles of a marker are weighted differently. That is a reweighting
+rather than a shift: block variances change (median factor ~3 on the barley
+panel) and rankings can move with them. It was the catalogue default up to
+0.5.5 and is what reproduces those numbers.
+
+Use \co\code{"locus_mean"} for selection and for any cross-package comparison;
+\co\code{"none"} is the default because it is the raw quantity and because it is
+what both entry points to this engine now agree on.
+}
+
+\section{What a haplotype slot is}{
+
+\code{level = "haplotype"} reports the genotype matrix's copies in the order
+the \strong{reader} wrote them. It is a \strong{slot assignment, not phase}.
+
+A genotype field in an unphased source — a PED, a VCF without phasing — is
+unordered by definition, so a heterozygote's two alleles are written in one
+fixed order by whatever produced the file. On the GRDC barley panel every
+heterozygote is written \code{AT} and none \code{TA} (7,584,722 vs 0), which
+makes slot 1 the A-strand panel-wide. Following the genotype matrix and
+assigning its copies to slots is exactly what this function should do — but
+per-slot output is not a chromosome, and nothing in the package checks
+whether the source was phased. Do not read \code{level = "haplotype"} columns
+as haplotypes of a real chromosome unless the source itself is phased.
+
+\code{level = "genotype"} sums over every ploidy copy, so it is the level to
+compare against a genotype-level figure from another package. Across levels
+the factor is between \code{ploidy} and \code{ploidy^2} — a population
+property that cannot be divided out.
+}
+
 \examples{
 \dontrun{
 meta     <- load_geno_meta("my_geno_meta.rds")

@@ -60,6 +60,9 @@
 #'   Default \code{0}.
 #' @param save_profile    Logical. Save the \code{GenoMeta} object to
 #'   \code{output_dir} as an RDS file. Default \code{TRUE}.
+#' @param center        Centring mode applied to the allele effects:
+#'   \code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
+#'   \code{\link{compute_profile_localgebv}} for what each preserves.
 #' @param center_by_freq  Logical. Mean-centre allele effects by population
 #'   frequency (catalogue-style). Default \code{TRUE}.
 #' @param n_cores         Integer. Parallel workers for trait processing.
@@ -115,9 +118,17 @@ run_haplotype_catalogue <- function(
   ld_threshold    = 0.5,
   tolerance       = 0,
   save_profile    = TRUE,
-  center_by_freq  = TRUE,
+  center          = NULL,
+  center_by_freq  = NULL,
   n_cores         = 1L
 ) {
+  # CEN / FR10: the default centring is "none" from 0.6.0, matching
+  # compute_profile_localgebv(). Until now the two entry points to the same
+  # engine disagreed about what the default answer was. This CHANGES PUBLISHED
+  # BLOCK VARIANCES (median factor ~3 on the barley panel);
+  # center = "allele_freq" reproduces the 0.5.5 numbers.
+  center <- .resolve_center(center, center_by_freq,
+                            "run_haplotype_catalogue", default = "none")
   if (!is_geno_meta(geno_meta))
     stop("run_haplotype_catalogue: 'geno_meta' must be a valid GenoMeta. ",
          "Use a read_*() function and then attach_block_info() to prepare it.")
@@ -189,7 +200,7 @@ run_haplotype_catalogue <- function(
       effect_df      = effect_df,
       blocks         = if (!is.null(selected_blocks)) selected_blocks$Block else NULL,
       level          = "genotype",
-      center_by_freq = center_by_freq,
+      center         = center,
       .core          = compute_core
     )
 
@@ -259,7 +270,7 @@ run_haplotype_catalogue <- function(
       geno_meta      = geno_meta,
       effect_df      = effect_df,
       block_info     = bloc_info_dt,
-      center_by_freq = center_by_freq,
+      center         = center,
       .core          = compute_core,
       .signatures    = compute_sigs
     )

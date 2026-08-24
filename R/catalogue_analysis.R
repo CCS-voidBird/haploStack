@@ -153,7 +153,7 @@
 # Accepts a pre-computed `catalogue` (run_haplotype_catalogue result) or computes
 # from geno_meta + effect_list with signature-based subtypes.
 .resolve_subtype_tables <- function(geno_meta, effect_list, catalogue,
-                                    trait_names, center_by_freq) {
+                                    trait_names, center) {
   if (!is.null(catalogue)) {
     if (is.null(trait_names)) trait_names <- names(catalogue)
     tabs <- lapply(trait_names, function(tr) {
@@ -194,13 +194,13 @@
     if (is.null(eff))
       stop("analyze_block_catalogue: no effects for trait '", tr, "'.")
     compute_block_catalogue(geno_meta, effect_df = eff, block_info = bloc,
-                            center_by_freq = center_by_freq,
+                            center   = center,
                             group_by = "signature",
                             .core = core, .signatures = sigs)
   })
   gebv <- lapply(trait_names, function(tr) {
     compute_profile_localgebv(geno_meta, effect_df = effect_list[[tr]],
-                              level = "genotype", center_by_freq = center_by_freq,
+                              level = "genotype", center = center,
                               .core = core)
   })
   names(tabs) <- names(gebv) <- trait_names
@@ -255,7 +255,7 @@
 #'   \item \strong{Rescale within each trait}, if asked: transform every subtype's
 #'     effect \code{S(subtype,t)} with \code{normalize} to \code{N(subtype,t)}
 #'     (\code{"zscore"} = a true standard score). Under the default
-#'     \code{"none"} this is the identity, so \code{N == S} and the analysis runs
+#'     \co\code{"none"} this is the identity, so \code{N == S} and the analysis runs
 #'     entirely on raw effects.
 #'   \item \strong{Select one subtype per block} shared across traits:
 #'     \code{selected(b) = argmax_subtype Σ_t w_t · value(subtype, t)}, where
@@ -297,7 +297,7 @@
 #'   \code{value_source} so the plot layer fills by the same value without the
 #'   caller re-specifying it.
 #' @param normalize Per-trait scale transform applied \strong{within each trait}:
-#'   \code{"none"} (default — no rescaling; \code{N == S} in raw units),
+#'   \co\code{"none"} (default — no rescaling; \code{N == S} in raw units),
 #'   \code{"zscore"}, \code{"minmax"}, \code{"rank"}, or a function
 #'   \code{function(numeric) -> numeric}. \code{"zscore"} is a \strong{true
 #'   standard score} \code{(x - mean)/sd} — it centres and scales, so a normalised
@@ -313,6 +313,9 @@
 #'   (default) uses equal unit weights (\code{1}); a negative weight flips a
 #'   lower-is-better trait so its subtypes are summed in the intended direction.
 #'   When supplied it must be named and cover every trait.
+#' @param center        Centring mode applied to the allele effects:
+#'   \code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
+#'   \code{\link{compute_profile_localgebv}} for what each preserves.
 #' @param center_by_freq Passed to \code{\link{compute_block_catalogue}} on the
 #'   compute path. Default \code{TRUE}.
 #' @param output_dir Directory for output \code{*.txt} tables. \code{NULL}
@@ -349,7 +352,7 @@
 #'   \item{\code{value_source}}{The \code{value_source} used, so the plot layer
 #'     fills by the same value.}
 #'   \item{\code{normalize}}{The transform actually applied
-#'     (\code{"none"} by default, or \code{"custom"} for a function), so the plot
+#'     (\co\code{"none"} by default, or \code{"custom"} for a function), so the plot
 #'     layer can label \code{N} honestly rather than assuming a standard score.}
 #' }
 #'
@@ -370,7 +373,8 @@ analyze_block_catalogue <- function(geno_meta       = NULL,
                                                         "minmax", "rank"),
                                     value_source    = c("raw", "normalized"),
                                     trait_weights   = NULL,
-                                    center_by_freq  = TRUE,
+                                    center          = NULL,
+                                    center_by_freq  = NULL,
                                     output_dir      = NULL,
                                     write_outputs   = TRUE,
                                     plots           = c("rectangular", "manhattan",
@@ -402,8 +406,11 @@ analyze_block_catalogue <- function(geno_meta       = NULL,
   norm_label <- if (is.function(normalize)) "custom" else normalize
 
   # ── FR1: resolve per-trait subtype tables (+ GEBV matrices for heatmap) ────
+  center      <- .resolve_center(center, center_by_freq,
+                                 "analyze_block_catalogue",
+                                 default = "allele_freq")
   resolved    <- .resolve_subtype_tables(geno_meta, effect_list, catalogue,
-                                         trait_names, center_by_freq)
+                                         trait_names, center)
   tabs        <- resolved$tabs
   gebv_mats   <- resolved$gebv
   trait_names <- names(tabs)

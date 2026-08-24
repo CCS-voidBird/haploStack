@@ -38,7 +38,7 @@ first numeric trait column.}
 \code{NULL} (default) uses \code{paste0("GEBV_", trait)}.}
 
 \item{impute}{Missing-dosage handling passed to the dosage transform:
-\code{"mean"} (default) or \code{"none"}.}
+\code{"mean"} (default) or \co\code{"none"}.}
 
 \item{nIter, burnIn}{BGLR sampler length and burn-in (\code{"bayesc"} only).}
 

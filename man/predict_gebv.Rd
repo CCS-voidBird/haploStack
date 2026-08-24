@@ -12,7 +12,8 @@ predict_gebv(
   markers = NULL,
   blocks = NULL,
   chromosomes = NULL,
-  center_by_freq = FALSE
+  center = NULL,
+  center_by_freq = NULL
 )
 }
 \arguments{
@@ -37,6 +38,10 @@ name one. The trait also names the output column.}
 
 \item{chromosomes}{Optional list of chromosome region specs (see
 \code{\link{filter_geno_meta}}).}
+
+\item{center}{Centring mode applied to the allele effects:
+�\code{"none"}, �\code{"locus_mean"} or �\code{"allele_freq"}. See
+�\code{\link{compute_profile_localgebv}} for what each preserves.}
 
 \item{center_by_freq}{Logical; mean-centre each allele effect by its
 population frequency before summing (forwarded to

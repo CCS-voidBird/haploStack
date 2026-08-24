@@ -51,7 +51,7 @@
 #' @param geno_meta A valid \code{GenoMeta} list with a diploid allele encoding
 #'   (\code{"selectiontools"} or \code{"nucleotide"}).
 #' @param impute    \code{"mean"} (default) mean-imputes missing dosages per
-#'   marker; \code{"none"} leaves them as \code{NA}.
+#'   marker; \co\code{"none"} leaves them as \code{NA}.
 #' @return A list with elements \code{M} (numeric matrix, rows = samples and
 #'   cols = markers in \code{geno_arrays} order, names preserved verbatim),
 #'   \code{allele_map} (data.frame: \code{Marker}, \code{Ref}, \code{Alt}) and
@@ -80,7 +80,15 @@
   # Ref/alt detection (blanks stripped, ties A->Z) via the allele-count kernel:
   # ref = most frequent observed allele, alt = 2nd most frequent. Detection is in
   # R; the kernel only counts codes.
-  counts <- .marker_allele_counts(arr, strip_blank = TRUE)
+  #
+  # `na_vals` is defence-in-depth (FR7), not the mechanism. A container built by
+  # 0.6.0 arrives normalised, so the token set is empty of anything present and
+  # this is a no-op. It exists for the container that did not come through the
+  # portal — a pre-0.6.0 .rds, or a hand-assembled list — where without it the
+  # missing code ranks as an allele and the marker's effect is estimated for
+  # missingness itself (INDEX discrepancy 23).
+  miss   <- .missing_tokens(enc)
+  counts <- .marker_allele_counts(arr, na_vals = miss, strip_blank = TRUE)
   levs    <- colnames(counts)
   ref     <- character(n_mark)
   alt     <- character(n_mark)
@@ -98,7 +106,11 @@
   # Alt-allele dosage; NA only when a cell is FULLY missing (na_if_any = FALSE),
   # blanks treated as observed non-matches (strip_blank = FALSE) — both preserving
   # the original per-marker semantics. Monomorphic markers (alt NA) -> 0 copies.
-  M <- .dosage_matrix(arr, alt, na_if_any = FALSE, strip_blank = FALSE)
+  # `na_vals` is the same defence-in-depth as above: a no-op on a normalised
+  # container, and on a legacy one it stops the missing code being counted as an
+  # observed non-match of the alt allele.
+  M <- .dosage_matrix(arr, alt, na_if_any = FALSE, na_vals = miss,
+                      strip_blank = FALSE)
   M <- matrix(as.numeric(M), n_samp, n_mark, dimnames = list(samples, markers))
   # Markers with no non-blank observed allele stay all-NA (matches the original
   # `next`, which left the NA_real_-initialised column untouched).
@@ -256,7 +268,7 @@
 #' @param gebv_colname Name for the GEBV column in the returned phenotype table.
 #'   \code{NULL} (default) uses \code{paste0("GEBV_", trait)}.
 #' @param impute       Missing-dosage handling passed to the dosage transform:
-#'   \code{"mean"} (default) or \code{"none"}.
+#'   \code{"mean"} (default) or \co\code{"none"}.
 #' @param nIter,burnIn BGLR sampler length and burn-in (\code{"bayesc"} only).
 #' @param verbose      Logical; print backend progress. Default \code{FALSE}.
 #' @param ...          Extra arguments forwarded to the backend
@@ -461,6 +473,9 @@ fit_genomic_prediction <- function(geno_meta,
 #' @param blocks         Optional character vector of block IDs to include.
 #' @param chromosomes    Optional list of chromosome region specs (see
 #'   \code{\link{filter_geno_meta}}).
+#' @param center        Centring mode applied to the allele effects:
+#'   \code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
+#'   \code{\link{compute_profile_localgebv}} for what each preserves.
 #' @param center_by_freq Logical; mean-centre each allele effect by its
 #'   population frequency before summing (forwarded to
 #'   \code{\link{compute_profile_localgebv}}). Default \code{FALSE}.
@@ -499,7 +514,10 @@ predict_gebv <- function(geno_meta,
                          markers        = NULL,
                          blocks         = NULL,
                          chromosomes    = NULL,
-                         center_by_freq = FALSE) {
+                         center         = NULL,
+                         center_by_freq = NULL) {
+  center <- .resolve_center(center, center_by_freq, "predict_gebv",
+                            default = "none")
   if (!is_geno_meta(geno_meta))
     stop("predict_gebv: 'geno_meta' is not a valid GenoMeta.")
 
@@ -545,7 +563,7 @@ predict_gebv <- function(geno_meta,
     blocks         = blocks,
     chromosomes    = chromosomes,
     level          = "genotype",
-    center_by_freq = center_by_freq)
+    center         = center)
 
   sample_cols <- setdiff(names(block_gebv), "Block")
   if (length(sample_cols) == 0L)

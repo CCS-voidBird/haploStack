@@ -13,7 +13,8 @@ run_haplotype_catalogue(
   ld_threshold = 0.5,
   tolerance = 0,
   save_profile = TRUE,
-  center_by_freq = TRUE,
+  center = NULL,
+  center_by_freq = NULL,
   n_cores = 1L
 )
 }
@@ -50,6 +51,10 @@ Default \code{0}.}
 
 \item{save_profile}{Logical. Save the \code{GenoMeta} object to
 \code{output_dir} as an RDS file. Default \code{TRUE}.}
+
+\item{center}{Centring mode applied to the allele effects:
+�\code{"none"}, �\code{"locus_mean"} or �\code{"allele_freq"}. See
+�\code{\link{compute_profile_localgebv}} for what each preserves.}
 
 \item{center_by_freq}{Logical. Mean-centre allele effects by population
 frequency (catalogue-style). Default \code{TRUE}.}
