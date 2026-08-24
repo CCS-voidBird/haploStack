@@ -729,13 +729,24 @@ barley panel, 3.9 (range 1.8–8.8) on the release fixture
   `.dll`; verified by installing into a throwaway library (kernels live, 127
   exports, the portal and all three centring modes exercised from the installed
   copy).
-- **The GitHub mirror `ready_to_use/haploStack/` is synced to 0.6.0.** It is an
-  extracted release tarball plus a curated `docs/` and its own README, so it was
-  re-seeded from the tarball: package content is byte-identical to what shipped.
-  `docs/CHANGELOG.md` and `docs/geno_meta_structure.md` refreshed, the new I/O
-  sheet added, and the README given an upgrade warning naming both migration
-  settings. `.git`, `.gitignore`, `.gitattributes` and the mirror's own
-  `.Rbuildignore` untouched. **Not committed or pushed.**
+- **Published to `CCS-voidBird/haploStack` (2026-08-25).** The mirror
+  `ready_to_use/haploStack/` is committed (`8a73229` on `main`) and tagged
+  **`haploStack-0.6.0`**, both pushed. The mirror is an extracted release
+  tarball plus a curated `docs/` and its own README, so it was re-seeded from
+  the tarball — package content is byte-identical to what shipped, except
+  `README.md` and `vignettes/quick_start.Rmd`, which are deliberately
+  repo-facing. `docs/CHANGELOG.md` and `docs/geno_meta_structure.md` refreshed,
+  the new I/O sheet added, and the README given an upgrade warning naming both
+  migration settings. The install instructions in the mirror's README and
+  vignette were corrected from `uq-bioinformatics/haploStack` to
+  `CCS-voidBird/haploStack`, where the release actually lives — closing the
+  remaining half of INDEX discrepancy 21.
+- `ready_to_use/release_v0.6.0/` — release assets: the source tarball, a Windows
+  binary built *from* it (verified by running the package suite against the
+  installed build: **1836 pass, 0 fail, 0 error**), and `RELEASE_NOTES.md` with
+  both migration settings, SHA-256s and build provenance. **The GitHub Release
+  page is not yet created** — `gh` is absent on this machine; the tag is live
+  and the assets are ready to attach.
 - `docs/haploStack_io_reference_0.6.0.md` — the per-release I/O sheet: what a
   missing allele is under each source mode, the new registry and repair path,
   why normalisation is one-way, what each centring mode preserves, and a
