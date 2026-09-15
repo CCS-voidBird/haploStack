@@ -14,9 +14,18 @@ run_stacking_simulation(
   ga_start_by = 1L,
   num_offspring = 4L,
   top_founders = 16L,
-  avoid_selfing = FALSE,
+  avoid_selfing = TRUE,
   selection_unit = c("parents", "pairs"),
   pair_budget = NULL,
+  gbs_pair_level = c("population", "family"),
+  pair_freq = NULL,
+  pair_penalty = c("loss", "hard"),
+  pair_pool = c("shortlist", "all"),
+  shortlist_k = NULL,
+  max_use = Inf,
+  overshoot = c("skip", "stop"),
+  ts_pair_score = c("midparent", "usefulness"),
+  usefulness_k = 1,
   scheme = c("TS", "OHS", "OCS", "GBS"),
   ohs_method = c("GA_pairwise", "GA_coverage", "Greedy"),
   gbs_method = c("ARCSIN", "LOG"),
@@ -74,18 +83,18 @@ between decision cycles. Default \code{0}.}
 
 \item{top_founders}{Integer. Parents selected per cycle. Default \code{16}.}
 
-\item{avoid_selfing}{Logical. Exclude self-crosses from the design. Default
-\code{FALSE}. Note that the \code{"all_pairs"} design used by the
-parents-first protocol never contains a self-cross in any case (it
-enumerates \code{combn(parents, 2)}), so each cycle makes
-\code{choose(top_founders, 2)} families whatever this flag says.}
+\item{avoid_selfing}{Logical. Exclude self-crosses. Default \code{TRUE}.
+The \code{"all_pairs"} design of the parents-first protocol never contains
+a self-cross in any case (it enumerates \code{combn(parents, 2)}), so the
+flag acts only under \code{selection_unit = "pairs"}, where
+\code{avoid_selfing = FALSE} offers the selfs as candidate families and
+counts them in the budget.}
 
-\item{selection_unit}{What a cycle selects. \code{"parents"} (default, the
-implemented protocol): a subgroup of \code{top_founders} parents, then every
-pair of them is crossed. \code{"pairs"}: the crosses themselves are chosen
-(direct pairing) — \strong{a placeholder in this version}: the arguments are
-validated and the budget is resolved, then the first cycle stops with the
-resolved budget in the message. Requires \code{pair_budget}.}
+\item{selection_unit}{What a cycle selects. \code{"parents"} (default): a
+subgroup of \code{top_founders} parents, then every pair of them is
+crossed. \code{"pairs"}: the crosses themselves are chosen (direct
+pairing; see the \emph{Selection unit} section). Requires
+\code{pair_budget}.}
 
 \item{pair_budget}{How a direct-pairing cycle is matched to the parents-first
 protocol; required when \code{selection_unit = "pairs"}, ignored otherwise.
@@ -97,6 +106,24 @@ parents — pairs are added until \code{top_founders} distinct parent names
 are in use, with the number of families free. See
 \code{\link{pair_selection_budget}} for the numbers a given
 \code{top_founders} implies.}
+
+\item{gbs_pair_level, pair_freq, pair_penalty, pair_pool, shortlist_k}{Direct
+pairing, GBS: the level the family is scored at (\code{"population"} /
+\code{"family"}), the frequency projection (\code{NULL} = by budget),
+the absent-state penalty form (\code{"loss"} / \code{"hard"}), the
+candidate space and its shortlist size — see \code{\link{gbs_pair_selection}}.}
+
+\item{max_use}{Direct pairing: per-parent usage cap (families a parent may
+appear in). Default \code{Inf}.}
+
+\item{overshoot}{Direct pairing, \code{pair_budget = "parents"}: a family
+that would exceed the parent limit is \code{"skip"}ped (default; the search
+goes on among the parents in use, up to the traversal) or \code{"stop"}s
+the search.}
+
+\item{ts_pair_score, usefulness_k}{Direct pairing, TS: \code{"midparent"}
+(default) or \code{"usefulness"} = mid-parent \code{+ usefulness_k *
+  sd(F1)}. Default \code{usefulness_k = 1}.}
 
 \item{scheme}{Character vector of schemes to run/compare: any of \code{"TS"},
 \code{"OHS"}, \code{"OCS"}, \code{"GBS"}.}
@@ -113,7 +140,8 @@ published method: fixed \code{-100} penalty). Fills \code{gbs_objective},
 an explicit value always wins. See \code{\link{gbs_selection}}.}
 
 \item{gbs_objective}{GBS objective, \code{"candidate"} or \code{"set"};
-\code{NULL} (default) takes the preset value (\code{"candidate"}).}
+\code{NULL} (default) takes the preset value (\code{"candidate"} under
+parents-first; \code{"set"} under direct pairing).}
 
 \item{gbs_engine}{GBS engine, \code{"greedy"} or \code{"GA"}; \code{NULL}
 (default) takes the preset value (\code{"greedy"}).}
@@ -201,13 +229,14 @@ A named list:
 \describe{
 \item{\code{plans}}{Per-cross data.table: \code{CrossID, Parent1, Parent2,
     F1count, F1mean, select_type, cycle, rep, sel_scheme, D2Ideal,
-    coancestry, ideal_phenotype}.}
+    coancestry, ideal_phenotype, pair_score} (the last is the family's
+selection score under direct pairing, \code{NA} otherwise).}
 \item{\code{summary}}{Per-cycle data.table: \code{cycle, select_type, rep,
     sel_scheme, mean_F1mean, var_F1mean, mean_D2Ideal, mean_coancestry,
-    mean_gene_diversity, mean_ideal_phenotype, marker_size} (with a
-\code{cycle = 0} founder row). \code{mean_gene_diversity} is Nei's (1973)
-gene diversity of the cycle's population (see
-\code{\link{compute_gene_diversity}}).}
+    mean_gene_diversity, mean_ideal_phenotype, ideal_hap_gebv, marker_size,
+    n_families, n_parents_used} (with a \code{cycle = 0} founder row).
+\code{mean_gene_diversity} is Nei's (1973) gene diversity of the cycle's
+population (see \code{\link{compute_gene_diversity}}).}
 \item{\code{ideal_genotypes}}{The founder ideal-genotype target:
 \code{Block, Effect, CFreq, TargetFreq}.}
 \item{\code{final_populations}}{Named list (\code{"<scheme>_rep<r>"} ->
@@ -246,14 +275,31 @@ selfing generations between decision cycles.
 
 \section{Selection unit}{
 
-Every scheme above selects a \emph{parent subgroup} of \code{top_founders},
-which is then crossed in a full traversal (\code{selection_unit =
-"parents"}, \code{choose(top_founders, 2)} families per cycle). Direct pair
-selection (\code{selection_unit = "pairs"}) — choosing the crosses rather than
-the parents — is reserved but \strong{not implemented}: the call validates
-\code{pair_budget}, resolves the per-cycle budget, prints it when
-\code{verbose}, and stops at the first cycle. \code{\link{pair_selection_budget}}
-gives the same numbers without running anything.
+Under \code{selection_unit = "parents"} (default) every scheme selects a
+\emph{parent subgroup} of \code{top_founders}, which is then crossed in a
+full traversal (\code{choose(top_founders, 2)} families per cycle). Under
+\code{selection_unit = "pairs"} (direct pair selection) every scheme scores
+\emph{families} — the expected F1 of one cross — and one greedy adds families
+until the budget stops it: \code{pair_budget = "families"} makes as many
+families as the traversal (distinct parents free), \code{"parents"} adds
+families until \code{top_founders} distinct parents are in use (families
+free; see \code{\link{pair_selection_budget}}). What each scheme scores:
+\describe{
+\item{\code{"TS"}}{the mid-parent value (the expected F1 mean), or with
+\code{ts_pair_score = "usefulness"} the mid-parent plus
+\code{usefulness_k} F1 standard deviations (exact under the block model).}
+\item{\code{"OHS"}}{the family's stacking ceiling \code{M[i, j]}
+(\code{\link{ohs_pair_selection}}; under \code{"parents"} the best
+parent set and its traversal — \code{ohs_method = "GA_coverage"} is refused).}
+\item{\code{"GBS"}}{the ideal-genotype objective on the family's expected
+offspring (\code{\link{gbs_pair_selection}}: \code{gbs_pair_level},
+\code{pair_freq}, \code{pair_penalty}, \code{pair_pool}; the default
+objective is \code{"set"}).}
+\item{\code{"OCS"}}{no family form yet (follows the KCT rename).}
+}
+\code{summary} reports the cycle's \code{n_families} and
+\code{n_parents_used} for both units, and \code{plans} the per-family
+\code{pair_score}.
 }
 
 \section{Crossing backends}{
@@ -275,6 +321,8 @@ use \pkg{future.apply}. Each replication uses a deterministic seed
 
 \seealso{
 \code{\link{ohs_selection}}, \code{\link{ocs_selection}},
-\code{\link{gbs_selection}}, \code{\link{construct_ideal_genotype}},
-\code{\link{make_cross_design}}, \code{\link{plot_simulation_trajectories}}
+\code{\link{gbs_selection}}, \code{\link{ohs_pair_selection}},
+\code{\link{gbs_pair_selection}}, \code{\link{pair_selection_budget}},
+\code{\link{construct_ideal_genotype}}, \code{\link{make_cross_design}},
+\code{\link{plot_simulation_trajectories}}
 }

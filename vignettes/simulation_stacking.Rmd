@@ -146,6 +146,13 @@ cat("Same seed → identical result:", identical(ga_r1, ga_r2), "\n")
 
 ## 5  OCS Selection  [Node: `ocs_selection`]
 
+> `ocs_selection()` is kept for compatibility but **has known issues** (it is a
+> kinship-penalised truncation, not optimum-contribution selection, and falls
+> back to plain truncation when the kinship cap stops it early). For simulations
+> use `TS`, `OHS` or `GBS` in `run_stacking_simulation()`; see
+> `vignettes/selection_grid.md`. Without a kinship matrix, as below, it is plain
+> truncation on total GEBV.
+
 ```{r ocs}
 ## ── Node: ocs_selection ────────────────────────────────────────────────────────
 ## Using total GEBV (column sums) as breeding value

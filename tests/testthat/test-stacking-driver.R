@@ -21,11 +21,11 @@ library(data.table)
 
 PLANS_COLS <- c("CrossID", "Parent1", "Parent2", "F1count", "F1mean",
                 "select_type", "cycle", "rep", "sel_scheme",
-                "D2Ideal", "coancestry", "ideal_phenotype")
+                "D2Ideal", "coancestry", "ideal_phenotype", "pair_score")
 SUMMARY_COLS <- c("cycle", "select_type", "rep", "sel_scheme", "mean_F1mean",
                   "var_F1mean", "mean_D2Ideal", "mean_coancestry",
                   "mean_gene_diversity", "mean_ideal_phenotype", "ideal_hap_gebv",
-                  "marker_size")
+                  "marker_size", "n_families", "n_parents_used")
 
 # ── output contract ───────────────────────────────────────────────────────────
 

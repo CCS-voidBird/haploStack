@@ -17,11 +17,13 @@
 #   5. the offspring GenoMeta becomes the next cycle's population.
 #
 # Steps 2-3 are the parents-first protocol (`selection_unit = "parents"`).
-# `selection_unit = "pairs"` (direct pair selection, Q23 i) is a PLACEHOLDER:
-# the budget that ties it to the parents-first run is resolved
-# (.stk_selection_budget(): same number of families, or same number of
-# parents), and .stk_select_pairs() — the seam where the scheme would return
-# the crosses themselves — stops with that budget. See thread #031.
+# Under `selection_unit = "pairs"` (direct pair selection, thread #031) the
+# scheme returns the crosses themselves: .stk_select_pairs() dispatches to the
+# family scorers of stacking_pairs.R (TS mid-parent / usefulness, OHS M[i, j],
+# GBS on the family's expected offspring) under the budget resolved by
+# .stk_selection_budget() — the same number of families as the traversal, or
+# the same number of distinct parents — and make_cross_design("custom") turns
+# the family table into the cycle's design.
 #
 # `scheme` accepts a vector -> the schemes are compared in one run. Decision
 # cycles run the chosen scheme; intervening `selfing_cycles` generations advance
@@ -148,19 +150,19 @@
 
 
 # ---------------------------------------------------------------------------
-# Internal — selection unit: parents-first (current) vs direct pairs (placeholder)
+# Internal — selection unit: parents-first vs direct pairs (budget + dispatch)
 # ---------------------------------------------------------------------------
 
 # Resolve the per-cycle budget the driver runs under. Parents-first
-# (`selection_unit = "parents"`, the only implemented unit) crosses
-# `top_founders` parents in a full traversal, so the family count is fixed at
-# .stk_n_families(). Direct pairing ("pairs") must be tied to that protocol by
-# one of the two conflicting budgets of pair_selection_budget(): the same
-# number of families, or the same number of distinct parents. `allow_selfing`
-# is what the crossing design actually does, not the driver's `avoid_selfing`
-# flag: make_cross_design("all_pairs") enumerates combn(parents, 2) and never
-# contains a self-cross (INDEX discrepancy 27 / Q24 c), so the driver passes
-# FALSE — the selfing term is there for the day the design honours the flag.
+# (`selection_unit = "parents"`) crosses `top_founders` parents in a full
+# traversal, so the family count is fixed at .stk_n_families(). Direct pairing
+# ("pairs") must be tied to that protocol by one of the two conflicting budgets
+# of pair_selection_budget(): the same number of families, or the same number
+# of distinct parents. `allow_selfing` is what the design actually does: under
+# parents-first, make_cross_design("all_pairs") enumerates combn(parents, 2)
+# and never contains a self-cross (INDEX discrepancy 27 / Q24 c), so the driver
+# passes FALSE; under pairs the candidate pool, this budget and the design all
+# take `!avoid_selfing`, so the three agree.
 .stk_selection_budget <- function(selection_unit, pair_budget, top_founders,
                                   allow_selfing = FALSE) {
   n <- as.integer(top_founders)
@@ -182,7 +184,7 @@
 }
 
 # One-line human-readable statement of a resolved budget (verbose header and
-# the placeholder's stop message).
+# the output check of .stk_select_pairs()).
 .stk_budget_text <- function(b) {
   selfing <- if (isTRUE(b$allow_selfing)) "self-crosses counted"
              else "self-crosses not in the all-pairs design"
@@ -199,26 +201,70 @@
             b$n_parents_max, b$n_families_min, b$n_families_max, selfing)
 }
 
-# PLACEHOLDER — direct pair selection (Q23 i, thread #031). Not implemented.
-#
-# Contract for the implementation: score candidate crosses (expected F1
-# block-state distribution against `ideal_genotypes`, plus the pair's
-# coancestry) under `scheme`, and return a data.table(Parent1, Parent2) that
-# make_cross_design(method = "custom") turns into the cycle's design. The
-# budget in `opts$pair_budget` fixes when to stop:
-#   "families" — exactly `n_families` rows;
-#   "parents"  — add pairs (best first) until `n_parents_max` distinct names
-#                are in use (open point Q24 b: a pair that would overshoot the
-#                limit is skipped, or the search stops there).
-# The GBS internals are already pair-agnostic (.gbs_deviation(),
-# .gbs_penalty_scale() — plan #030 §2.4): "pool vs parents" becomes "pool vs
-# number of crosses".
+# Direct pair selection (thread #031): the scheme returns the families of the
+# cycle as a "pair_selection" table (Parent1, Parent2, score, rank) under the
+# budget in `opts$pair_budget`. Scorers live in stacking_pairs.R; this is the
+# dispatch (the pairs counterpart of .stk_select_parents()) plus the output
+# check. A scheme that returns no family errors with its name — no truncation
+# fallback for this unit. OCS has no family form until the KCT rename (plan
+# #030 Phase 0 / pair plan Phase C).
 .stk_select_pairs <- function(scheme, localgebv, geno_meta, ideal_genotypes,
                               opts) {
-  stop("run_stacking_simulation: selection_unit = \"pairs\" (direct pair ",
-       "selection) is a placeholder and is not implemented yet (thread #031). ",
-       "Budget resolved for this run — ", .stk_budget_text(opts$pair_budget),
-       ".", call. = FALSE)
+  b <- opts$pair_budget
+  pairs <- switch(
+    scheme,
+    TS  = .stk_pairs_truncation(localgebv, b, opts),
+    OHS = ohs_pair_selection(localgebv, pair_budget = b$pair_budget,
+                             top_founders = b$n_parents_ref,
+                             allow_selfing = b$allow_selfing,
+                             ohs_method = opts$ohs_method,
+                             max_use = opts$max_use, overshoot = opts$overshoot,
+                             seed = opts$seed),
+    OCS = stop("run_stacking_simulation: scheme \"OCS\" has no direct-pair form ",
+               "yet (it follows the KCT rename; pair plan Phase C). Use ",
+               "selection_unit = \"parents\" for OCS.", call. = FALSE),
+    GBS = gbs_pair_selection(localgebv, ideal_genotypes = ideal_genotypes,
+                             pair_budget = b$pair_budget,
+                             top_founders = b$n_parents_ref,
+                             num_offspring = opts$num_offspring,
+                             allow_selfing = b$allow_selfing,
+                             gbs_method = opts$gbs_method,
+                             gbs_objective = opts$gbs_objective,
+                             penalty_mode = opts$penalty_mode,
+                             gbs_penalty = opts$gbs_penalty,
+                             penalty_scale = opts$penalty_scale,
+                             gbs_effect_weight = opts$gbs_effect_weight,
+                             gbs_pair_level = opts$gbs_pair_level,
+                             pair_freq = opts$pair_freq,
+                             pair_penalty = opts$pair_penalty,
+                             pair_pool = opts$pair_pool,
+                             shortlist_k = opts$shortlist_k,
+                             max_use = opts$max_use, overshoot = opts$overshoot,
+                             select_priority = opts$select_priority),
+    stop(".stk_select_pairs: unknown scheme '", scheme, "'.")
+  )
+  .stk_check_pairs(pairs, dimnames(geno_meta$geno_arrays)[[1L]], b, scheme)
+  pairs
+}
+
+# Output contract of a family scorer: >= 1 family, parents in the pool, no
+# duplicate family (in either orientation), a self only when allowed.
+.stk_check_pairs <- function(pairs, pool, budget, scheme) {
+  if (is.null(pairs) || nrow(pairs) == 0L)
+    stop("run_stacking_simulation: scheme \"", scheme, "\" returned no family ",
+         "under selection_unit = \"pairs\" (", .stk_budget_text(budget), ").",
+         call. = FALSE)
+  miss <- setdiff(unique(c(pairs$Parent1, pairs$Parent2)), pool)
+  if (length(miss))
+    stop(".stk_select_pairs: parent(s) not in the pool: ",
+         paste(miss, collapse = ", "))
+  key <- paste(pmin(pairs$Parent1, pairs$Parent2), pmax(pairs$Parent1, pairs$Parent2))
+  if (anyDuplicated(key))
+    stop(".stk_select_pairs: scheme \"", scheme, "\" returned a duplicate family.")
+  if (!isTRUE(budget$allow_selfing) && any(pairs$Parent1 == pairs$Parent2))
+    stop(".stk_select_pairs: scheme \"", scheme, "\" returned a self-cross with ",
+         "avoid_selfing = TRUE.")
+  invisible(TRUE)
 }
 
 
@@ -361,19 +407,21 @@
                                 select_priority = opts$select_priority)
   lap("ideal")
 
-  # Selection unit. Parents-first (the implemented protocol): a parent subgroup,
-  # then its full traversal. Direct pairing: the scheme returns the crosses
-  # themselves under the resolved budget (placeholder — .stk_select_pairs()
-  # stops; the seam is here so the implementation slots in without touching
-  # the rest of the cycle).
+  # Selection unit. Parents-first: a parent subgroup, then its full traversal.
+  # Direct pairing: the scheme returns the crosses themselves under the
+  # resolved budget; the family table (a fresh copy — make_cross_design()
+  # adds columns by reference) becomes the custom design, self-crosses kept
+  # only when the budget allowed them as candidates.
+  pairs <- NULL
   if (identical(opts$selection_unit, "pairs")) {
     pairs   <- .stk_select_pairs(scheme, lg, current, ideal, opts)
     parents <- unique(c(pairs$Parent1, pairs$Parent2))
     lap("selection")
-    cross_design <- make_cross_design(parents, method = "custom",
-                                      cross_table = pairs,
-                                      avoid_selfing = opts$avoid_selfing,
-                                      n_offspring = opts$num_offspring)
+    cross_design <- make_cross_design(
+      parents, method = "custom",
+      cross_table   = data.table(Parent1 = pairs$Parent1, Parent2 = pairs$Parent2),
+      avoid_selfing = !isTRUE(opts$pair_budget$allow_selfing),
+      n_offspring   = opts$num_offspring)
   } else {
     parents <- .stk_select_parents(scheme, lg, current, opts$top_founders,
                                    ideal, opts)
@@ -391,6 +439,18 @@
   # sample-name blow-up; lineage stays in Parent1/Parent2 + cycle).
   gen <- .stk_rename_generation(res, cycle, opts)
   off <- gen$off
+
+  # Per-family selection score (direct pairing; NA under parents-first) and the
+  # cycle's family / distinct-parent counts — both units, so the two protocols
+  # are compared on the same columns.
+  cross_plans <- gen$cross_plans
+  cross_plans[, pair_score := NA_real_]
+  if (!is.null(pairs))
+    cross_plans[data.table(Parent1 = pairs$Parent1, Parent2 = pairs$Parent2,
+                           s = pairs$score),
+                on = .(Parent1, Parent2), pair_score := i.s]
+  n_families     <- nrow(cross_plans)
+  n_parents_used <- length(unique(c(cross_plans$Parent1, cross_plans$Parent2)))
 
   # FR3 (persistent gS session): push the SAME compact names into the live group
   # so next cycle's parent-name -> "X" lookup in gs_cross_plan() resolves. Ordering
@@ -438,7 +498,9 @@
   lap("metrics")
 
   list(off             = off,
-       cross_plans     = gen$cross_plans,
+       cross_plans     = cross_plans,
+       n_families      = n_families,
+       n_parents_used  = n_parents_used,
        f1              = as.numeric(gen$bp$F1mean),
        ideal_phenotype = if (is.null(ideal)) NA_real_
                          else as.numeric(attr(ideal, "ideal_phenotype")),
@@ -500,7 +562,7 @@
             ideal_phenotype = adv$ideal_phenotype)]
   setcolorder(cp, c("CrossID", "Parent1", "Parent2", "F1count", "F1mean",
                     "select_type", "cycle", "rep", "sel_scheme",
-                    "D2Ideal", "coancestry", "ideal_phenotype"))
+                    "D2Ideal", "coancestry", "ideal_phenotype", "pair_score"))
   cp[]
 }
 
@@ -518,7 +580,9 @@
              mean_gene_diversity  = adv$gene_div,
              mean_ideal_phenotype = adv$ideal_phenotype,
              ideal_hap_gebv       = adv$ideal_hap,
-             marker_size          = adv$n_marker)
+             marker_size          = adv$n_marker,
+             n_families           = as.integer(adv$n_families),
+             n_parents_used       = as.integer(adv$n_parents_used))
 }
 
 
@@ -553,14 +617,31 @@
 #' selfing generations between decision cycles.
 #'
 #' @section Selection unit:
-#' Every scheme above selects a \emph{parent subgroup} of \code{top_founders},
-#' which is then crossed in a full traversal (\code{selection_unit =
-#' "parents"}, \code{choose(top_founders, 2)} families per cycle). Direct pair
-#' selection (\code{selection_unit = "pairs"}) — choosing the crosses rather than
-#' the parents — is reserved but \strong{not implemented}: the call validates
-#' \code{pair_budget}, resolves the per-cycle budget, prints it when
-#' \code{verbose}, and stops at the first cycle. \code{\link{pair_selection_budget}}
-#' gives the same numbers without running anything.
+#' Under \code{selection_unit = "parents"} (default) every scheme selects a
+#' \emph{parent subgroup} of \code{top_founders}, which is then crossed in a
+#' full traversal (\code{choose(top_founders, 2)} families per cycle). Under
+#' \code{selection_unit = "pairs"} (direct pair selection) every scheme scores
+#' \emph{families} — the expected F1 of one cross — and one greedy adds families
+#' until the budget stops it: \code{pair_budget = "families"} makes as many
+#' families as the traversal (distinct parents free), \code{"parents"} adds
+#' families until \code{top_founders} distinct parents are in use (families
+#' free; see \code{\link{pair_selection_budget}}). What each scheme scores:
+#' \describe{
+#'   \item{\code{"TS"}}{the mid-parent value (the expected F1 mean), or with
+#'     \code{ts_pair_score = "usefulness"} the mid-parent plus
+#'     \code{usefulness_k} F1 standard deviations (exact under the block model).}
+#'   \item{\code{"OHS"}}{the family's stacking ceiling \code{M[i, j]}
+#'     (\code{\link{ohs_pair_selection}}; under \code{"parents"} the best
+#'     parent set and its traversal — \code{ohs_method = "GA_coverage"} is refused).}
+#'   \item{\code{"GBS"}}{the ideal-genotype objective on the family's expected
+#'     offspring (\code{\link{gbs_pair_selection}}: \code{gbs_pair_level},
+#'     \code{pair_freq}, \code{pair_penalty}, \code{pair_pool}; the default
+#'     objective is \code{"set"}).}
+#'   \item{\code{"OCS"}}{no family form yet (follows the KCT rename).}
+#' }
+#' \code{summary} reports the cycle's \code{n_families} and
+#' \code{n_parents_used} for both units, and \code{plans} the per-family
+#' \code{pair_score}.
 #'
 #' @section Crossing backends:
 #' \describe{
@@ -595,17 +676,17 @@
 #'   (truncation before it). Default \code{1}.
 #' @param num_offspring Integer. Offspring per cross. Default \code{4}.
 #' @param top_founders Integer. Parents selected per cycle. Default \code{16}.
-#' @param avoid_selfing Logical. Exclude self-crosses from the design. Default
-#'   \code{FALSE}. Note that the \code{"all_pairs"} design used by the
-#'   parents-first protocol never contains a self-cross in any case (it
-#'   enumerates \code{combn(parents, 2)}), so each cycle makes
-#'   \code{choose(top_founders, 2)} families whatever this flag says.
-#' @param selection_unit What a cycle selects. \code{"parents"} (default, the
-#'   implemented protocol): a subgroup of \code{top_founders} parents, then every
-#'   pair of them is crossed. \code{"pairs"}: the crosses themselves are chosen
-#'   (direct pairing) — \strong{a placeholder in this version}: the arguments are
-#'   validated and the budget is resolved, then the first cycle stops with the
-#'   resolved budget in the message. Requires \code{pair_budget}.
+#' @param avoid_selfing Logical. Exclude self-crosses. Default \code{TRUE}.
+#'   The \code{"all_pairs"} design of the parents-first protocol never contains
+#'   a self-cross in any case (it enumerates \code{combn(parents, 2)}), so the
+#'   flag acts only under \code{selection_unit = "pairs"}, where
+#'   \code{avoid_selfing = FALSE} offers the selfs as candidate families and
+#'   counts them in the budget.
+#' @param selection_unit What a cycle selects. \code{"parents"} (default): a
+#'   subgroup of \code{top_founders} parents, then every pair of them is
+#'   crossed. \code{"pairs"}: the crosses themselves are chosen (direct
+#'   pairing; see the \emph{Selection unit} section). Requires
+#'   \code{pair_budget}.
 #' @param pair_budget How a direct-pairing cycle is matched to the parents-first
 #'   protocol; required when \code{selection_unit = "pairs"}, ignored otherwise.
 #'   The two options conflict, so there is no default. \code{"families"}: the
@@ -616,6 +697,20 @@
 #'   are in use, with the number of families free. See
 #'   \code{\link{pair_selection_budget}} for the numbers a given
 #'   \code{top_founders} implies.
+#' @param gbs_pair_level,pair_freq,pair_penalty,pair_pool,shortlist_k Direct
+#'   pairing, GBS: the level the family is scored at (\code{"population"} /
+#'   \code{"family"}), the frequency projection (\code{NULL} = by budget),
+#'   the absent-state penalty form (\code{"loss"} / \code{"hard"}), the
+#'   candidate space and its shortlist size — see \code{\link{gbs_pair_selection}}.
+#' @param max_use Direct pairing: per-parent usage cap (families a parent may
+#'   appear in). Default \code{Inf}.
+#' @param overshoot Direct pairing, \code{pair_budget = "parents"}: a family
+#'   that would exceed the parent limit is \code{"skip"}ped (default; the search
+#'   goes on among the parents in use, up to the traversal) or \code{"stop"}s
+#'   the search.
+#' @param ts_pair_score,usefulness_k Direct pairing, TS: \code{"midparent"}
+#'   (default) or \code{"usefulness"} = mid-parent \code{+ usefulness_k *
+#'   sd(F1)}. Default \code{usefulness_k = 1}.
 #' @param scheme Character vector of schemes to run/compare: any of \code{"TS"},
 #'   \code{"OHS"}, \code{"OCS"}, \code{"GBS"}.
 #' @param ohs_method OHS engine (see \code{\link{ohs_selection}}).
@@ -627,7 +722,8 @@
 #'   \code{penalty_scale} and \code{gbs_effect_weight} when they are \code{NULL};
 #'   an explicit value always wins. See \code{\link{gbs_selection}}.
 #' @param gbs_objective GBS objective, \code{"candidate"} or \code{"set"};
-#'   \code{NULL} (default) takes the preset value (\code{"candidate"}).
+#'   \code{NULL} (default) takes the preset value (\code{"candidate"} under
+#'   parents-first; \code{"set"} under direct pairing).
 #' @param gbs_engine GBS engine, \code{"greedy"} or \code{"GA"}; \code{NULL}
 #'   (default) takes the preset value (\code{"greedy"}).
 #' @param penalty_mode GBS absent-state penalty scaling, \code{"dynamic"} or
@@ -694,13 +790,14 @@
 #' \describe{
 #'   \item{\code{plans}}{Per-cross data.table: \code{CrossID, Parent1, Parent2,
 #'     F1count, F1mean, select_type, cycle, rep, sel_scheme, D2Ideal,
-#'     coancestry, ideal_phenotype}.}
+#'     coancestry, ideal_phenotype, pair_score} (the last is the family's
+#'     selection score under direct pairing, \code{NA} otherwise).}
 #'   \item{\code{summary}}{Per-cycle data.table: \code{cycle, select_type, rep,
 #'     sel_scheme, mean_F1mean, var_F1mean, mean_D2Ideal, mean_coancestry,
-#'     mean_gene_diversity, mean_ideal_phenotype, marker_size} (with a
-#'     \code{cycle = 0} founder row). \code{mean_gene_diversity} is Nei's (1973)
-#'     gene diversity of the cycle's population (see
-#'     \code{\link{compute_gene_diversity}}).}
+#'     mean_gene_diversity, mean_ideal_phenotype, ideal_hap_gebv, marker_size,
+#'     n_families, n_parents_used} (with a \code{cycle = 0} founder row).
+#'     \code{mean_gene_diversity} is Nei's (1973) gene diversity of the cycle's
+#'     population (see \code{\link{compute_gene_diversity}}).}
 #'   \item{\code{ideal_genotypes}}{The founder ideal-genotype target:
 #'     \code{Block, Effect, CFreq, TargetFreq}.}
 #'   \item{\code{final_populations}}{Named list (\code{"<scheme>_rep<r>"} ->
@@ -711,8 +808,10 @@
 #' }
 #'
 #' @seealso \code{\link{ohs_selection}}, \code{\link{ocs_selection}},
-#'   \code{\link{gbs_selection}}, \code{\link{construct_ideal_genotype}},
-#'   \code{\link{make_cross_design}}, \code{\link{plot_simulation_trajectories}}
+#'   \code{\link{gbs_selection}}, \code{\link{ohs_pair_selection}},
+#'   \code{\link{gbs_pair_selection}}, \code{\link{pair_selection_budget}},
+#'   \code{\link{construct_ideal_genotype}}, \code{\link{make_cross_design}},
+#'   \code{\link{plot_simulation_trajectories}}
 #'
 #' @export
 run_stacking_simulation <- function(
@@ -725,9 +824,18 @@ run_stacking_simulation <- function(
   ga_start_by         = 1L,
   num_offspring       = 4L,
   top_founders        = 16L,
-  avoid_selfing       = FALSE,
+  avoid_selfing       = TRUE,
   selection_unit      = c("parents", "pairs"),
   pair_budget         = NULL,
+  gbs_pair_level      = c("population", "family"),
+  pair_freq           = NULL,
+  pair_penalty        = c("loss", "hard"),
+  pair_pool           = c("shortlist", "all"),
+  shortlist_k         = NULL,
+  max_use             = Inf,
+  overshoot           = c("skip", "stop"),
+  ts_pair_score       = c("midparent", "usefulness"),
+  usefulness_k        = 1,
   scheme              = c("TS", "OHS", "OCS", "GBS"),
   ohs_method          = c("GA_pairwise", "GA_coverage", "Greedy"),
   gbs_method          = c("ARCSIN", "LOG"),
@@ -790,17 +898,39 @@ run_stacking_simulation <- function(
   construct_method <- match.arg(construct_method)
   cross_backend    <- match.arg(cross_backend)
   selection_unit   <- match.arg(selection_unit)
+  gbs_pair_level   <- match.arg(gbs_pair_level)
+  pair_penalty     <- match.arg(pair_penalty)
+  pair_pool        <- match.arg(pair_pool)
+  overshoot        <- match.arg(overshoot)
+  ts_pair_score    <- match.arg(ts_pair_score)
+  if (!is.null(pair_freq)) pair_freq <- match.arg(pair_freq, c("projected", "running"))
 
   # Selection unit and its per-cycle budget (parents-first: the traversal of
   # `top_founders`; direct pairing: the chosen `pair_budget`). Resolved up front
   # so a missing `pair_budget` fails before anything runs, and so the family-ID
-  # width below follows the family count. `allow_selfing = FALSE` because the
-  # all-pairs design never selfs (see .stk_selection_budget()).
+  # width below follows the family count. Selfing: the all-pairs design never
+  # selfs, so parents-first passes FALSE; under pairs the flag is honoured by
+  # the candidate pool, the budget and the design alike.
   if (selection_unit == "parents" && !is.null(pair_budget))
     warning("run_stacking_simulation: 'pair_budget' is ignored unless ",
             "selection_unit = \"pairs\".", call. = FALSE)
-  budget <- .stk_selection_budget(selection_unit, pair_budget, top_founders,
-                                  allow_selfing = FALSE)
+  budget <- .stk_selection_budget(
+    selection_unit, pair_budget, top_founders,
+    allow_selfing = if (selection_unit == "pairs") !isTRUE(avoid_selfing) else FALSE)
+  if (selection_unit == "pairs") {
+    if ("OHS" %in% scheme && ohs_method == "GA_coverage")
+      stop("run_stacking_simulation: ohs_method = \"GA_coverage\" has no family ",
+           "form under selection_unit = \"pairs\"; use \"GA_pairwise\" or \"Greedy\".")
+    if ("OCS" %in% scheme)
+      stop("run_stacking_simulation: scheme \"OCS\" has no direct-pair form yet ",
+           "(pair plan Phase C); run it under selection_unit = \"parents\".")
+    if (!is.null(gbs_engine) && gbs_engine == "GA")
+      stop("run_stacking_simulation: gbs_engine = \"GA\" over family sets is not ",
+           "implemented (pair plan Phase D); the pairs engine is the greedy.")
+    # The pairs default objective is "set" (the candidate score is separable
+    # over a family); an explicit value still wins.
+    if (is.null(gbs_objective)) gbs_objective <- "set"
+  }
 
   # GBS knobs: the preset fills whatever was left NULL; explicit values win.
   gbs_spec <- .gbs_apply_preset(gbs_preset, list(
@@ -859,6 +989,15 @@ run_stacking_simulation <- function(
     avoid_selfing     = avoid_selfing,
     selection_unit    = selection_unit,
     pair_budget       = budget,        # resolved budget (see .stk_selection_budget)
+    gbs_pair_level    = gbs_pair_level,
+    pair_freq         = pair_freq,
+    pair_penalty      = pair_penalty,
+    pair_pool         = pair_pool,
+    shortlist_k       = shortlist_k,
+    max_use           = max_use,
+    overshoot         = overshoot,
+    ts_pair_score     = ts_pair_score,
+    usefulness_k      = usefulness_k,
     ohs_method        = ohs_method,
     gbs_method        = gbs_method,
     gbs_objective     = gbs_spec$gbs_objective,
@@ -958,7 +1097,8 @@ run_stacking_simulation <- function(
         else as.numeric(attr(f_ideal, "ideal_phenotype")),
       ideal_hap_gebv = if (wantm("ideal_hap_gebv"))
         .stk_ideal_hap_gebv(founder_lg, ploidy = opts$ploidy) else NA_real_,
-      marker_size = dim(geno_meta$geno_arrays)[2L])
+      marker_size = dim(geno_meta$geno_arrays)[2L],
+      n_families = NA_integer_, n_parents_used = NA_integer_)
 
     slot <- 1L
     wc   <- 0L

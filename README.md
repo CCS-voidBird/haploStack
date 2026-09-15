@@ -5,26 +5,34 @@
 Developed for the GRDC Barley Phase 2 project at the University of Queensland.
 Generalised for use with any biparental or multiparental diploid breeding programme.
 
-> ### ⚠ 0.6.0 changes numbers — read this before upgrading a running analysis
+> ### 0.7.2 — direct pair selection
 >
-> Two contracts changed, and both move output you may already have published.
+> The stacking driver can now **select the crosses themselves** instead of a
+> parent subgroup: `run_stacking_simulation(selection_unit = "pairs",
+> pair_budget = "families" | "parents", ...)`. Every scheme scores *families*
+> (the expected F1 of one cross) and one greedy adds families until the budget
+> stops it — TS by the mid-parent (or usefulness), OHS by the family's stacking
+> ceiling `M[i, j]`, GBS by the ideal-genotype objective on the family's expected
+> offspring, which reduces exactly to the parents-first frequency for a full
+> traversal. New exports `ohs_pair_selection()`, `gbs_pair_selection()`;
+> `summary` gains `n_families` / `n_parents_used`, `plans` gains `pair_score`.
+> Parents-first runs are unchanged (`avoid_selfing` now defaults to `TRUE`, which
+> the all-pairs design never used). Every valid combination of scheme × unit ×
+> budget × option: [`vignettes/selection_grid.md`](vignettes/selection_grid.md).
 >
-> **A missing allele is now `NA`, and nothing else.** Every reader normalises the
-> source file's missing code (PLINK's `"0"`, `"N"`, `"."`, `"-"`) on the way in,
-> at a single portal. On a panel with missing calls this moves **marker effects**,
-> **frequency-centred local GEBVs** and **block signatures** — because the missing
-> code could previously rank as a real allele and take a marker's effect. MAF,
-> call rate, block definitions, LD, uncentred GEBVs and dosage containers are
-> unchanged. A container saved by an earlier version still loads; it warns and
-> names `repair_geno_meta()`, and your file is never rewritten for you.
+> **Focus on `TS`, `OHS`, `GBS`.** `OCS` is kept for compatibility but has known
+> issues (kinship-penalised truncation with a silent fall-back — not true
+> optimum-contribution selection) and has no family form; a `KCT` rename and a
+> real `OPT` scheme are planned. In a single call with `replications > 1` the
+> OHS genetic-algorithm engines and OCS re-seed the RNG each cycle, so their
+> replicates are identical — use `ohs_method = "Greedy"` or one call per seed.
 >
-> **`center_by_freq` is replaced by `center`**, with three named modes, and
-> `run_haplotype_catalogue()` no longer centres by default. This **changes
-> published catalogue block variances**. `center = "allele_freq"` reproduces the
-> old numbers exactly; the deprecated logical still works for one release.
->
-> Full detail, with a migration checklist:
-> [`docs/haploStack_io_reference_0.6.0.md`](docs/haploStack_io_reference_0.6.0.md).
+> **0.7.0 changed published GBS numbers** (`gbs_preset = "kemper"`, Kemper's
+> `LOG`, the bounded risk × hope penalty scale, `ideal_scope = "founder"`), and
+> **0.6.0 changed missing-allele handling and the catalogue centring default**
+> — see [`docs/CHANGELOG.md`](docs/CHANGELOG.md) and
+> [`docs/haploStack_io_reference_0.6.0.md`](docs/haploStack_io_reference_0.6.0.md)
+> before upgrading a running analysis.
 
 ---
 
@@ -40,7 +48,7 @@ remotes::install_github("CCS-voidBird/haploStack")
 devtools::install("path/to/haploStack")
 
 # From a release source tarball
-install.packages("haploStack_0.6.0.tar.gz", repos = NULL, type = "source")
+install.packages("haploStack_0.7.2.tar.gz", repos = NULL, type = "source")
 
 library(haploStack)
 ```
@@ -137,7 +145,10 @@ haploStack/
 │   ├── catalogue_family.R       trace_haplotype_family()
 │   ├── catalogue_main.R         run_haplotype_catalogue() orchestrator
 │   ├── fitness_functions.R      create/update/write fitness index
-│   ├── stacking_selection.R     greedy, GA, OCS selection; make_cross_design()
+│   ├── stacking_selection.R     greedy, GA, OCS selection; make_cross_design(); pair_selection_budget()
+│   ├── stacking_ohs.R           ohs_selection() — Optimal Haplotype Selection
+│   ├── stacking_gbs.R           gbs_selection() — Genotype Building Strategy (Kemper 2012)
+│   ├── stacking_pairs.R         direct pair selection: ohs_pair_selection(), gbs_pair_selection()
 │   ├── stacking_main.R          run_stacking_simulation()
 │   └── stacking_monitor.R       plot_simulation_trajectories(), summarise_simulation()
 ├── tests/testthat/
@@ -148,6 +159,8 @@ haploStack/
 │   └── test-stacking.R          Stacking module QA (12 tests)
 ├── vignettes/
 │   ├── quick_start.Rmd          ← START HERE: beginner guide
+│   ├── example_stacking_simulation.Rmd   Stacking simulation: one method, a comparison, direct pairs
+│   ├── selection_grid.md        Which selection settings combine (scheme × unit × budget × options)
 │   ├── simulation_catalogue.Rmd Full catalogue workflow with simulated data
 │   └── simulation_stacking.Rmd  Full stacking workflow with simulated data
 ├── src/                         Rcpp kernels (compiled on install)
@@ -256,7 +269,11 @@ testthat::test_file("tests/testthat/test-catalogue.R")
   centring mode preserves
 - [`docs/haploStack_io_reference_0.5.5.md`](docs/haploStack_io_reference_0.5.5.md) —
   and the sheets for earlier releases beside it
-- `vignettes/` — worked examples; start with `quick_start.Rmd`
+- [`vignettes/selection_grid.md`](vignettes/selection_grid.md) — the matrix of
+  selection scheme × unit × budget × options for `run_stacking_simulation()`,
+  with the caveats (OCS, replicate seeding)
+- `vignettes/` — worked examples; start with `quick_start.Rmd`, then
+  `example_stacking_simulation.Rmd` for the simulation
 
 ---
 

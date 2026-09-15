@@ -27,18 +27,33 @@ value accumulates. It reuses the `GenoMeta` and marker effects from
 
 1. A **standalone run with one selection method** and explicit parameters.
 2. An **assessment comparing several methods** in a single call.
+3. **Direct pair selection** — choosing the crosses themselves rather than a
+   parent subgroup (`selection_unit = "pairs"`, new in 0.7.2).
 
-`run_stacking_simulation()` offers four schemes:
+`run_stacking_simulation()` offers four schemes; **focus on `TS`, `OHS` and
+`GBS`** — `OCS` is kept for compatibility but is not recommended at present:
 
-| Scheme | Meaning |
-|--------|---------|
-| `TS`  | Truncation (genomic) selection — top founders by total local GEBV |
-| `OHS` | Optimal Haplotype Selection — maximise next-cross block gain |
-| `OCS` | Optimal Contribution Selection — kinship-constrained gain |
-| `GBS` | Genotype Building Strategy — drive block frequencies to an ideal |
+| Scheme | Meaning | Status |
+|--------|---------|--------|
+| `TS`  | Truncation (genomic) selection — top founders by total local GEBV | ✔ |
+| `OHS` | Optimal Haplotype Selection — maximise next-cross block gain (Tong et al. 2025) | ✔ |
+| `GBS` | Genotype Building Strategy — drive block frequencies to an ideal genotype (Kemper et al. 2012) | ✔ |
+| `OCS` | *Kinship-penalised truncation.* **Known issues** — it is neither Meuwissen-1997 optimum-contribution selection nor Kemper's OPT (no contribution vector, a unit-dependent penalty, silent fall-back to truncation when the kinship cap stops it early), and in a multi-replication call its replicates are not independent (see the note below). A rename to `KCT` and a true `OPT` scheme are planned. | ⚠ not recommended |
+
+Every scheme has two **selection units**: `"parents"` (default — pick a parent
+subgroup, cross every pair of them) and `"pairs"` (pick the families
+directly). The full matrix of what can be combined with what is in
+`vignettes/selection_grid.md`.
 
 The default crossing backend is pure-R (`"block"`), so no external simulation
 package is required.
+
+> **Note on replicates.** In a single call with `replications > 1`, the
+> `OHS` genetic-algorithm engines (`GA_pairwise`, `GA_coverage`) and `OCS`
+> re-seed the random-number stream with the fixed `seed` every cycle, so their
+> replicates come out identical. Use `ohs_method = "Greedy"` when you rely on
+> replicate spread, or run replicates as separate calls with different seeds
+> (as the HaploSim campaign driver does). `TS` and `GBS` are unaffected.
 
 ```{r load}
 library(haploStack)
@@ -141,13 +156,13 @@ plot_simulation_trajectories(sim_ohs$trajectories,
 
 Pass a **vector of schemes** to compare them in one call — each runs under the
 same founders, cycles, and seeds, so differences reflect the method, not the
-draw.
+draw. We compare the three recommended schemes.
 
 ```{r multi-run}
 sim_cmp <- run_stacking_simulation(
   geno_meta         = meta,
   effect_df         = effects,
-  scheme            = c("TS", "OHS", "OCS", "GBS"),   # compare all four
+  scheme            = c("TS", "OHS", "GBS"),          # the recommended three
   ohs_method        = "Greedy",
   gbs_method        = "ARCSIN",
   replications      = 3L,
@@ -218,6 +233,73 @@ summ[Cycle == final_cycle, .(Method, MeanGEBV_mean, MeanGEBV_sd)][order(-MeanGEB
 
 ---
 
+## 3  Direct pair selection — choosing the crosses, not the parents
+
+Under the default unit every scheme picks a parent subgroup of `top_founders`
+and then crosses every pair of them (`choose(top_founders, 2)` families per
+cycle). With `selection_unit = "pairs"` every scheme instead scores
+**families** — the expected F1 of one cross — and one greedy adds families
+until a **budget** stops it. The budget ties the pair run to the parents-first
+run it replaces, and the two ways of doing that conflict, so you must choose:
+
+| `pair_budget` | Held equal to the parents-first run | Free |
+|---|---|---|
+| `"families"` | the offspring population size — `choose(top_founders, 2)` families | how many distinct parents are used |
+| `"parents"`  | the number of distinct parents — `top_founders` | how many families are made |
+
+`pair_selection_budget()` gives the numbers for a given `top_founders` without
+running anything. What each scheme scores under `"pairs"`:
+
+- **TS** — the mid-parent value (the exact expected F1 mean), or with
+  `ts_pair_score = "usefulness"` the mid-parent plus `usefulness_k` F1
+  standard deviations (a segregating family is worth more than a fixed one of
+  the same mean).
+- **OHS** — the family's stacking ceiling `M[i, j]`; under `"parents"` the
+  optimum is the best parent set and its traversal, so that budget runs the
+  usual `ohs_selection()`.
+- **GBS** — the ideal-genotype objective on the family's expected offspring:
+  `gbs_pair_level = "population"` scores what a family adds to the offspring
+  population being built, `"family"` the family's own distance to the ideal;
+  the absent-state penalty is weighted by the exact probability that none of
+  the `num_offspring` progeny carries the state (`pair_penalty = "loss"`).
+
+```{r pairs-run}
+sim_pairs <- run_stacking_simulation(
+  geno_meta      = meta,
+  effect_df      = effects,
+  scheme         = c("TS", "OHS", "GBS"),
+  selection_unit = "pairs",
+  pair_budget    = "families",       # same offspring population size as parents-first
+  ohs_method     = "Greedy",
+  replications   = 3L,
+  select_cycles  = 5L,
+  top_founders   = 4L,               # -> 6 families per cycle
+  num_offspring  = 4L,
+  select_top_blocks = 50L,
+  seed           = 42L,
+  output_dir     = NULL,
+  verbose        = FALSE
+)
+
+# the family / distinct-parent counts are logged per cycle, and every family
+# carries its selection score
+sim_pairs$summary[cycle > 0L, .(cycle, rep, sel_scheme, n_families, n_parents_used)][1:6]
+sim_pairs$plans[cycle == 1L & rep == 1L, .(sel_scheme, Parent1, Parent2, pair_score)][1:6]
+```
+
+Under `pair_budget = "parents"` the family count becomes a *result* of the
+cycle (between `ceiling(top_founders / 2)` and the traversal), and
+`avoid_selfing = FALSE` offers self-crosses as candidate families. The
+exported `ohs_pair_selection()` and `gbs_pair_selection()` run one cycle's
+family choice on a haplotype-level GEBV table outside the driver.
+
+```{r pairs-budget}
+pair_selection_budget(16, "families")$n_families      # 120 families, parents free
+pair_selection_budget(16, "parents")[c("n_parents_max", "n_families_min", "n_families_max")]
+```
+
+---
+
 ## Notes for real studies
 
 - **Scale up gradually.** Increase `replications` and `select_cycles` once the
@@ -235,7 +317,10 @@ summ[Cycle == final_cycle, .(Method, MeanGEBV_mean, MeanGEBV_sd)][order(-MeanGEB
 |------|------|
 | Resume from saved founders | `load_geno_meta()` |
 | One-method simulation | `run_stacking_simulation(scheme = "OHS", ...)` |
-| Multi-method comparison | `run_stacking_simulation(scheme = c("TS","OHS","OCS","GBS"), ...)` |
+| Multi-method comparison | `run_stacking_simulation(scheme = c("TS","OHS","GBS"), ...)` |
+| Direct pair selection | `run_stacking_simulation(selection_unit = "pairs", pair_budget = "families", ...)` |
+| Budget of a pair run | `pair_selection_budget(top_founders, "families" / "parents")` |
+| All valid combinations | `vignettes/selection_grid.md` |
 | Trajectory plot | `plot_simulation_trajectories()` |
 | Aggregated summary | `summarise_simulation()` |
 

@@ -444,7 +444,7 @@ make_cross_design <- function(selected_parents,
 
 
 # ---------------------------------------------------------------------------
-# Family count of a parent set, and the direct-pairing budget (placeholder seam)
+# Family count of a parent set, and the direct-pairing budget
 # ---------------------------------------------------------------------------
 
 # Families a full traversal of `n_parents` parents makes: n(n-1)/2 distinct
@@ -462,7 +462,7 @@ make_cross_design <- function(selected_parents,
 #' The stacking driver selects a \emph{parent subgroup} first and then crosses it
 #' in a full traversal (\code{\link{make_cross_design}}, \code{"all_pairs"}).
 #' Selecting \emph{pairs} directly (\code{selection_unit = "pairs"} in
-#' \code{\link{run_stacking_simulation}} — a placeholder in this version) has to
+#' \code{\link{run_stacking_simulation}}) has to
 #' be matched to that protocol by one of two budgets, which conflict in general
 #' and must therefore be chosen explicitly:
 #' \describe{

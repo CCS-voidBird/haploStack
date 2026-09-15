@@ -1,11 +1,11 @@
 # =============================================================================
 # test-stacking-pairs.R
 #
-# Direct pair selection — PLACEHOLDER (thread #031, Q23 i). What is tested is
-# the seam, not a selector: the budget that ties a direct-pairing cycle to the
-# parents-first traversal (pair_selection_budget(), .stk_selection_budget()),
-# the driver's argument validation, the stop message of .stk_select_pairs(),
-# and that the default parents-first path is untouched.
+# Direct pair selection — the seam (thread #031): the budget that ties a
+# direct-pairing cycle to the parents-first traversal (pair_selection_budget(),
+# .stk_selection_budget()), the driver's argument validation, the engine's
+# stop rules (.pairs_greedy()), and that the default parents-first path is
+# untouched. The scheme scorers are tested in test-stacking-pairs-schemes.R.
 # =============================================================================
 
 library(testthat)
@@ -109,16 +109,103 @@ test_that("selection_unit = 'pairs' without pair_budget fails before running", {
     "needs 'pair_budget'")
 })
 
-test_that("selection_unit = 'pairs' stops at the first cycle with the resolved budget", {
+test_that("selection_unit = 'pairs' runs every cycle under either budget", {
   fx <- .pairs_fixture()
   run <- function(budget) run_stacking_simulation(
-    fx$meta, fx$eff, replications = 1L, select_cycles = 2L, top_founders = 4L,
+    fx$meta, fx$eff, replications = 1L, select_cycles = 3L, top_founders = 4L,
     num_offspring = 2L, scheme = "GBS", selection_unit = "pairs",
     pair_budget = budget, select_top_blocks = 50L, output_dir = NULL,
     verbose = FALSE)
-  # 4 parents -> 6 families under "families"; 2..6 families under "parents"
-  expect_error(run("families"), "not implemented.*6 families per cycle")
-  expect_error(run("parents"),  "not implemented.*4 distinct parents.*2\\.\\.6 families")
+  # 4 parents -> exactly 6 families under "families"; 4 distinct parents and
+  # 2..6 families under "parents"
+  a <- run("families")
+  expect_true(all(a$summary[cycle > 0L]$n_families == 6L))
+  expect_true(all(a$plans[, .N, by = cycle]$N == 6L))
+  b <- run("parents")
+  expect_true(all(b$summary[cycle > 0L]$n_parents_used == 4L))
+  expect_true(all(b$summary[cycle > 0L]$n_families %between% c(2L, 6L)))
+  expect_true(all(!is.na(b$plans$pair_score)))
+})
+
+test_that("selection_unit = 'pairs' refuses what has no family form", {
+  fx <- .pairs_fixture()
+  run <- function(...) run_stacking_simulation(
+    fx$meta, fx$eff, replications = 1L, select_cycles = 1L, top_founders = 4L,
+    num_offspring = 2L, selection_unit = "pairs", pair_budget = "families",
+    select_top_blocks = 50L, output_dir = NULL, verbose = FALSE, ...)
+  expect_error(run(scheme = "OCS"), "no direct-pair form")
+  expect_error(run(scheme = "OHS", ohs_method = "GA_coverage"), "GA_coverage")
+  expect_error(run(scheme = "GBS", gbs_engine = "GA", gbs_objective = "set"),
+               "family sets")
+})
+
+# ── the engine: stop rules ────────────────────────────────────────────────────
+
+# An additive scorer over a fixed score triangle (lower = better).
+.toy_scorer <- function(S, allow_selfing = FALSE) {
+  n <- nrow(S)
+  cand0 <- haploStack:::.pair_candidates(n, allow_selfing)
+  list(scheme = "TOY", samples = rownames(S), additive = TRUE, init = NULL,
+       candidates = function(state) cand0,
+       score = function(state, cand) S[cbind(cand$i, cand$j)],
+       update = function(state, i, j) state)
+}
+
+test_that("the engine takes the top-F families under 'families' (= order())", {
+  set.seed(1)
+  n <- 8L
+  S <- matrix(stats::runif(n * n), n, n, dimnames = list(paste0("P", 1:n), paste0("P", 1:n)))
+  S <- (S + t(S)) / 2
+  sc <- .toy_scorer(S)
+  b  <- pair_selection_budget(4, "families")            # 6 families
+  out <- haploStack:::.pairs_greedy(sc, b)
+  expect_s3_class(out, "pair_selection")
+  expect_equal(nrow(out), 6L)
+  expect_equal(attr(out, "n_families"), 6L)
+  # equals the 6 smallest upper-triangle entries, in order
+  ut <- which(upper.tri(S), arr.ind = TRUE)
+  ref <- sort(S[ut])[1:6]
+  expect_equal(out$score, ref)
+  expect_true(all(out$Parent1 != out$Parent2))
+  key <- paste(pmin(out$Parent1, out$Parent2), pmax(out$Parent1, out$Parent2))
+  expect_false(anyDuplicated(key) > 0)
+})
+
+test_that("the engine stops at n distinct parents under 'parents' and honours overshoot", {
+  n <- 8L
+  # scores chosen so the best-first order is (1,2) (3,4) (5,6) (1,3) (2,4) ...
+  S <- matrix(10, n, n, dimnames = list(paste0("P", 1:n), paste0("P", 1:n)))
+  S[1, 2] <- S[2, 1] <- 1; S[3, 4] <- S[4, 3] <- 2; S[5, 6] <- S[6, 5] <- 3
+  S[1, 3] <- S[3, 1] <- 4; S[2, 4] <- S[4, 2] <- 5
+  sc <- .toy_scorer(S)
+  b  <- pair_selection_budget(4, "parents")            # 4 names, 2..6 families
+  skip <- haploStack:::.pairs_greedy(sc, b, overshoot = "skip")
+  # (1,2), (3,4) fill the 4 names; (5,6) is skipped; then families among 1..4
+  expect_equal(attr(skip, "n_parents_used"), 4L)
+  expect_equal(nrow(skip), 6L)                          # up to the traversal cap
+  expect_setequal(unique(c(skip$Parent1, skip$Parent2)), paste0("P", 1:4))
+  expect_equal(skip$score[1:2], c(1, 2))
+  stop_ <- haploStack:::.pairs_greedy(sc, b, overshoot = "stop")
+  expect_equal(nrow(stop_), 2L)                         # ends at the first overshoot
+  expect_equal(attr(stop_, "n_parents_used"), 4L)
+})
+
+test_that("the engine honours a per-parent usage cap and the selfing rule", {
+  n <- 6L
+  S <- matrix(10, n, n, dimnames = list(paste0("P", 1:n), paste0("P", 1:n)))
+  S[1, 2] <- 1; S[1, 3] <- 2; S[1, 4] <- 3; S[2, 3] <- 4
+  S <- pmin(S, t(S))
+  b <- pair_selection_budget(3, "families")             # 3 families
+  out <- haploStack:::.pairs_greedy(.toy_scorer(S), b, max_use = 2L)
+  # P1 may appear twice only: (1,2), (1,3), then (2,3) instead of (1,4)
+  expect_equal(out$score, c(1, 2, 4))
+  # selfs offered only when allowed
+  diag(S) <- 0
+  none <- haploStack:::.pairs_greedy(.toy_scorer(S, FALSE), b)
+  expect_false(any(none$Parent1 == none$Parent2))
+  bs   <- pair_selection_budget(3, "families", allow_selfing = TRUE)
+  some <- haploStack:::.pairs_greedy(.toy_scorer(S, TRUE), bs)
+  expect_true(any(some$Parent1 == some$Parent2))
 })
 
 test_that("pair_budget is ignored (with a warning) under the parents-first unit", {
@@ -142,7 +229,7 @@ test_that("the verbose header states the parents-first budget", {
     "4 parents -> 6 families per cycle")
 })
 
-test_that("the default parents-first path is unchanged by the seam", {
+test_that("the default parents-first path is unchanged by the pairs unit", {
   fx <- .pairs_fixture()
   run <- function(...) run_stacking_simulation(
     fx$meta, fx$eff, replications = 1L, select_cycles = 3L, top_founders = 4L,

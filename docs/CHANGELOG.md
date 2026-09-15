@@ -608,6 +608,123 @@ published repo ships:
   holder is still "University of Queensland", which is a rights statement, not an
   authorship one, and it already matches the published copy byte for byte.
 
+## [0.7.2] - 2026-09-15 — Direct pair selection: the selector
+
+The 0.7.1 placeholder becomes a working unit. Under `selection_unit = "pairs"`
+every scheme scores **families** — the expected F1 of one cross — and one shared
+greedy adds families until the budget of `pair_selection_budget()` stops it
+(plan `dev/UPGRADE_PLAN_pair_selection.md`, Phases A–B; thread #031). The idea:
+**a scheme is a scorer, the unit is the engine** — the scoring currency of each
+scheme is unchanged, only the object it is applied to changes.
+
+### Added
+- `R/stacking_pairs.R`: the shared engine (`.pair_candidates()`,
+  `.pairs_greedy()` with the two budgets, the overshoot rule under `"parents"`
+  — `"skip"` continues among the parents in use up to the traversal cap,
+  `"stop"` ends the search — a per-parent usage cap `max_use`, and the selfing
+  rule) and one scorer per scheme:
+  - **TS** — the mid-parent value `(g_i + g_j)/2` (the exact expected F1 mean),
+    or `ts_pair_score = "usefulness"` = mid-parent `+ usefulness_k · sd(F1)`
+    with the F1 standard deviation exact under the block model (`.pair_f1_sd()`).
+  - **OHS** — `ohs_pair_selection()` (exported): the family's stacking
+    ceiling `M[i, j]`. Under `"families"` the top-`F` of the triangle (exact);
+    under `"parents"` the optimum of an additive family value with a name limit
+    is the best parent *set* and every family among it — `sum(M[S, S])`, the
+    parents-first objective — so that budget runs `ohs_selection()` and returns
+    its traversal ranked by `M`. `"GA_coverage"` has no family reading and is
+    refused. A self's ceiling is the parent's haplotypes doubled, top-`ploidy`
+    per block (`.pair_self_ceiling()`).
+  - **GBS** — `gbs_pair_selection()` (exported): the ideal-genotype objective
+    on the family's expected offspring `q_t(i, j) = (HapN[i,t] + HapN[j,t]) /
+    (2m)`. Two levels (`gbs_pair_level`): `"population"` (default) scores the
+    marginal gain of the set objective `F(P)` at the offspring-pool frequency
+    `p_t(P) = mean_f q_t(f)`, which **reduces exactly to the parents-first
+    `p_t(S)` when `P` is the traversal of `S`** (pinned by test); `"family"`
+    scores the family's own distance to the ideal. `gbs_objective = "candidate"`
+    is accepted and is separable over a family (`= s_i + s_j`; pinned by test),
+    so the pairs default is `"set"` for both presets. `pair_freq = "projected"`
+    (Kemper's projection to the final family count; default under
+    `"families"`) or `"running"` (default under `"parents"`).
+    `pair_penalty = "loss"` (default) replaces the hard absence test by the
+    exact loss probability `L_t = prod_f a_f(t)^M` that none of the
+    `num_offspring = M` progeny carries state `t` — the parents-first risk term
+    made exact for a chosen design (`"hard"` keeps the 0.7.0 rule; the two
+    coincide as `M → ∞`, pinned by test). The penalty scale is sized with
+    `top_founders`, so `β_t` equals the matched parents-first run's.
+    `pair_pool = "shortlist"` (default; the `shortlist_k = 4 · top_founders`
+    parents whose single gamete helps most at each step) or `"all"`.
+  - Output class `"pair_selection"` (`Parent1, Parent2, score, rank`;
+    attributes `n_families`, `n_parents_used`, `pair_budget`, `scheme`) with a
+    `print()` method.
+- `run_stacking_simulation()`: `.stk_select_pairs()` dispatches TS / OHS / GBS
+  to the scorers and validates the family table (names in the pool, no
+  duplicate in either orientation, selfs only when allowed; a scheme returning
+  no family **errors with its name** — no truncation fallback for this unit).
+  New arguments `gbs_pair_level`, `pair_freq`, `pair_penalty`, `pair_pool`,
+  `shortlist_k`, `max_use`, `overshoot`, `ts_pair_score`, `usefulness_k`.
+  `"OCS"` under `"pairs"` is refused until the KCT rename (pair plan Phase C);
+  `gbs_engine = "GA"` under `"pairs"` is refused (Phase D).
+- `summary` gains **`n_families`** and **`n_parents_used`** (filled for both
+  units — parents-first reports `choose(n, 2)` and `n`); `plans` gains
+  **`pair_score`** (`NA` under parents-first). Appended columns only.
+- 31 new tests: `test-stacking-pairs-schemes.R` (hand-computed `M` and F1
+  variance on a 3 × 2 toy; the reduction identity; separability; the first set
+  pick maximises `F` over every single family; loss → hard as `M` grows; the
+  two levels agree with one family; shortlist vs all; both projections × both
+  links × both presets × selfing; driver under both budgets and both backends)
+  and the engine's stop rules in `test-stacking-pairs.R` (top-`F` = `order()`,
+  the name limit with both overshoot rules, `max_use`, selfing).
+- `dev/pair_selection_toy/run_toy.R`: the owner's toy comparison — one family
+  × 16 offspring × 20 cycles × 5 reps on 60 simulated founders, ten arms
+  (parents-first TS / OHS / OCS / GBS vs pairs TS / TS-usefulness / OHS / GBS /
+  GBS-candidate / GBS-kemper); outputs beside it.
+
+### Changed
+- **`avoid_selfing` default flips to `TRUE`** (Q24 c iii). No numeric change:
+  the parents-first `all_pairs` design never contained a self-cross
+  (discrepancy 27, now closed). Under `"pairs"` the flag is honoured by the
+  candidate pool, the budget (`allow_selfing = !avoid_selfing`) and the design
+  alike, so `avoid_selfing = FALSE` offers selfs and counts them
+  (`choose(n, 2) + n` families).
+- `gbs_objective = NULL` resolves to `"set"` under `"pairs"` (preset value
+  `"candidate"` under parents-first, unchanged).
+- Parents-first path otherwise untouched: default runs identical to 0.7.1
+  apart from the appended columns.
+
+### Docs, templates, release (same day, later)
+- New `vignettes/selection_grid.md` — the matrix of scheme × selection unit ×
+  budget × options, with the caveats (OCS not recommended; the multi-rep RNG
+  re-seed of OHS-GA / OCS). Copied to `ready_to_use/SELECTION_GRID.md`.
+- `vignettes/example_stacking_simulation.Rmd`: scheme table with the OCS
+  caveat, the comparison narrowed to `TS` / `OHS` / `GBS`, a new §3 *Direct
+  pair selection* (both budgets, per-scheme family scores, the counts and
+  scores in the records); `skill_stacking_simulation.md`, `quick_start.Rmd`
+  and `simulation_stacking.Rmd` carry the same OCS note and pairs snippet.
+- `ready_to_use/templates/06_stacking_simulation.R` and
+  `workshop/06_stacking_simulation.R`: `SELECTION_UNIT`, `PAIR_BUDGET`,
+  `OHS_METHOD` parameters, the OCS warning, family / parent counts in the
+  final table. `ready_to_use/HaploSim/run_method_comparison_v2.R`:
+  `MMC_SELECTION_UNIT` / `MMC_PAIR_BUDGET` route knobs (recorded in
+  `metadata.dcf` and every task log; preflight refuses pairs under < 0.7.2,
+  OCS or `GA_coverage` under pairs), default `MMC_SCHEMES=TS,OHS,GBS`, default
+  `MMC_AVOID_SELFING=1` (the package default; under pairs `0` would offer
+  selfs). Smoke-tested end to end in quick mode under pairs.
+- Release bundle `ready_to_use/release_v0.7.2/`: source tarball (rebuilt with
+  the docs above, 264 files, 513 KB), Windows binary built from it,
+  `SHA256SUMS.txt`, `RELEASE_NOTES.md`; the test suite passes against the
+  installed binary (2080 / 0 / 0).
+
+### Found, not fixed (discrepancy 28)
+- `.ga_pairwise()`, `genetic_algorithm_selection()` and `ocs_selection()` call
+  `set.seed(seed)` with the driver's fixed `seed` on every cycle, so the
+  crossing draws that follow are identical in every replication: under
+  parents-first, **OHS (GA engines) and OCS replicates are not independent**
+  (the toy run shows five identical cycle-20 values). Only `.gbs_ga_set()`
+  restores the RNG (0.7.0). Campaigns that run one replicate per call with
+  its own seed (the HaploSim driver) are unaffected. Fixing it (restore `.Random.seed` around the
+  scheme call) changes every published parents-first OHS / OCS trajectory —
+  owner's call (Q24 o).
+
 ## [0.7.1] - 2026-09-15 — Direct pair selection: the placeholder and its budget
 
 The stacking driver has always run the **parents-first protocol**: choose a

@@ -183,7 +183,9 @@ you use.
 
 ### Step 5 — Select parents for stacking
 
-Three selection methods are available:
+Three low-level selectors are shown here (the driver in Step 7 wraps them as
+the schemes `TS`, `OHS`, `GBS` — and `OCS`, which currently has known issues
+and is not recommended; see *Example 4* and `vignettes/selection_grid.md`):
 
 ```{r selection}
 # Greedy: maximise block coverage
