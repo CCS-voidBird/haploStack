@@ -164,6 +164,36 @@ sim_cmp <- run_stacking_simulation(
 unique(sim_cmp$summary$sel_scheme)
 ```
 
+#### GBS: Kemper's original versus the haploStack adjustments
+
+`GBS` implements the genotype-building strategy of Kemper et al. (2012). Two
+deviation forms are Kemper's (`gbs_method = "ARCSIN"` or `"LOG"`), and
+`gbs_preset = "kemper"` runs the published method as written — sequential
+greedy, fixed `-100` penalty for a target state absent from the selected set,
+no effect weight. The default preset (`"haploStack"`) differs in one thing: the
+penalty is `gbs_penalty * s_t` with a **dynamic, bounded scale** `s_t` in
+`[1, penalty_scale]` that depends on how rare the state is in the candidate
+pool relative to the number of parents (rare and recoverable states are
+protected most; common ones fall back to the origin's `-10`). Further options
+layer on top of either preset: `gbs_objective = "set"` (marginal gain of a set
+objective), `gbs_engine = "GA"`, `gbs_effect_weight`, and `ideal_scope`
+(`"founder"`, the default, keeps one ideal genotype for the whole run —
+Kemper's design — while `"cycle"` rebuilds it every cycle).
+
+```{r gbs-presets, eval = FALSE}
+# Kemper 2012 as published (LOG mode) vs the haploStack default, same seeds
+sim_gbs <- run_stacking_simulation(
+  geno_meta = meta, effect_df = effects, scheme = "GBS",
+  gbs_method = "LOG", gbs_preset = "kemper",
+  replications = 3L, select_cycles = 5L, top_founders = 6L,
+  select_top_blocks = 50L, output_dir = NULL, verbose = FALSE)
+sim_gbs_hs <- run_stacking_simulation(
+  geno_meta = meta, effect_df = effects, scheme = "GBS",
+  gbs_method = "LOG",                       # gbs_preset = "haploStack" (default)
+  replications = 3L, select_cycles = 5L, top_founders = 6L,
+  select_top_blocks = 50L, output_dir = NULL, verbose = FALSE)
+```
+
 ### 2.1  Trajectories, coloured by method
 
 ```{r multi-plot}

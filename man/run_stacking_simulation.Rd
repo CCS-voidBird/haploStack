@@ -18,11 +18,17 @@ run_stacking_simulation(
   scheme = c("TS", "OHS", "OCS", "GBS"),
   ohs_method = c("GA_pairwise", "GA_coverage", "Greedy"),
   gbs_method = c("ARCSIN", "LOG"),
+  gbs_preset = c("haploStack", "kemper"),
+  gbs_objective = NULL,
+  gbs_engine = NULL,
+  penalty_mode = NULL,
+  gbs_penalty = NULL,
+  penalty_scale = NULL,
+  gbs_effect_weight = NULL,
+  ideal_scope = c("founder", "cycle"),
   select_priority = c("high", "low"),
   construct_method = c("custom", "argmax", "ratio"),
   k_penalty = 0.5,
-  gbs_penalty = NULL,
-  gbs_effect_weight = 0,
   max_kinship = 0.125,
   freq_penalty_weight = 1,
   select_top_blocks = 200L,
@@ -74,7 +80,41 @@ between decision cycles. Default \code{0}.}
 
 \item{ohs_method}{OHS engine (see \code{\link{ohs_selection}}).}
 
-\item{gbs_method}{GBS deviation metric (see \code{\link{gbs_selection}}).}
+\item{gbs_method}{GBS deviation form, \code{"ARCSIN"} (default) or
+\code{"LOG"} — Kemper's two modes (see \code{\link{gbs_selection}}).}
+
+\item{gbs_preset}{\code{"haploStack"} (default) or \code{"kemper"} (the
+published method: fixed \code{-100} penalty). Fills \code{gbs_objective},
+\code{gbs_engine}, \code{penalty_mode}, \code{gbs_penalty},
+\code{penalty_scale} and \code{gbs_effect_weight} when they are \code{NULL};
+an explicit value always wins. See \code{\link{gbs_selection}}.}
+
+\item{gbs_objective}{GBS objective, \code{"candidate"} or \code{"set"};
+\code{NULL} (default) takes the preset value (\code{"candidate"}).}
+
+\item{gbs_engine}{GBS engine, \code{"greedy"} or \code{"GA"}; \code{NULL}
+(default) takes the preset value (\code{"greedy"}).}
+
+\item{penalty_mode}{GBS absent-state penalty scaling, \code{"dynamic"} or
+\code{"fixed"}; \code{NULL} (default) takes the preset value
+(\code{"dynamic"} for \code{"haploStack"}, \code{"fixed"} for \code{"kemper"}).}
+
+\item{gbs_penalty}{GBS base penalty (\code{<= 0}); \code{NULL} (default) takes
+the preset value \code{-10}.}
+
+\item{penalty_scale}{GBS penalty scale or cap (\code{>= 1}); \code{NULL}
+(default) takes the preset value \code{10}.}
+
+\item{gbs_effect_weight}{GBS effect-magnitude weight; \code{NULL} (default)
+takes the preset value \code{0}.}
+
+\item{ideal_scope}{\code{"founder"} (default) builds the ideal genotype once
+from the founders and keeps it for every cycle — Kemper's design, and the
+scope under which the \code{D2Ideal} trajectory is comparable across cycles;
+GBS selection is then also pinned to the founders' block set.
+\code{"cycle"} rebuilds it from the current pool every cycle (the 0.6.0 /
+origin behaviour: a lost state drops out and the remaining targets are
+re-normalised).}
 
 \item{select_priority}{\code{"high"} (default) or \code{"low"} — selection
 direction (shared by TS/OHS-ideal/GBS and the ideal genotype).}
@@ -84,11 +124,6 @@ direction (shared by TS/OHS-ideal/GBS and the ideal genotype).}
 
 \item{k_penalty}{Diversity penalty for \code{construct_method = "custom"}.
 Default \code{0.5}.}
-
-\item{gbs_penalty}{GBS missing-haplotype penalty. \code{NULL} (default)
-resolves to a scale-relative value (see \code{\link{gbs_selection}}).}
-
-\item{gbs_effect_weight}{GBS effect-magnitude weight. Default \code{0}.}
 
 \item{max_kinship}{OCS mean-kinship cap. Default \code{0.125}.}
 

@@ -98,6 +98,17 @@ semantic versioning.
 > tarball `ready_to_use/haploStack_0.6.0.tar.gz`, verified by installing into a
 > throwaway library.
 
+> **Updated 2026-09-15.** Added `[0.7.0]` — **GBS: Kemper's two modes as
+> written, and a bounded penalty scale** (thread
+> [#030](project_record/threads/030-gbs-kemper-modes.md), plan
+> `dev/UPGRADE_PLAN_opt_kemper.md` §4). `gbs_method = "LOG"` becomes Kemper's
+> `τ·log p`, the absent-state penalty becomes `gbs_penalty · s_t` with a bounded
+> risk × hope scale, and the ideal genotype is founder-fixed by default —
+> **changes published GBS numbers**; TS / OHS / OCS are byte-identical. Tarball
+> `ready_to_use/haploStack_0.7.0.tar.gz`, verified by installing into a
+> throwaway library. The OPT scheme and the KCT rename from the same plan are
+> **not** in this release.
+
 ## [Unreleased]
 
 _The remaining roadmap items (stacking-simulation rebuild #013, genomicSimulation
@@ -586,6 +597,131 @@ published repo ships:
   form, and the missing `CITATION.cff`. `LICENSE` is untouched — its copyright
   holder is still "University of Queensland", which is a rights statement, not an
   authorship one, and it already matches the published copy byte for byte.
+
+## [0.7.0] - 2026-09-15 — GBS: Kemper's two modes as written, and a bounded penalty scale
+
+The genotype-building scheme (GBS) now runs Kemper et al. (2012) as published
+under `gbs_preset = "kemper"` — ARCSIN or LOG deviation, sequential greedy,
+fixed −100 = base −10 × scale 10 — and haploStack's adjustments are options
+layered on top. Plan: `dev/UPGRADE_PLAN_opt_kemper.md` (#030) §4, Phase 1 and
+its driver hooks. Thread
+[#030](project_record/threads/030-gbs-kemper-modes.md). Decisions:
+`dev/questions_sheet.md` Q23 b, c, d, j (owner, 2026-09-14/15). **Not in this
+release:** the OPT scheme (plan §3, Phases 2–3) and the KCT rename (Phase 0) —
+both wait on Q23 a / e / f.
+
+### ⚠ Changes published numbers — GBS runs only
+
+TS, OHS and OCS selection are byte-identical to 0.6.0 (the full suite passes
+unchanged and the parity script below confirms the ARCSIN path). Three GBS
+defaults move:
+
+1. **`gbs_method = "LOG"` is Kemper's form** `d_t = τ_t · log p_t`, ranked
+   ascending (a need score, like ARCSIN). 0.6.0's `"LOG"` was the 2026-06-19
+   rebuild's own signed log-ratio — `log p_t − log τ_t` in the candidate score
+   and `(log(p_t + 1e-10) − log τ_t)²` in D2Ideal — introduced to cure the
+   origin's inverted (descending) rank. Both are **dropped, not renamed**: the
+   ascending rank removes the reason for them, they have no oracle (neither
+   Kemper's nor the origin's), and no reported number used them (one
+   `expect_length` test). The formulas are quoted here so a 0.6.0 LOG run can be
+   recomputed by hand if ever needed. Under LOG the D2Ideal metric is now
+   `KL(τ ‖ p) = Σ_t w_t τ_t (log τ_t − log p_t)` with an absent state floored at
+   half a copy, `1 / (2·|S|·ploidy)`.
+2. **The absent-state ("diversity") penalty is `β_t = gbs_penalty · s_t`**, a
+   vector over target states (owner's design). Base `gbs_penalty = −10` (the
+   origin's constant). `penalty_mode = "fixed"`: `s_t = penalty_scale` for every
+   state — 10 gives Kemper's −100, 1 the origin's −10. `penalty_mode =
+   "dynamic"` (default): `s_t = 1 + (penalty_scale − 1) · risk_t · hope_t`,
+   bounded in `[1, penalty_scale]`, with `risk_t = (1 − pop_f_t)^(n_parents ·
+   ploidy)` (probability a random parental set carries no copy of the state;
+   `pop_f_t` its frequency in the whole candidate pool, computed from the pool
+   supplied, never read from the ideal table) and `hope_t = min(1,
+   copies_in_pool_t / (τ_t · n_parents · ploidy))` (can the pool supply the
+   target?). The scale rises from the origin's −10 for common states to near
+   Kemper's −100 for states with a handful of copies, then declines for the
+   near-hopeless, and the same pool frequency is penalised more with few parents
+   than with many (`docs/haploStack_TAG_manuscript/audit/penalty_curves_2026-09-15.{R,png}`).
+   0.6.0's rule — one scale-relative constant `−penalty_scale · max_t |d_t(p_min)|`
+   with `penalty_scale = 2`, `p_min = 1/(n_parents·ploidy)` — is dropped;
+   feeding that constant back as `gbs_penalty` with `penalty_mode = "fixed",
+   penalty_scale = 1` reproduces every 0.6.0 ARCSIN pick exactly
+   (`audit/gbs_parity_2026-09-15.R`: 3 fixtures × {default, effect weight 0.5,
+   −10}, all identical). **`penalty_scale` changes meaning** — it multiplied
+   `max|d|`, it now multiplies `gbs_penalty`.
+3. **`ideal_scope = "founder"`** is the new driver default: the ideal genotype
+   is built once from the founders and kept for every cycle — Kemper's design
+   ("upon losing segments, ARCSIN simply tries to obtain the remaining segments
+   *at the target frequency*"), and the only scope under which the D2Ideal
+   trajectory is comparable across cycles. GBS selection is then also pinned to
+   the founders' `select_top_blocks` so a target block cannot drop out of a later
+   cycle's top-N; TS/OHS/OCS keep the per-cycle top-N and the metric is measured
+   on the full offspring table, so neither is affected. `ideal_scope = "cycle"`
+   reproduces 0.6.0 (rebuild every cycle; a lost state drops out and the
+   remaining targets are re-normalised).
+
+### Added
+
+- `gbs_selection()` — `gbs_preset = c("haploStack", "kemper")`,
+  `gbs_objective = c("candidate", "set")` (marginal gain of `F(S) = Σ_t w_t
+  f_t(p_t(S))`, `f_t = −d_t²` for ARCSIN, `f_t = d_t` — the cross-entropy summand
+  — for LOG), `gbs_engine = c("greedy", "GA")` (GA over subsets on `F(S)`,
+  seeded with the greedy set; requires the set objective; restores the global
+  RNG stream on exit), `penalty_mode`, `ga_control`, `seed`. A preset fills
+  every knob not passed explicitly; an explicit argument always wins.
+- `run_stacking_simulation()` — `gbs_preset`, `gbs_objective`, `gbs_engine`,
+  `penalty_mode`, `penalty_scale`, `ideal_scope`; `gbs_penalty` and
+  `gbs_effect_weight` now default to `NULL` = the preset value.
+- `tune_gbs_penalty()` — `penalty_mode`, `gbs_penalty`; grids `penalty_scale`
+  (the fixed scale or the dynamic cap; default grid `c(1, 2, 5, 10, 20)`) with
+  the base held fixed; `best_penalty = gbs_penalty × best_penalty_scale`.
+- Internals (`R/stacking_gbs.R`): `.gbs_deviation()` — **the only place the two
+  formulas live**; every other function (need score, set term, D2Ideal, penalty
+  scale) calls it — `.gbs_set_term()`, `.gbs_need_score()`,
+  `.gbs_set_objective()`, `.gbs_marginal_scores()`, `.gbs_greedy()`,
+  `.gbs_ga_set()`, `.gbs_penalty_scale()`, `.gbs_context()`,
+  `.gbs_apply_preset()` + `.GBS_PRESETS`, `.gbs_check_penalty_args()`;
+  `.gbs_hapn_matrix()` also returns `pop_f` and `n_pool`. The internals are
+  written pair-agnostic (plan §2.4) for a later pair-level scheme.
+- Tests: `tests/testthat/test-stacking-gbs-modes.R` (17 tests — plan Phase 1
+  gates (a)–(h): hand-computed scores and `F(S)`; **the `kemper` preset
+  reproduces an independent transcription of Kemper's sequential greedy for both
+  modes** on a 30 × 25 fixture, with and without the effect weight; fixed = base
+  × scale; the dynamic curve's table values, bounds and monotonicity in
+  `n_parents`; absent target recruited first; the set greedy equals the
+  brute-force argmax at every step; GA ≥ greedy `F(S)`; RNG restored; the
+  2 × 2 × 2 × 2 smoke; D2Ideal(LOG) zero at target and ≥ 0; `ideal_scope`
+  founder vs cycle and the Kemper / GA presets through the driver).
+  `test-stacking-gbs.R` updated for the new penalty signature.
+
+### Changed
+
+- `.resolve_gbs_penalty(gbs_penalty, penalty_mode, penalty_scale, pop_f,
+  target_freq, n_parents, ploidy, n_pool)` — new signature, returns a vector.
+- `.stk_advance()` takes the founder ideal from `opts$founder_ideal` under the
+  founder scope and pins GBS selection to `opts$founder_blocks`.
+- `gbs_selection()` validates `gbs_penalty <= 0`, `penalty_scale >= 1`, and
+  refuses `gbs_engine = "GA"` without `gbs_objective = "set"`.
+- No export change (127).
+
+### Verified
+
+- Full suite under `devtools::load_all()`: **583 tests, 0 failed, 0 errors**
+  (12 pre-existing skips for absent optional dependencies; the one warning is
+  `test-plot-order.R`'s expected-warning test).
+- `ready_to_use/haploStack_0.7.0.tar.gz` (481 KB, no `.o`/`.dll`) installed
+  into a throwaway library from source: kernels live, `gbs_preset = "kemper",
+  gbs_method = "LOG"` and the dynamic scale run from the installed build.
+
+### Recorded, not fixed
+
+- The origin GRDC `OCS_fitness_function` is **not** a sequential greedy: it
+  picks all `select_top_n` at once on the initial score (every target absent →
+  rank by target-copy count) and then makes one position-wise replacement
+  sweep (`Origin_workflow_example/_Haplotype_Stacking/_haplotype_combin_function_GA.R`
+  L1318–1416). The owner confirmed Kemper's engine is the sequential greedy,
+  which 0.6.0 already implemented and 0.7.0 keeps; the origin is therefore an
+  oracle for Kemper's *formula* (used as such by the tests) but not for the
+  engine. INDEX discrepancy **26**; plan checkpoint K4b.
 
 ## [0.6.0] - 2026-08-24 — One representation of missing, one centring vocabulary
 

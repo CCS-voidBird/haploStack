@@ -9,10 +9,16 @@ gbs_selection(
   ideal_genotypes = NULL,
   n_parents = 8L,
   gbs_method = c("ARCSIN", "LOG"),
-  gbs_penalty = NULL,
-  penalty_scale = 2,
+  gbs_preset = c("haploStack", "kemper"),
+  gbs_objective = c("candidate", "set"),
+  gbs_engine = c("greedy", "GA"),
+  penalty_mode = c("dynamic", "fixed"),
+  gbs_penalty = -10,
+  penalty_scale = 10,
   gbs_effect_weight = 0,
-  select_priority = c("high", "low")
+  select_priority = c("high", "low"),
+  ga_control = list(),
+  seed = 42L
 )
 }
 \arguments{
@@ -28,26 +34,41 @@ constructed from \code{localgebv} via \code{construct_ideal_genotype()}.}
 
 \item{n_parents}{Integer number of parents to select. Default \code{8}.}
 
-\item{gbs_method}{Deviation metric comparing running \code{SelFreq} to
-\code{TargetFreq}: \code{"ARCSIN"} (default, variance-stabilised) or
-\code{"LOG"}. Both use a signed deviation (negative below target); an absent
-target takes \code{gbs_penalty}.}
+\item{gbs_method}{Deviation form: \code{"ARCSIN"} (default) or \code{"LOG"} —
+Kemper's two modes, see the section above.}
 
-\item{gbs_penalty}{Penalty applied to a target state that is still absent from
-the selected set (\code{SelFreq == 0}). \code{NULL} (default) resolves to a
-scale-relative value \code{-penalty_scale * max|dev|} (interpretable and
-stable across datasets); pass a numeric to override (e.g. the origin
-\code{-10}).}
+\item{gbs_preset}{\code{"haploStack"} (default) or \code{"kemper"}; fills every
+knob below that is not passed explicitly.}
 
-\item{penalty_scale}{Multiplier for the scale-relative default penalty
-(worst-case deviations an uncovered target costs). Default \code{2}.}
+\item{gbs_objective}{\code{"candidate"} (Kemper's per-candidate score at the
+current \code{SelFreq}) or \code{"set"} (marginal gain of the set objective
+\code{F(S) = sum_t w_t f_t(p_t(S))}, with \code{f_t = -d_t^2} for ARCSIN
+and \code{f_t = d_t} — the cross-entropy summand — for LOG).}
+
+\item{gbs_engine}{\code{"greedy"} (sequential) or \code{"GA"} (genetic
+algorithm over subsets maximising \code{F(S)}; requires
+\code{gbs_objective = "set"}; seeded with the greedy solution).}
+
+\item{penalty_mode}{\code{"dynamic"} or \code{"fixed"}, see the penalty
+section.}
+
+\item{gbs_penalty}{Base penalty \code{<= 0}. Preset default \code{-10}.}
+
+\item{penalty_scale}{Scale \code{>= 1}: the fixed scale, or the cap of the
+dynamic scale. Preset default \code{10}.}
 
 \item{gbs_effect_weight}{Weight in \code{[0, 1]} scaling each state's
-contribution by \code{(1 + |Effect| * gbs_effect_weight)}. Default \code{0}
-(ignore effect magnitude).}
+contribution by \code{w_t = 1 + |Effect| * gbs_effect_weight}. Preset
+default \code{0} (ignore effect magnitude).}
 
-\item{select_priority}{\code{"high"} (default) drives toward high-value target
-states; \code{"low"} reverses the pick direction.}
+\item{select_priority}{\code{"high"} (default) takes the minimum score;
+\code{"low"} the maximum.}
+
+\item{ga_control}{Optional list for \code{gbs_engine = "GA"}: \code{pop_size}
+(100), \code{n_generations} (200), \code{mutation_rate} (0.1).}
+
+\item{seed}{Seed for the GA engine (the global RNG stream is restored on
+exit). Default \code{42L}.}
 }
 \value{
 A character vector of selected sample names (length \code{n_parents},
@@ -56,11 +77,59 @@ or all candidates when \code{n_parents} exceeds the pool).
 \description{
 Selects \code{n_parents} candidates whose pooled block-haplotype frequencies
 are driven toward an \emph{ideal genotype}, following the genotype-building
-strategy of Kemper et al. (2012). Selection is greedy and genuinely
-per-candidate: a running selected-set frequency (\code{SelFreq}) is recomputed
-after every pick and each remaining candidate is scored by how much it pulls
-\code{SelFreq} toward the target \code{TargetFreq}.
+strategy of Kemper et al. (2012). By default selection is Kemper's sequential
+greedy: a running selected-set frequency \code{SelFreq} (projected to the
+final set size, \code{sum(HapN) / (n_parents * ploidy)}) is recomputed after
+every pick and each remaining candidate is scored by
+\code{sum_t HapN[c, t] * w_t * D_t}, where \code{D_t} is the deviation of
+\code{SelFreq} from \code{TargetFreq} on the chosen link scale, or the
+absent-state penalty when the state is not yet in the set.
 }
+\section{The two deviation forms (Kemper's modes)}{
+
+\describe{
+\item{\code{"ARCSIN"}}{\code{asin(sqrt(p)) - asin(sqrt(tau))} — signed, zero
+at target: once a state reaches its target it stops pulling, and any
+other state may fill a gap left by a lost one.}
+\item{\code{"LOG"}}{\code{tau * log(p)} — always \eqn{\le 0}, most negative
+for states rare in the set: keeps pulling every remaining target, harder
+for the ones with the larger \code{TargetFreq}. Ranked ascending (the
+origin GRDC transcription ranked it descending, which inverted the
+order; haploStack 0.6.0 replaced the formula by a signed log-ratio —
+dropped in 0.7.0, see the changelog).}
+}
+Both are \emph{need} scores: the minimum is the most needed candidate.
+}
+
+\section{The absent-state ("diversity") penalty}{
+
+A target state absent from the selected set takes
+\code{beta_t = gbs_penalty * s_t} in place of its deviation; it enters the
+score per state, times \code{HapN[c, t]} and \code{w_t}. With
+\code{penalty_mode = "fixed"}, \code{s_t = penalty_scale} for every state
+(\code{10} gives Kemper's \code{-100} from the \code{-10} base; \code{1} the
+origin's flat \code{-10}). With \code{penalty_mode = "dynamic"} (default),
+\code{s_t = 1 + (penalty_scale - 1) * risk_t * hope_t}, bounded in
+\code{[1, penalty_scale]}, where \code{risk_t = (1 - pop_f_t)^(n_parents *
+ploidy)} is the probability that a random parental set carries no copy of
+the state (\code{pop_f_t} = its frequency in the whole candidate pool) and
+\code{hope_t = min(1, copies_in_pool_t / (TargetFreq_t * n_parents *
+ploidy))} is whether the pool can supply the target at all. The scale rises
+from the origin's constant for common states to near Kemper's for states
+with a handful of copies, then declines for the near-hopeless, and the same
+pool frequency is penalised more with few parents than with many.
+}
+
+\section{Presets}{
+
+\code{gbs_preset = "kemper"} runs the published method: \code{"candidate"}
+objective, \code{"greedy"} engine, \code{penalty_mode = "fixed"},
+\code{penalty_scale = 10}, \code{gbs_penalty = -10} (i.e. \code{-100}),
+\code{gbs_effect_weight = 0}. \code{"haploStack"} (default) is identical
+except \code{penalty_mode = "dynamic"}. Any argument passed explicitly
+overrides its preset value.
+}
+
 \references{
 Kemper, K.E., Bowman, P.J., Pryce, J.E., Hayes, B.J., Goddard,
 M.E. (2012). Long-term selection strategies for complex traits using

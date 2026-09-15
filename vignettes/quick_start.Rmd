@@ -39,16 +39,12 @@ no external files required.
 ## Installation
 
 ```{r}
-# From GitHub
-remotes::install_github("CCS-voidBird/haploStack")
+# Install from local source (while in development)
+install.packages("Haplotype_workflow_R", repos = NULL, type = "source") 
 ```
 ```{r}
-# Or from a release source tarball
-install.packages("haploStack_0.6.0.tar.gz", repos = NULL, type = "source")
-```
-```{r}
-# Or from a local clone, with devtools
-devtools::install("path/to/haploStack")
+# Or with devtools
+devtools::install("Haplotype_workflow_R")
 ```
 
 **Required packages** (installed automatically):
@@ -418,6 +414,7 @@ meta_nuc <- recode_geno_meta(meta, to_type = "nucleotide")
 ## Getting Help
 
 - **Function reference:** `?geno_meta_views`, `?run_haplotype_catalogue`, etc.
-- **Container spec:** `docs/geno_meta_structure.md`
-- **Version history:** `docs/CHANGELOG.md`
-- **Issues:** https://github.com/CCS-voidBird/haploStack/issues
+- **Development sheet:** `dev/development_sheet.md`
+- **Open questions:** `dev/questions_sheet.md`
+- **Future suggestions:** `dev/qa_suggestions.md`
+- **Source pipeline:** `../Block_analysis/Haplotype_Workflow/`

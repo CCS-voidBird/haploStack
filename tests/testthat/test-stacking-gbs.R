@@ -105,8 +105,9 @@ test_that("gbs_selection moves the selected set toward the ideal vs fillers", {
 })
 
 test_that("gbs_penalty protects a rare target haplotype", {
-  # A large (auto) penalty recruits the lone B3 carrier R over the redundant P1b.
-  sel_big <- gbs_selection(.rare_lg, n_parents = 3L, gbs_penalty = NULL)
+  # The default (-10 x dynamic scale) recruits the lone B3 carrier R over the
+  # redundant P1b.
+  sel_big <- gbs_selection(.rare_lg, n_parents = 3L)
   expect_true("R" %in% sel_big)
 
   # A negligible penalty over-represents the common B1 target and drops R.
@@ -121,15 +122,16 @@ test_that("gbs_selection is not a no-op: selection tracks the ideal genotype", {
   expect_setequal(gbs_selection(.ng_lg, ideal_lo, n_parents = 1L), "Y")
 })
 
-# ── scale-relative penalty ────────────────────────────────────────────────────
+# ── penalty = base x scale (0.7.0; the 0.6.0 scale-relative rule is gone) ─────
 
-test_that("auto penalty is scale-relative and a numeric override is respected", {
-  auto2 <- haploStack:::.resolve_gbs_penalty(NULL, 2, "ARCSIN", c(1), 8L, 2L)
-  auto4 <- haploStack:::.resolve_gbs_penalty(NULL, 4, "ARCSIN", c(1), 8L, 2L)
-  expect_true(auto2 < 0)
-  expect_equal(auto4, 2 * auto2)                         # linear in penalty_scale
-  expect_equal(
-    haploStack:::.resolve_gbs_penalty(-10, 2, "ARCSIN", c(1), 8L, 2L), -10)
+test_that("the penalty is gbs_penalty * s_t, a vector over target states", {
+  pf <- c(0.5, 0.01)
+  fixed <- haploStack:::.resolve_gbs_penalty(-10, "fixed", 2, pf, c(1, 1), 8L, 2L, 50L)
+  expect_equal(fixed, c(-20, -20))                       # linear in penalty_scale
+  dyn <- haploStack:::.resolve_gbs_penalty(-10, "dynamic", 10, pf, c(1, 1), 8L, 2L, 50L)
+  expect_length(dyn, 2L)
+  expect_true(all(dyn <= -10 & dyn >= -100))             # bounded [base, base * cap]
+  expect_lt(dyn[2], dyn[1])                              # rarer state, larger penalty
 })
 
 # ── penalty tuning ────────────────────────────────────────────────────────────

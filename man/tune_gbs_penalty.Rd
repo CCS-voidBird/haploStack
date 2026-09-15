@@ -2,13 +2,15 @@
 % Please edit documentation in R/stacking_gbs.R
 \name{tune_gbs_penalty}
 \alias{tune_gbs_penalty}
-\title{Tune the GBS missing-haplotype penalty}
+\title{Tune the GBS absent-state penalty scale}
 \usage{
 tune_gbs_penalty(
   localgebv,
   ideal_genotypes = NULL,
   n_parents = 8L,
   gbs_method = c("ARCSIN", "LOG"),
+  penalty_mode = c("dynamic", "fixed"),
+  gbs_penalty = -10,
   grid = NULL,
   n_rep = 5L,
   subsample_frac = 0.8,
@@ -26,8 +28,12 @@ from \code{localgebv} when \code{NULL}.}
 
 \item{gbs_method}{\code{"ARCSIN"} (default) or \code{"LOG"}.}
 
-\item{grid}{Numeric vector of \code{penalty_scale} multipliers to evaluate.
-\code{NULL} (default) uses \code{c(0.5, 1, 2, 3, 5, 10)}.}
+\item{penalty_mode}{\code{"dynamic"} (default) or \code{"fixed"}.}
+
+\item{gbs_penalty}{Base penalty held fixed across the grid. Default \code{-10}.}
+
+\item{grid}{Numeric vector of \code{penalty_scale} values (\code{>= 1}) to
+evaluate. \code{NULL} (default) uses \code{c(1, 2, 5, 10, 20)}.}
 
 \item{n_rep}{Number of subsample replicates per grid point. Default \code{5}.}
 
@@ -37,19 +43,24 @@ from \code{localgebv} when \code{NULL}.}
 \item{seed}{Random seed. Default \code{42L}.}
 
 \item{...}{Passed through to \code{\link{gbs_selection}} (e.g.
-\code{gbs_effect_weight}, \code{select_priority}).}
+\code{gbs_effect_weight}, \code{gbs_objective}, \code{select_priority}).}
 }
 \value{
-A list with \code{best_penalty_scale}, \code{best_penalty} (the
-resolved numeric penalty at the full-pool ideal), and \code{scores}, a
+A list with \code{best_penalty_scale}, \code{best_penalty}
+(\code{gbs_penalty * best_penalty_scale}: the constant under
+\code{"fixed"}, the most negative value the dynamic scale can reach under
+\code{"dynamic"}), and \code{scores}, a
 \code{data.table(penalty_scale, mean_score, sd_score)}.
 }
 \description{
-Data-optimises the \code{gbs_selection} penalty by searching over a grid of
-\code{penalty_scale} multipliers and scoring each resulting parent set by its
-distance to the ideal genotype (\code{\link{.distance_to_ideal}}, lower is
-better). Scores are averaged over \code{n_rep} candidate-pool subsamples to
-avoid overfitting a single realisation.
+Data-optimises the \code{\link{gbs_selection}} penalty by searching over a
+grid of \code{penalty_scale} values (the fixed scale under
+\code{penalty_mode = "fixed"}, the cap of the dynamic scale under
+\code{"dynamic"}) with the base \code{gbs_penalty} held fixed, scoring each
+resulting parent set by its distance to the ideal genotype
+(\code{\link{.distance_to_ideal}}, lower is better). Scores are averaged over
+\code{n_rep} candidate-pool subsamples to avoid overfitting a single
+realisation.
 }
 \seealso{
 \code{\link{gbs_selection}}

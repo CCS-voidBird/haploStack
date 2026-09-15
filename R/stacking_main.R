@@ -121,9 +121,14 @@
     },
     GBS = gbs_selection(localgebv, ideal_genotypes = ideal_genotypes,
                         n_parents = n_parents, gbs_method = opts$gbs_method,
+                        gbs_objective = opts$gbs_objective,
+                        gbs_engine = opts$gbs_engine,
+                        penalty_mode = opts$penalty_mode,
                         gbs_penalty = opts$gbs_penalty,
+                        penalty_scale = opts$penalty_scale,
                         gbs_effect_weight = opts$gbs_effect_weight,
-                        select_priority = opts$select_priority),
+                        select_priority = opts$select_priority,
+                        seed = opts$seed),
     stop(".stk_select_parents: unknown scheme '", scheme, "'.")
   )
 
@@ -224,9 +229,13 @@
 # select -> design -> cross -> rename -> score. Returns the (compactly renamed)
 # offspring GenoMeta, the per-cross plan, the per-offspring F1mean vector and the
 # cycle metrics (D2Ideal, coancestry, the ideal-genotype target and its
-# ideal_phenotype, marker count). `ideal_genotypes` is recomputed here from the
-# current pool (origin behaviour). `cycle` is the whole-cycle index used to build
-# the compact offspring IDs (see .stk_rename_generation).
+# ideal_phenotype, marker count). Under `opts$ideal_scope = "founder"` (default)
+# the ideal genotype is `opts$founder_ideal`, built once from the founders
+# (Kemper 2012: targets fixed for the whole run, a lost state stays a lost
+# target); under `"cycle"` it is recomputed here from the current pool (0.6.0 /
+# origin behaviour: a lost state drops out and the remaining targets are
+# re-normalised). `cycle` is the whole-cycle index used to build the compact
+# offspring IDs (see .stk_rename_generation).
 .stk_advance <- function(current, scheme, effect_df, opts, cycle, session = NULL) {
   want <- function(m) m %in% opts$metrics
 
@@ -242,7 +251,17 @@
   }
 
   lg <- compute_profile_localgebv(current, effect_df, level = "haplotype")
-  lg <- .stk_limit_blocks(lg, opts$selected_blocks, opts$select_top_blocks)
+  # A founder-fixed ideal defines the block set of GBS selection for the whole
+  # run (the founders' `select_top_blocks`), so a target block cannot silently
+  # drop out of a later cycle's top-N. Only GBS selection is pinned: TS/OHS/OCS
+  # keep the per-cycle top-N, and the d2ideal metric is measured on the full
+  # offspring table, so neither is affected by the scope.
+  use_founder <- identical(opts$ideal_scope, "founder") &&
+    !is.null(opts$founder_ideal)
+  lg <- if (use_founder && scheme == "GBS")
+    .stk_limit_blocks(lg, opts$founder_blocks, NULL)
+  else
+    .stk_limit_blocks(lg, opts$selected_blocks, opts$select_top_blocks)
   if (nrow(lg) == 0L)
     stop(".stk_advance: no blocks remain for selection (check 'selected_blocks' ",
          "/ block assignments).")
@@ -253,11 +272,11 @@
   # the d2ideal MEASUREMENT. Built once and shared when both apply, so metrics can
   # never change GBS selection.
   need_ideal <- scheme == "GBS" || want("d2ideal")
-  ideal <- if (need_ideal)
-    construct_ideal_genotype(lg, method = opts$construct_method,
-                             k_penalty = opts$k_penalty,
-                             select_priority = opts$select_priority)
-  else NULL
+  ideal <- if (!need_ideal) NULL
+  else if (use_founder) opts$founder_ideal
+  else construct_ideal_genotype(lg, method = opts$construct_method,
+                                k_penalty = opts$k_penalty,
+                                select_priority = opts$select_priority)
   lap("ideal")
 
   parents <- .stk_select_parents(scheme, lg, current, opts$top_founders,
@@ -475,16 +494,39 @@
 #' @param scheme Character vector of schemes to run/compare: any of \code{"TS"},
 #'   \code{"OHS"}, \code{"OCS"}, \code{"GBS"}.
 #' @param ohs_method OHS engine (see \code{\link{ohs_selection}}).
-#' @param gbs_method GBS deviation metric (see \code{\link{gbs_selection}}).
+#' @param gbs_method GBS deviation form, \code{"ARCSIN"} (default) or
+#'   \code{"LOG"} — Kemper's two modes (see \code{\link{gbs_selection}}).
+#' @param gbs_preset \code{"haploStack"} (default) or \code{"kemper"} (the
+#'   published method: fixed \code{-100} penalty). Fills \code{gbs_objective},
+#'   \code{gbs_engine}, \code{penalty_mode}, \code{gbs_penalty},
+#'   \code{penalty_scale} and \code{gbs_effect_weight} when they are \code{NULL};
+#'   an explicit value always wins. See \code{\link{gbs_selection}}.
+#' @param gbs_objective GBS objective, \code{"candidate"} or \code{"set"};
+#'   \code{NULL} (default) takes the preset value (\code{"candidate"}).
+#' @param gbs_engine GBS engine, \code{"greedy"} or \code{"GA"}; \code{NULL}
+#'   (default) takes the preset value (\code{"greedy"}).
+#' @param penalty_mode GBS absent-state penalty scaling, \code{"dynamic"} or
+#'   \code{"fixed"}; \code{NULL} (default) takes the preset value
+#'   (\code{"dynamic"} for \code{"haploStack"}, \code{"fixed"} for \code{"kemper"}).
+#' @param gbs_penalty GBS base penalty (\code{<= 0}); \code{NULL} (default) takes
+#'   the preset value \code{-10}.
+#' @param penalty_scale GBS penalty scale or cap (\code{>= 1}); \code{NULL}
+#'   (default) takes the preset value \code{10}.
+#' @param gbs_effect_weight GBS effect-magnitude weight; \code{NULL} (default)
+#'   takes the preset value \code{0}.
+#' @param ideal_scope \code{"founder"} (default) builds the ideal genotype once
+#'   from the founders and keeps it for every cycle — Kemper's design, and the
+#'   scope under which the \code{D2Ideal} trajectory is comparable across cycles;
+#'   GBS selection is then also pinned to the founders' block set.
+#'   \code{"cycle"} rebuilds it from the current pool every cycle (the 0.6.0 /
+#'   origin behaviour: a lost state drops out and the remaining targets are
+#'   re-normalised).
 #' @param select_priority \code{"high"} (default) or \code{"low"} — selection
 #'   direction (shared by TS/OHS-ideal/GBS and the ideal genotype).
 #' @param construct_method Ideal-genotype construction (see
 #'   \code{\link{construct_ideal_genotype}}).
 #' @param k_penalty Diversity penalty for \code{construct_method = "custom"}.
 #'   Default \code{0.5}.
-#' @param gbs_penalty GBS missing-haplotype penalty. \code{NULL} (default)
-#'   resolves to a scale-relative value (see \code{\link{gbs_selection}}).
-#' @param gbs_effect_weight GBS effect-magnitude weight. Default \code{0}.
 #' @param max_kinship OCS mean-kinship cap. Default \code{0.125}.
 #' @param freq_penalty_weight OCS frequency-deviation weight. Default \code{1}.
 #' @param select_top_blocks Integer. Cap on blocks selection considers (top by
@@ -562,11 +604,17 @@ run_stacking_simulation <- function(
   scheme              = c("TS", "OHS", "OCS", "GBS"),
   ohs_method          = c("GA_pairwise", "GA_coverage", "Greedy"),
   gbs_method          = c("ARCSIN", "LOG"),
+  gbs_preset          = c("haploStack", "kemper"),
+  gbs_objective       = NULL,
+  gbs_engine          = NULL,
+  penalty_mode        = NULL,
+  gbs_penalty         = NULL,
+  penalty_scale       = NULL,
+  gbs_effect_weight   = NULL,
+  ideal_scope         = c("founder", "cycle"),
   select_priority     = c("high", "low"),
   construct_method    = c("custom", "argmax", "ratio"),
   k_penalty           = 0.5,
-  gbs_penalty         = NULL,
-  gbs_effect_weight   = 0,
   max_kinship         = 0.125,
   freq_penalty_weight = 1,
   select_top_blocks   = 200L,
@@ -609,9 +657,28 @@ run_stacking_simulation <- function(
                                 several.ok = TRUE)
   ohs_method       <- match.arg(ohs_method)
   gbs_method       <- match.arg(gbs_method)
+  gbs_preset       <- match.arg(gbs_preset)
+  ideal_scope      <- match.arg(ideal_scope)
   select_priority  <- match.arg(select_priority)
   construct_method <- match.arg(construct_method)
   cross_backend    <- match.arg(cross_backend)
+
+  # GBS knobs: the preset fills whatever was left NULL; explicit values win.
+  gbs_spec <- .gbs_apply_preset(gbs_preset, list(
+    gbs_objective = if (is.null(gbs_objective)) NULL
+                    else match.arg(gbs_objective, c("candidate", "set")),
+    gbs_engine    = if (is.null(gbs_engine)) NULL
+                    else match.arg(gbs_engine, c("greedy", "GA")),
+    penalty_mode  = if (is.null(penalty_mode)) NULL
+                    else match.arg(penalty_mode, c("dynamic", "fixed")),
+    gbs_penalty       = gbs_penalty,
+    penalty_scale     = penalty_scale,
+    gbs_effect_weight = gbs_effect_weight))
+  .gbs_check_penalty_args(gbs_spec$gbs_penalty, gbs_spec$penalty_mode,
+                          gbs_spec$penalty_scale)
+  if (gbs_spec$gbs_engine == "GA" && gbs_spec$gbs_objective != "set")
+    stop("run_stacking_simulation: gbs_engine = \"GA\" requires ",
+         "gbs_objective = \"set\".")
 
   # ── Metrics vector (measurement-only; never affects selection) ─────────────
   # "gebv" (F1mean) is the always-on base; append any optional offspring metrics,
@@ -651,11 +718,18 @@ run_stacking_simulation <- function(
     avoid_selfing     = avoid_selfing,
     ohs_method        = ohs_method,
     gbs_method        = gbs_method,
+    gbs_objective     = gbs_spec$gbs_objective,
+    gbs_engine        = gbs_spec$gbs_engine,
+    penalty_mode      = gbs_spec$penalty_mode,
+    gbs_penalty       = gbs_spec$gbs_penalty,
+    penalty_scale     = gbs_spec$penalty_scale,
+    gbs_effect_weight = gbs_spec$gbs_effect_weight,
+    ideal_scope       = ideal_scope,
+    founder_ideal     = NULL,          # filled below once the founder ideal exists
+    founder_blocks    = NULL,
     select_priority   = select_priority,
     construct_method  = construct_method,
     k_penalty         = k_penalty,
-    gbs_penalty       = gbs_penalty,
-    gbs_effect_weight = gbs_effect_weight,
     max_kinship       = max_kinship,
     freq_penalty_weight = freq_penalty_weight,
     cross_backend     = cross_backend,
@@ -682,6 +756,12 @@ run_stacking_simulation <- function(
                              k_penalty = k_penalty,
                              select_priority = select_priority)
   else NULL
+  # Founder-fixed scope: every cycle selects and measures against this table,
+  # and GBS selection is pinned to the founders' block set (see .stk_advance).
+  if (ideal_scope == "founder" && !is.null(ideal_genotypes)) {
+    opts$founder_ideal  <- ideal_genotypes
+    opts$founder_blocks <- unique(as.character(founder_lg$Block))
+  }
 
   # ── One (rep, scheme) run of the full route ───────────────────────────────
   .run_one <- function(rep, sch) {
