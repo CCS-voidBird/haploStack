@@ -443,6 +443,86 @@ make_cross_design <- function(selected_parents,
 }
 
 
+# ---------------------------------------------------------------------------
+# Family count of a parent set, and the direct-pairing budget (placeholder seam)
+# ---------------------------------------------------------------------------
+
+# Families a full traversal of `n_parents` parents makes: n(n-1)/2 distinct
+# pairs, plus the n self-crosses when the design allows them. This is the
+# reference quantity for direct pair selection (pair_selection_budget()), and
+# the driver sizes its compact family IDs from it.
+.stk_n_families <- function(n_parents, allow_selfing = FALSE) {
+  n <- as.integer(n_parents)
+  as.integer(choose(n, 2L) + if (isTRUE(allow_selfing)) n else 0L)
+}
+
+
+#' Budget of a direct-pair selection run
+#'
+#' The stacking driver selects a \emph{parent subgroup} first and then crosses it
+#' in a full traversal (\code{\link{make_cross_design}}, \code{"all_pairs"}).
+#' Selecting \emph{pairs} directly (\code{selection_unit = "pairs"} in
+#' \code{\link{run_stacking_simulation}} — a placeholder in this version) has to
+#' be matched to that protocol by one of two budgets, which conflict in general
+#' and must therefore be chosen explicitly:
+#' \describe{
+#'   \item{\code{"families"}}{The same offspring population size: as many
+#'     families as the traversal of \code{top_founders} parents would make,
+#'     \code{choose(top_founders, 2)} (\code{+ top_founders} when self-crosses
+#'     are allowed). The number of distinct parents is then free — anywhere
+#'     between roughly \code{sqrt(2 * n_families)} and \code{2 * n_families}.}
+#'   \item{\code{"parents"}}{The same number of parents: pairs are added until
+#'     \code{top_founders} distinct parent names are in use. The number of
+#'     families is then free — between \code{ceiling(top_founders / 2)} (every
+#'     pair brings two new parents) and the full traversal.}
+#' }
+#' This function is the "quick calculation" of what a given \code{top_founders}
+#' implies under each budget.
+#'
+#' @param top_founders Integer. Parents per cycle of the parents-first protocol
+#'   (the driver's \code{top_founders}).
+#' @param pair_budget \code{"families"} or \code{"parents"} (see Details).
+#' @param allow_selfing Logical. Count the \code{top_founders} self-crosses in
+#'   the traversal. Default \code{FALSE} — the driver's \code{"all_pairs"} design
+#'   never contains a self-cross (it enumerates \code{combn(parents, 2)}), so the
+#'   driver passes \code{FALSE} whatever its \code{avoid_selfing} argument says.
+#'
+#' @return A list: \code{pair_budget}, \code{n_parents_ref} (the
+#'   \code{top_founders} the budget is derived from), \code{allow_selfing},
+#'   \code{n_families} (fixed under \code{"families"}, \code{NA} under
+#'   \code{"parents"}), \code{n_families_min} / \code{n_families_max} (the range
+#'   a run can produce), and \code{n_parents_max} (fixed under \code{"parents"},
+#'   \code{NA} under \code{"families"}).
+#'
+#' @examples
+#' pair_selection_budget(16, "families")                       # 120 families
+#' pair_selection_budget(16, "families", allow_selfing = TRUE) # 136 families
+#' pair_selection_budget(16, "parents")                        # 8..120 families
+#'
+#' @seealso \code{\link{run_stacking_simulation}}, \code{\link{make_cross_design}}
+#' @export
+pair_selection_budget <- function(top_founders,
+                                  pair_budget = c("families", "parents"),
+                                  allow_selfing = FALSE) {
+  pair_budget <- match.arg(pair_budget)
+  n <- as.integer(top_founders)
+  if (length(n) != 1L || is.na(n) || n < 2L)
+    stop("pair_selection_budget: 'top_founders' must be a single integer >= 2.")
+  full <- .stk_n_families(n, allow_selfing)
+  if (pair_budget == "families")
+    list(pair_budget = "families", n_parents_ref = n,
+         allow_selfing = isTRUE(allow_selfing),
+         n_families = full, n_families_min = full, n_families_max = full,
+         n_parents_max = NA_integer_)
+  else
+    list(pair_budget = "parents", n_parents_ref = n,
+         allow_selfing = isTRUE(allow_selfing),
+         n_families = NA_integer_,
+         n_families_min = as.integer(ceiling(n / 2)), n_families_max = full,
+         n_parents_max = n)
+}
+
+
 #' Compute a Genomic Relationship Matrix (GRM) from a GenoMeta object
 #'
 #' Builds the additive genomic relationship matrix via the first method of

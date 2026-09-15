@@ -15,6 +15,8 @@ run_stacking_simulation(
   num_offspring = 4L,
   top_founders = 16L,
   avoid_selfing = FALSE,
+  selection_unit = c("parents", "pairs"),
+  pair_budget = NULL,
   scheme = c("TS", "OHS", "OCS", "GBS"),
   ohs_method = c("GA_pairwise", "GA_coverage", "Greedy"),
   gbs_method = c("ARCSIN", "LOG"),
@@ -73,7 +75,28 @@ between decision cycles. Default \code{0}.}
 \item{top_founders}{Integer. Parents selected per cycle. Default \code{16}.}
 
 \item{avoid_selfing}{Logical. Exclude self-crosses from the design. Default
-\code{FALSE}.}
+\code{FALSE}. Note that the \code{"all_pairs"} design used by the
+parents-first protocol never contains a self-cross in any case (it
+enumerates \code{combn(parents, 2)}), so each cycle makes
+\code{choose(top_founders, 2)} families whatever this flag says.}
+
+\item{selection_unit}{What a cycle selects. \code{"parents"} (default, the
+implemented protocol): a subgroup of \code{top_founders} parents, then every
+pair of them is crossed. \code{"pairs"}: the crosses themselves are chosen
+(direct pairing) — \strong{a placeholder in this version}: the arguments are
+validated and the budget is resolved, then the first cycle stops with the
+resolved budget in the message. Requires \code{pair_budget}.}
+
+\item{pair_budget}{How a direct-pairing cycle is matched to the parents-first
+protocol; required when \code{selection_unit = "pairs"}, ignored otherwise.
+The two options conflict, so there is no default. \code{"families"}: the
+same offspring population size — as many families as the traversal of
+\code{top_founders} parents makes (\code{choose(top_founders, 2)}), with the
+number of distinct parents free. \code{"parents"}: the same number of
+parents — pairs are added until \code{top_founders} distinct parent names
+are in use, with the number of families free. See
+\code{\link{pair_selection_budget}} for the numbers a given
+\code{top_founders} implies.}
 
 \item{scheme}{Character vector of schemes to run/compare: any of \code{"TS"},
 \code{"OHS"}, \code{"OCS"}, \code{"GBS"}.}
@@ -219,6 +242,18 @@ frequencies toward an ideal genotype via \code{\link{gbs_selection}}
 \code{ga_start_by} delays the chosen scheme until that cycle (truncation
 before it); \code{selfing_cycles} interleaves that many truncation-advanced
 selfing generations between decision cycles.
+}
+
+\section{Selection unit}{
+
+Every scheme above selects a \emph{parent subgroup} of \code{top_founders},
+which is then crossed in a full traversal (\code{selection_unit =
+"parents"}, \code{choose(top_founders, 2)} families per cycle). Direct pair
+selection (\code{selection_unit = "pairs"}) — choosing the crosses rather than
+the parents — is reserved but \strong{not implemented}: the call validates
+\code{pair_budget}, resolves the per-cycle budget, prints it when
+\code{verbose}, and stops at the first cycle. \code{\link{pair_selection_budget}}
+gives the same numbers without running anything.
 }
 
 \section{Crossing backends}{

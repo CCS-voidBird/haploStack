@@ -109,6 +109,16 @@ semantic versioning.
 > throwaway library. The OPT scheme and the KCT rename from the same plan are
 > **not** in this release.
 
+> **Updated 2026-09-15 (second pass).** Added `[0.7.1]` — **direct pair
+> selection: the placeholder and its budget** (thread
+> [#031](project_record/threads/031-direct-pair-selection.md), Q23 i / Q24).
+> `selection_unit = c("parents", "pairs")` and `pair_budget = c("families",
+> "parents")` are reserved on `run_stacking_simulation()`, the budget that ties
+> a direct-pairing cycle to the parents-first traversal is resolved and
+> reported, and the exported `pair_selection_budget()` gives the numbers. No
+> selector is implemented — `"pairs"` stops at the first cycle. Default runs are
+> byte-identical to 0.7.0. Tarball `ready_to_use/haploStack_0.7.1.tar.gz`.
+
 ## [Unreleased]
 
 _The remaining roadmap items (stacking-simulation rebuild #013, genomicSimulation
@@ -597,6 +607,85 @@ published repo ships:
   form, and the missing `CITATION.cff`. `LICENSE` is untouched — its copyright
   holder is still "University of Queensland", which is a rights statement, not an
   authorship one, and it already matches the published copy byte for byte.
+
+## [0.7.1] - 2026-09-15 — Direct pair selection: the placeholder and its budget
+
+The stacking driver has always run the **parents-first protocol**: choose a
+subgroup of `top_founders`, then cross every pair of them (`make_cross_design(
+"all_pairs")`, `choose(top_founders, 2)` families per cycle). The owner's next
+step is **direct pairing** — choose the crosses, not the parents (plan #030
+§2.4, Q23 i). This release reserves the seam for it and settles the one design
+question that has to be answered before any selector is written: how a
+direct-pairing cycle is matched to the parents-first run. Thread
+[#031](project_record/threads/031-direct-pair-selection.md). **Nothing is
+selected by pairs yet** — see *Placeholder* below. Default runs are
+byte-identical to 0.7.0 (`test-stacking-pairs.R` compares an explicit
+`selection_unit = "parents"` run with a default run; the full suite passes
+unchanged).
+
+### Added
+
+- **`selection_unit = c("parents", "pairs")`** on `run_stacking_simulation()`.
+  `"parents"` (default) is the implemented protocol. `"pairs"` is the direct
+  pairing placeholder.
+- **`pair_budget = c("families", "parents")`**, required when `selection_unit =
+  "pairs"` and ignored (with a warning) otherwise. The two ways of tying a
+  direct-pairing cycle to the parents-first run **conflict**, so there is no
+  default — the caller has to say which one holds:
+  - `"families"` — the same offspring population size: as many families as the
+    traversal of `top_founders` parents makes (`choose(top_founders, 2)`); the
+    number of distinct parents is then free (roughly `sqrt(2F)` to `2F`).
+  - `"parents"` — the same number of parents: pairs are added until
+    `top_founders` distinct parent names are in use; the number of families is
+    then free (`ceiling(top_founders / 2)` to the full traversal).
+- **`pair_selection_budget(top_founders, pair_budget, allow_selfing = FALSE)`**
+  (exported, 128 exports): the "quick calculation" of what a given
+  `top_founders` implies under each budget — `n_families` (fixed under
+  `"families"`), `n_parents_max` (fixed under `"parents"`), and the
+  `n_families_min` / `n_families_max` range. `allow_selfing = TRUE` adds the
+  `top_founders` self-crosses to the traversal count (16 parents: 120 families,
+  136 with selfing; `"parents"`: 8 to 120 families).
+- Internals: `.stk_n_families()`, `.stk_selection_budget()` (resolves the
+  budget for either unit; `"pairs"` without a `pair_budget` fails **before**
+  anything runs), `.stk_budget_text()` (one-line statement, printed in the
+  `verbose` header — `Selection unit - parents-first: 16 parents -> 120 families
+  per cycle (...)`), and `.stk_select_pairs()` — the **placeholder**: the seam
+  in `.stk_advance()` where a scheme would return `data.table(Parent1,
+  Parent2)` for `make_cross_design(method = "custom")`. Its contract is written
+  in the function comment (score candidate crosses against the ideal, stop by
+  the budget; the GBS internals are already pair-agnostic).
+- `tests/testthat/test-stacking-pairs.R` (12 tests): family counts, the two
+  budgets and their ranges, up-front validation, the stop message carries the
+  resolved budget, the warning under `"parents"`, the verbose header, and the
+  default path unchanged.
+
+### Placeholder — what `selection_unit = "pairs"` does now
+
+Validates `pair_budget`, resolves the budget, prints it under `verbose`, then
+the first cycle stops: `selection_unit = "pairs" (direct pair selection) is a
+placeholder and is not implemented yet (thread #031). Budget resolved for this
+run — direct pairing, pair_budget = "families": 120 families per cycle (= the
+traversal of 16 parents; self-crosses not in the all-pairs design), distinct
+parents free.` The compact family-ID width (`C<cycle>F<family>_<child>`) is
+sized from the budget's `n_families_max` — identical to `choose(top_founders,
+2)` under the default unit, so IDs do not change.
+
+### Recorded, not fixed
+
+- **`avoid_selfing` does not reach the all-pairs design** (INDEX discrepancy
+  27, Q24 c). `make_cross_design(method = "all_pairs")` enumerates `combn(
+  parents, 2)`, so a parents-first cycle never contains a self-cross whatever
+  the driver's `avoid_selfing` (default `FALSE`, documented as "exclude
+  self-crosses") says; the flag only acts on `"sequential"` (odd-n tail) and
+  `"custom"` tables. Every run to date therefore made `choose(top_founders, 2)`
+  families with no selfs. The budget is computed from what the design actually
+  produces (`allow_selfing = FALSE` from the driver), so the reported family
+  count is right; the `allow_selfing` term in `pair_selection_budget()` is there
+  for the day the design honours the flag — a numeric change to every default
+  run, hence the owner's call. `test-stacking-pairs.R` pins the current
+  behaviour; the `avoid_selfing` roxygen now says so.
+- Under `pair_budget = "parents"`, what happens when the next-best pair would
+  overshoot the parent limit (skip it and continue, or stop) is open — Q24 b.
 
 ## [0.7.0] - 2026-09-15 — GBS: Kemper's two modes as written, and a bounded penalty scale
 

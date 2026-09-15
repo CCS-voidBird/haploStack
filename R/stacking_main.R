@@ -16,6 +16,13 @@
 #   4. .cross_backend_dispatch() ("block" default, or "genomicSimulation")
 #   5. the offspring GenoMeta becomes the next cycle's population.
 #
+# Steps 2-3 are the parents-first protocol (`selection_unit = "parents"`).
+# `selection_unit = "pairs"` (direct pair selection, Q23 i) is a PLACEHOLDER:
+# the budget that ties it to the parents-first run is resolved
+# (.stk_selection_budget(): same number of families, or same number of
+# parents), and .stk_select_pairs() — the seam where the scheme would return
+# the crosses themselves — stops with that budget. See thread #031.
+#
 # `scheme` accepts a vector -> the schemes are compared in one run. Decision
 # cycles run the chosen scheme; intervening `selfing_cycles` generations advance
 # under truncation (GS), and `ga_start_by` delays the chosen scheme until that
@@ -137,6 +144,81 @@
     sel <- .stk_select_truncation(localgebv, max(n_parents, 2L),
                                   opts$select_priority)
   sel
+}
+
+
+# ---------------------------------------------------------------------------
+# Internal — selection unit: parents-first (current) vs direct pairs (placeholder)
+# ---------------------------------------------------------------------------
+
+# Resolve the per-cycle budget the driver runs under. Parents-first
+# (`selection_unit = "parents"`, the only implemented unit) crosses
+# `top_founders` parents in a full traversal, so the family count is fixed at
+# .stk_n_families(). Direct pairing ("pairs") must be tied to that protocol by
+# one of the two conflicting budgets of pair_selection_budget(): the same
+# number of families, or the same number of distinct parents. `allow_selfing`
+# is what the crossing design actually does, not the driver's `avoid_selfing`
+# flag: make_cross_design("all_pairs") enumerates combn(parents, 2) and never
+# contains a self-cross (INDEX discrepancy 27 / Q24 c), so the driver passes
+# FALSE — the selfing term is there for the day the design honours the flag.
+.stk_selection_budget <- function(selection_unit, pair_budget, top_founders,
+                                  allow_selfing = FALSE) {
+  n <- as.integer(top_founders)
+  if (selection_unit == "parents") {
+    full <- .stk_n_families(n, allow_selfing)
+    return(list(selection_unit = "parents", pair_budget = NA_character_,
+                n_parents_ref = n, allow_selfing = isTRUE(allow_selfing),
+                n_families = full, n_families_min = full, n_families_max = full,
+                n_parents_max = n))
+  }
+  if (is.null(pair_budget))
+    stop("run_stacking_simulation: selection_unit = \"pairs\" needs ",
+         "'pair_budget' = \"families\" (same offspring population size as the ",
+         "parents-first traversal) or \"parents\" (same number of distinct ",
+         "parents) — the two conflict, so one must be chosen.")
+  pair_budget <- match.arg(pair_budget, c("families", "parents"))
+  c(list(selection_unit = "pairs"),
+    pair_selection_budget(n, pair_budget, allow_selfing))
+}
+
+# One-line human-readable statement of a resolved budget (verbose header and
+# the placeholder's stop message).
+.stk_budget_text <- function(b) {
+  selfing <- if (isTRUE(b$allow_selfing)) "self-crosses counted"
+             else "self-crosses not in the all-pairs design"
+  if (b$selection_unit == "parents")
+    sprintf("parents-first: %d parents -> %d families per cycle (%s)",
+            b$n_parents_ref, b$n_families, selfing)
+  else if (b$pair_budget == "families")
+    sprintf(paste0("direct pairing, pair_budget = \"families\": %d families per ",
+                   "cycle (= the traversal of %d parents; %s), distinct parents free"),
+            b$n_families, b$n_parents_ref, selfing)
+  else
+    sprintf(paste0("direct pairing, pair_budget = \"parents\": add pairs until %d ",
+                   "distinct parents are in use (%d..%d families per cycle; %s)"),
+            b$n_parents_max, b$n_families_min, b$n_families_max, selfing)
+}
+
+# PLACEHOLDER — direct pair selection (Q23 i, thread #031). Not implemented.
+#
+# Contract for the implementation: score candidate crosses (expected F1
+# block-state distribution against `ideal_genotypes`, plus the pair's
+# coancestry) under `scheme`, and return a data.table(Parent1, Parent2) that
+# make_cross_design(method = "custom") turns into the cycle's design. The
+# budget in `opts$pair_budget` fixes when to stop:
+#   "families" — exactly `n_families` rows;
+#   "parents"  — add pairs (best first) until `n_parents_max` distinct names
+#                are in use (open point Q24 b: a pair that would overshoot the
+#                limit is skipped, or the search stops there).
+# The GBS internals are already pair-agnostic (.gbs_deviation(),
+# .gbs_penalty_scale() — plan #030 §2.4): "pool vs parents" becomes "pool vs
+# number of crosses".
+.stk_select_pairs <- function(scheme, localgebv, geno_meta, ideal_genotypes,
+                              opts) {
+  stop("run_stacking_simulation: selection_unit = \"pairs\" (direct pair ",
+       "selection) is a placeholder and is not implemented yet (thread #031). ",
+       "Budget resolved for this run — ", .stk_budget_text(opts$pair_budget),
+       ".", call. = FALSE)
 }
 
 
@@ -279,13 +361,27 @@
                                 select_priority = opts$select_priority)
   lap("ideal")
 
-  parents <- .stk_select_parents(scheme, lg, current, opts$top_founders,
-                                 ideal, opts)
-  lap("selection")
-
-  cross_design <- make_cross_design(parents, method = "all_pairs",
-                                    avoid_selfing = opts$avoid_selfing,
-                                    n_offspring = opts$num_offspring)
+  # Selection unit. Parents-first (the implemented protocol): a parent subgroup,
+  # then its full traversal. Direct pairing: the scheme returns the crosses
+  # themselves under the resolved budget (placeholder — .stk_select_pairs()
+  # stops; the seam is here so the implementation slots in without touching
+  # the rest of the cycle).
+  if (identical(opts$selection_unit, "pairs")) {
+    pairs   <- .stk_select_pairs(scheme, lg, current, ideal, opts)
+    parents <- unique(c(pairs$Parent1, pairs$Parent2))
+    lap("selection")
+    cross_design <- make_cross_design(parents, method = "custom",
+                                      cross_table = pairs,
+                                      avoid_selfing = opts$avoid_selfing,
+                                      n_offspring = opts$num_offspring)
+  } else {
+    parents <- .stk_select_parents(scheme, lg, current, opts$top_founders,
+                                   ideal, opts)
+    lap("selection")
+    cross_design <- make_cross_design(parents, method = "all_pairs",
+                                      avoid_selfing = opts$avoid_selfing,
+                                      n_offspring = opts$num_offspring)
+  }
 
   res <- .cross_backend_dispatch(opts$cross_backend, current, cross_design,
                                  effect_df = effect_df, work_dir = opts$work_dir,
@@ -456,6 +552,16 @@
 #' before it); \code{selfing_cycles} interleaves that many truncation-advanced
 #' selfing generations between decision cycles.
 #'
+#' @section Selection unit:
+#' Every scheme above selects a \emph{parent subgroup} of \code{top_founders},
+#' which is then crossed in a full traversal (\code{selection_unit =
+#' "parents"}, \code{choose(top_founders, 2)} families per cycle). Direct pair
+#' selection (\code{selection_unit = "pairs"}) — choosing the crosses rather than
+#' the parents — is reserved but \strong{not implemented}: the call validates
+#' \code{pair_budget}, resolves the per-cycle budget, prints it when
+#' \code{verbose}, and stops at the first cycle. \code{\link{pair_selection_budget}}
+#' gives the same numbers without running anything.
+#'
 #' @section Crossing backends:
 #' \describe{
 #'   \item{\code{"block"} (default)}{Pure-R, dependency-free. The haplotype
@@ -490,7 +596,26 @@
 #' @param num_offspring Integer. Offspring per cross. Default \code{4}.
 #' @param top_founders Integer. Parents selected per cycle. Default \code{16}.
 #' @param avoid_selfing Logical. Exclude self-crosses from the design. Default
-#'   \code{FALSE}.
+#'   \code{FALSE}. Note that the \code{"all_pairs"} design used by the
+#'   parents-first protocol never contains a self-cross in any case (it
+#'   enumerates \code{combn(parents, 2)}), so each cycle makes
+#'   \code{choose(top_founders, 2)} families whatever this flag says.
+#' @param selection_unit What a cycle selects. \code{"parents"} (default, the
+#'   implemented protocol): a subgroup of \code{top_founders} parents, then every
+#'   pair of them is crossed. \code{"pairs"}: the crosses themselves are chosen
+#'   (direct pairing) — \strong{a placeholder in this version}: the arguments are
+#'   validated and the budget is resolved, then the first cycle stops with the
+#'   resolved budget in the message. Requires \code{pair_budget}.
+#' @param pair_budget How a direct-pairing cycle is matched to the parents-first
+#'   protocol; required when \code{selection_unit = "pairs"}, ignored otherwise.
+#'   The two options conflict, so there is no default. \code{"families"}: the
+#'   same offspring population size — as many families as the traversal of
+#'   \code{top_founders} parents makes (\code{choose(top_founders, 2)}), with the
+#'   number of distinct parents free. \code{"parents"}: the same number of
+#'   parents — pairs are added until \code{top_founders} distinct parent names
+#'   are in use, with the number of families free. See
+#'   \code{\link{pair_selection_budget}} for the numbers a given
+#'   \code{top_founders} implies.
 #' @param scheme Character vector of schemes to run/compare: any of \code{"TS"},
 #'   \code{"OHS"}, \code{"OCS"}, \code{"GBS"}.
 #' @param ohs_method OHS engine (see \code{\link{ohs_selection}}).
@@ -601,6 +726,8 @@ run_stacking_simulation <- function(
   num_offspring       = 4L,
   top_founders        = 16L,
   avoid_selfing       = FALSE,
+  selection_unit      = c("parents", "pairs"),
+  pair_budget         = NULL,
   scheme              = c("TS", "OHS", "OCS", "GBS"),
   ohs_method          = c("GA_pairwise", "GA_coverage", "Greedy"),
   gbs_method          = c("ARCSIN", "LOG"),
@@ -662,6 +789,18 @@ run_stacking_simulation <- function(
   select_priority  <- match.arg(select_priority)
   construct_method <- match.arg(construct_method)
   cross_backend    <- match.arg(cross_backend)
+  selection_unit   <- match.arg(selection_unit)
+
+  # Selection unit and its per-cycle budget (parents-first: the traversal of
+  # `top_founders`; direct pairing: the chosen `pair_budget`). Resolved up front
+  # so a missing `pair_budget` fails before anything runs, and so the family-ID
+  # width below follows the family count. `allow_selfing = FALSE` because the
+  # all-pairs design never selfs (see .stk_selection_budget()).
+  if (selection_unit == "parents" && !is.null(pair_budget))
+    warning("run_stacking_simulation: 'pair_budget' is ignored unless ",
+            "selection_unit = \"pairs\".", call. = FALSE)
+  budget <- .stk_selection_budget(selection_unit, pair_budget, top_founders,
+                                  allow_selfing = FALSE)
 
   # GBS knobs: the preset fills whatever was left NULL; explicit values win.
   gbs_spec <- .gbs_apply_preset(gbs_preset, list(
@@ -703,8 +842,10 @@ run_stacking_simulation <- function(
   whole_cycles <- select_cycles * (selfing_cycles + 1L)
 
   # Fixed-width fields for the compact generational IDs (C<cycle>F<family>_<child>):
-  # widths are sized to the run so IDs stay short, uniform and sortable.
-  fam_max <- max(2L, choose(top_founders, 2L))
+  # widths are sized to the run so IDs stay short, uniform and sortable. The
+  # family width follows the most families a cycle can make under the budget
+  # (parents-first: choose(top_founders, 2), unchanged).
+  fam_max <- max(2L, budget$n_families_max)
   cyc_w   <- max(2L, nchar(as.character(whole_cycles)))
   fam_w   <- max(2L, nchar(as.character(fam_max)))
   ch_w    <- max(1L, nchar(as.character(num_offspring)))
@@ -716,6 +857,8 @@ run_stacking_simulation <- function(
     top_founders      = top_founders,
     num_offspring     = num_offspring,
     avoid_selfing     = avoid_selfing,
+    selection_unit    = selection_unit,
+    pair_budget       = budget,        # resolved budget (see .stk_selection_budget)
     ohs_method        = ohs_method,
     gbs_method        = gbs_method,
     gbs_objective     = gbs_spec$gbs_objective,
@@ -762,6 +905,9 @@ run_stacking_simulation <- function(
     opts$founder_ideal  <- ideal_genotypes
     opts$founder_blocks <- unique(as.character(founder_lg$Block))
   }
+
+  # The quick calculation of what `top_founders` implies per cycle.
+  if (verbose) message("Selection unit - ", .stk_budget_text(budget))
 
   # ── One (rep, scheme) run of the full route ───────────────────────────────
   .run_one <- function(rep, sch) {
