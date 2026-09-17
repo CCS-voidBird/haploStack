@@ -5,6 +5,13 @@
 Developed for the GRDC Barley Phase 2 project at the University of Queensland.
 Generalised for use with any biparental or multiparental diploid breeding programme.
 
+> ### 0.7.4 — `ohs_method = "GA_coverage"` removed
+>
+> The binary block-coverage engine is gone (it was the worst set on every
+> metric in the 2026-09-17 review); `ohs_method` is `"GA_pairwise"` or
+> `"Greedy"`, and the deprecated `select_method = "GA"` now maps to
+> `GA_pairwise`. `genetic_algorithm_selection()` itself stays exported.
+>
 > ### 0.7.3 — OHS: elite subsetting of the families
 >
 > `ohs_selection()`, `ohs_pair_selection()` and `run_stacking_simulation()`
@@ -62,7 +69,7 @@ remotes::install_github("CCS-voidBird/haploStack")
 devtools::install("path/to/haploStack")
 
 # From a release source tarball
-install.packages("haploStack_0.7.3.tar.gz", repos = NULL, type = "source")
+install.packages("haploStack_0.7.4.tar.gz", repos = NULL, type = "source")
 
 library(haploStack)
 ```

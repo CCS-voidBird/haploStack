@@ -44,8 +44,6 @@ test_that("OHS pairs rank families by the hand-computed M[i, j]", {
   expect_equal(nrow(out), 1L)
   expect_setequal(c(out$Parent1, out$Parent2), c("S2", "S3"))
   expect_equal(out$score, -15)
-  expect_error(ohs_pair_selection(lg, "families", 2, ohs_method = "GA_coverage"),
-               "GA_coverage")
 })
 
 test_that("OHS pairs under 'parents' is the best set's traversal, ranked by M", {
@@ -354,8 +352,4 @@ test_that("the driver runs the OHS elite knobs under both units", {
       select_top_blocks = 50L, output_dir = NULL, verbose = FALSE)
     expect_true(all(res$summary[cycle > 0L]$n_families == 6L), info = unit)
   }
-  expect_error(run_stacking_simulation(
-    fx$meta, fx$eff, replications = 1L, select_cycles = 1L, top_founders = 4L,
-    scheme = "OHS", ohs_method = "GA_coverage", ohs_elite_ratio = 0.5,
-    output_dir = NULL, verbose = FALSE), "GA_coverage")
 })

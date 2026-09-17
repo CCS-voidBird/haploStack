@@ -1,4 +1,4 @@
-# Selection grid — what can be combined with what (haploStack 0.7.2)
+# Selection grid — what can be combined with what (haploStack 0.7.4)
 
 The stacking driver `run_stacking_simulation()` is a matrix of **scheme ×
 selection unit × budget × engine/options × crossing backend**. This sheet lists
@@ -14,7 +14,7 @@ Legend: ✔ available · ⚠ available with a caveat · ✖ refused (error) · �
 | Scheme | `selection_unit = "parents"` (default) — picks a parent subgroup of `top_founders`, crosses every pair | `selection_unit = "pairs"` — picks the families directly under `pair_budget` | Status |
 |---|---|---|---|
 | **TS** | top-`n` by total local GEBV `g_i` | families ranked by the **mid-parent** `(g_i + g_j)/2` (= expected F1 mean); or **usefulness** `+ usefulness_k · sd(F1)`, sd exact under the block model | ✔ / ✔ |
-| **OHS** | maximise `Σ_{i<j∈S} M[i, j]` — `M` = the family's stacking ceiling (`ohs_method`: `GA_pairwise`, `Greedy`, `GA_coverage`) | families ranked by `M[i, j]`; under `"families"` the top-`F` of the triangle (exact); under `"parents"` = the best set's traversal, i.e. `ohs_selection()` is run | ✔ / ✔ (`GA_coverage` ✖ under pairs) |
+| **OHS** | maximise `Σ_{i<j∈S} M[i, j]` — `M` = the family's stacking ceiling (`ohs_method`: `GA_pairwise`, `Greedy`; `ohs_elite_ratio` / `ohs_elite_level`) | families ranked by `M[i, j]`; under `"families"` the top-`F` of the triangle (exact); under `"parents"` = the best set's traversal, i.e. `ohs_selection()` is run | ✔ / ✔ |
 | **GBS** | sequential greedy / GA on the ideal-genotype objective at the selected-set frequency `p_t(S)` | the same objective on the family's expected offspring `q_t(i,j) = (HapN_i + HapN_j)/(2m)`; `gbs_pair_level` = `"population"` (marginal gain of `F(P)` at the offspring-pool frequency, which equals `p_t(S)` for a traversal) or `"family"` (the family's own distance) | ✔ / ✔ (`gbs_engine = "GA"` ✖ under pairs) |
 | **OCS** | greedy on `g_i − asin√(mean K)`, cap on the set's mean kinship; **falls back to truncation** when the cap stops it early | — | ⚠ / ✖ (no family form until the KCT rename) |
 | OPT (Kemper objective 2, Meuwissen contributions) | ◻ plan #030 | ◻ contributions → cross table | ◻ |
@@ -50,11 +50,10 @@ selfs).
 ### OHS
 | Argument | Values | Unit | Note |
 |---|---|---|---|
-| `ohs_method` | `"GA_pairwise"` (default) / `"Greedy"` / `"GA_coverage"` | parents | 0.7.3: the GA engines restore the RNG on exit (replicates differ again) and `Greedy` starts from the best row sum of `M` (it used to start from the first sample column) |
+| `ohs_method` | `"GA_pairwise"` (default) / `"Greedy"` | parents | 0.7.3: the GA engine restores the RNG on exit (replicates differ again) and `Greedy` starts from the best row sum of `M` (it used to start from the first sample column). 0.7.4: `"GA_coverage"` removed (binary block coverage; the worst set on every metric in the review) |
 | `ohs_method` | `"GA_pairwise"` / `"Greedy"` | pairs, `"parents"` budget | runs the set engine, returns its traversal |
 | `ohs_method` | irrelevant | pairs, `"families"` budget | the sort on `M` is exact |
-| `ohs_method = "GA_coverage"` | — | pairs | ✖ refused (set-coverage objective, no family reading) |
-| `ohs_elite_ratio` | `(0, 1]`, default `1` | both | 0.7.3: the objective counts only the best `ceiling(ratio · P)` of the set's `P` families; the crossing design is the same size at every ratio. ✖ with `GA_coverage` |
+| `ohs_elite_ratio` | `(0, 1]`, default `1` | both | 0.7.3: the objective counts only the best `ceiling(ratio · P)` of the set's `P` families; the crossing design is the same size at every ratio |
 | `ohs_elite_level` | `"pair"` (default) / `"block"` | both | `"pair"`: the elite families of the set (ratio → 0: the best single cross). `"block"`: the elite families of every block (ratio → 0: the best two haplotypes per block from any two parents — Kemper's ultimate genotype, HapSelect `Haploid_OHS`) |
 | `ohs_elite_ratio` / `ohs_elite_level` | as above | pairs, `"parents"` budget | passed to the set engine; its traversal is returned |
 | `ohs_elite_level = "pair"` | any ratio | pairs, family greedy | no effect — the families taken best-first are the pool's elite subset already |

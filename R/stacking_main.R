@@ -611,7 +611,7 @@
 #'     by total local GEBV.}
 #'   \item{\code{"OHS"}}{Optimal Haplotype Selection — maximise next-cross gain
 #'     via \code{\link{ohs_selection}} (\code{ohs_method}: \code{"GA_pairwise"},
-#'     \code{"GA_coverage"}, \code{"Greedy"}; \code{ohs_elite_ratio} /
+#'     \code{"Greedy"}; \code{ohs_elite_ratio} /
 #'     \code{ohs_elite_level} restrict the objective to the set's elite
 #'     families — the crossing design is unchanged).}
 #'   \item{\code{"OCS"}}{Optimal Contribution Selection — kinship-constrained
@@ -640,8 +640,8 @@
 #'     \code{usefulness_k} F1 standard deviations (exact under the block model).}
 #'   \item{\code{"OHS"}}{the family's stacking ceiling \code{M[i, j]}
 #'     (\code{\link{ohs_pair_selection}}; under \code{"parents"} the best
-#'     parent set and its traversal — \code{ohs_method = "GA_coverage"} is
-#'     refused). With \code{ohs_elite_level = "block"} and a ratio below 1 the
+#'     parent set and its traversal). With \code{ohs_elite_level = "block"} and a
+#'     ratio below 1 the
 #'     family set's per-block elite is scored instead
 #'     (\code{ohs_shortlist_families} candidate families).}
 #'   \item{\code{"GBS"}}{the ideal-genotype objective on the family's expected
@@ -804,7 +804,7 @@
 #' @param catalogue_results,trait_name,select_method Deprecated back-compat
 #'   inputs. \code{catalogue_results}/\code{trait_name} supply the founder
 #'   \code{GenoMeta}; \code{select_method} (\code{"GA"}/\code{"GS"}/\code{"OCS"})
-#'   maps to \code{scheme} (\code{GA -> OHS(GA_coverage)}, \code{GS -> TS},
+#'   maps to \code{scheme} (\code{GA -> OHS(GA_pairwise)}, \code{GS -> TS},
 #'   \code{OCS -> OCS}).
 #'
 #' @return A named list:
@@ -858,7 +858,7 @@ run_stacking_simulation <- function(
   ts_pair_score       = c("midparent", "usefulness"),
   usefulness_k        = 1,
   scheme              = c("TS", "OHS", "OCS", "GBS"),
-  ohs_method          = c("GA_pairwise", "GA_coverage", "Greedy"),
+  ohs_method          = c("GA_pairwise", "Greedy"),
   ohs_elite_ratio     = 1,
   ohs_elite_level     = c("pair", "block"),
   ohs_shortlist_families = NULL,
@@ -905,7 +905,7 @@ run_stacking_simulation <- function(
   if (!is.null(select_method)) {              # GA/GS/OCS -> scheme
     select_method <- match.arg(select_method, c("GA", "GS", "OCS"))
     scheme <- switch(select_method, GA = "OHS", GS = "TS", OCS = "OCS")
-    if (select_method == "GA") ohs_method <- "GA_coverage"
+    if (select_method == "GA") ohs_method <- "GA_pairwise"   # GA_coverage removed 0.7.4
   }
 
   if (!is_geno_meta(geno_meta))
@@ -917,9 +917,6 @@ run_stacking_simulation <- function(
   ohs_method       <- match.arg(ohs_method)
   ohs_elite_level  <- match.arg(ohs_elite_level)
   .ohs_check_elite(ohs_elite_ratio)
-  if ("OHS" %in% scheme && ohs_method == "GA_coverage" && ohs_elite_ratio < 1)
-    stop("run_stacking_simulation: ohs_elite_ratio applies to the pairwise ",
-         "objective; ohs_method = \"GA_coverage\" has no family reading.")
   gbs_method       <- match.arg(gbs_method)
   gbs_preset       <- match.arg(gbs_preset)
   ideal_scope      <- match.arg(ideal_scope)
@@ -947,9 +944,6 @@ run_stacking_simulation <- function(
     selection_unit, pair_budget, top_founders,
     allow_selfing = if (selection_unit == "pairs") !isTRUE(avoid_selfing) else FALSE)
   if (selection_unit == "pairs") {
-    if ("OHS" %in% scheme && ohs_method == "GA_coverage")
-      stop("run_stacking_simulation: ohs_method = \"GA_coverage\" has no family ",
-           "form under selection_unit = \"pairs\"; use \"GA_pairwise\" or \"Greedy\".")
     if ("OCS" %in% scheme)
       stop("run_stacking_simulation: scheme \"OCS\" has no direct-pair form yet ",
            "(pair plan Phase C); run it under selection_unit = \"parents\".")

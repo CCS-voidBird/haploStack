@@ -608,6 +608,45 @@ published repo ships:
   holder is still "University of Queensland", which is a rights statement, not an
   authorship one, and it already matches the published copy byte for byte.
 
+## [0.7.4] - 2026-09-17 — OHS: `GA_coverage` removed; barley benchmark of the selection arms
+
+### Removed
+- **`ohs_method = "GA_coverage"`** (owner's decision, 2026-09-17: "dispose the
+  GA_coverage mode as its poor performance"). It scored a parent set by the
+  fraction of blocks with at least one positive-effect carrier (genotype level,
+  binary) — not an OHS objective — and was the worst set on every metric in
+  `dev/review_ohs_gbs_2026-09-17.md` §1.3 (mid-parent 5.4 vs 20.8). `ohs_method`
+  is now `c("GA_pairwise", "Greedy")` in `ohs_selection()`, `ohs_pair_selection()`
+  and `run_stacking_simulation()`; the deprecated `select_method = "GA"` maps to
+  `OHS(GA_pairwise)`. `genetic_algorithm_selection()` itself stays exported (it
+  is the stage-4 legacy engine on genotype-level tables) and `.collapse_hap_to_geno()`
+  stays (the driver's truncation scorer uses it). Tests, the selection grid,
+  the example vignette and the skill sheet updated; the vignette's replicate
+  note now names OCS only (the OHS GA restores the RNG since 0.7.3).
+
+### Added
+- `dev/bench_barley_2026-09-17/` — benchmark of eleven selection arms on the
+  GRDC barley AGG1 panel (HapSelect blocks, haploStack rrBLUP per-allele
+  effects, trait NFNB), reduced to 120 random AGG parents × the 300
+  highest-variance blocks (838 markers): `bench_prep.R` (the subset),
+  `bench_arm.R <arm>` (one arm through `run_stacking_simulation()`, block
+  backend, 8 parents, ~112 offspring per cycle, 10 cycles, 3 replicates),
+  `bench_aggregate.R` (tables + `trajectories.png`). Arms: OHS `GA_pairwise` at
+  `elite_ratio` 1 / 0.1 / one family; HapSelect's `haplotype_parent_selection(
+  strategy = "OHS")` plugged in as the parent selector; GBS ARCSIN / LOG,
+  parents-first and direct pairing; TS with all / the top 10 % / the top 1
+  families by mid-parent kept (offspring per family scaled to the same
+  population size). Results in the thread #013 note and the endpoint table.
+
+### Verified
+- Full suite under `devtools::load_all()`: **2114 tests, 0 failed, 0 errors**
+  (12 pre-existing skips; 4 expectations fewer than 0.7.3 = the removed
+  `GA_coverage` tests).
+- `ready_to_use/haploStack_0.7.4.tar.gz` (264 files, 521 KB, no `.o`/`.dll`)
+  installed from source into a throwaway library: 130 exports, kernels live,
+  `Greedy`, `GA_pairwise(elite_level = "block")`, `ohs_pair_selection()` and
+  the driver with `ohs_elite_ratio` run.
+
 ## [0.7.3] - 2026-09-17 — OHS: elite subsetting of the families, the greedy's first pick, the GA's RNG
 
 The OHS objective gains an optional **elite ratio**: instead of every family a

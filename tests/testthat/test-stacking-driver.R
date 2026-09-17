@@ -136,7 +136,8 @@ test_that("catalogue_results + select_method back-compat path works", {
     replications = 1L, select_cycles = 2L, top_founders = 4L,
     num_offspring = 2L, select_method = "GA", output_dir = NULL, verbose = FALSE)
 
-  # GA -> OHS(GA_coverage); trajectories compat view is still emitted.
+  # GA -> OHS(GA_pairwise) since 0.7.4 (GA_coverage removed); trajectories
+  # compat view is still emitted.
   expect_identical(unique(res$summary$sel_scheme), "OHS")
   expect_true("trajectories" %in% names(res))
   expect_named(res$trajectories,

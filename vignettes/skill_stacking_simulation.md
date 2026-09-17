@@ -39,7 +39,7 @@ sim <- run_stacking_simulation(
   geno_meta     = meta,
   effect_df     = effects,          # or rely on meta$marker_effects
   scheme        = "OHS",            # single method
-  ohs_method    = "Greedy",         # GA_pairwise / GA_coverage / Greedy
+  ohs_method    = "Greedy",         # GA_pairwise / Greedy
   replications  = 3L,
   select_cycles = 5L,
   top_founders  = 6L,
@@ -97,8 +97,8 @@ pair_selection_budget(16, "families")                               # the number
 - In one call with `replications > 1`, `OHS` GA engines and `OCS` re-seed the
   RNG every cycle, so their replicates are identical — use
   `ohs_method = "Greedy"`, or separate calls with different seeds.
-- `"pairs"`: `pair_budget` is required; `OCS` and `ohs_method = "GA_coverage"`
-  have no family form and are refused.
+- `"pairs"`: `pair_budget` is required; `OCS` has no family form and is
+  refused.
 - On small datasets GBS may emit benign penalty warnings.
 - Parallelise large comparisons with `n_cores > 1` (needs *future* /
   *future.apply*).

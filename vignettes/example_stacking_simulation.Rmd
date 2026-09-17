@@ -48,12 +48,11 @@ directly). The full matrix of what can be combined with what is in
 The default crossing backend is pure-R (`"block"`), so no external simulation
 package is required.
 
-> **Note on replicates.** In a single call with `replications > 1`, the
-> `OHS` genetic-algorithm engines (`GA_pairwise`, `GA_coverage`) and `OCS`
-> re-seed the random-number stream with the fixed `seed` every cycle, so their
-> replicates come out identical. Use `ohs_method = "Greedy"` when you rely on
-> replicate spread, or run replicates as separate calls with different seeds
-> (as the HaploSim campaign driver does). `TS` and `GBS` are unaffected.
+> **Note on replicates.** In a single call with `replications > 1`, `OCS`
+> re-seeds the random-number stream with the fixed `seed` every cycle, so its
+> replicates come out identical; run OCS replicates as separate calls with
+> different seeds (as the HaploSim campaign driver does). `TS`, `OHS` (since
+> 0.7.3 the GA engine restores the stream) and `GBS` are unaffected.
 
 ```{r load}
 library(haploStack)

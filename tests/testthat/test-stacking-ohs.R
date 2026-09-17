@@ -59,14 +59,9 @@ test_that("OHS GA_pairwise reaches the pairwise optimum (40)", {
   expect_equal(.obj(sel, M), 40)                  # global optimum
 })
 
-test_that("OHS GA_pairwise objective >= GA_coverage objective", {
-  M    <- haploStack:::.pairwise_block_value_matrix(.ohs_lg)
-  s_pw <- ohs_selection(.ohs_lg, n_parents = 2L, method = "GA_pairwise",
-                        n_generations = 50L, seed = 1L)
-  s_cv <- ohs_selection(.ohs_lg, n_parents = 2L, method = "GA_coverage",
-                        n_generations = 50L, seed = 1L)
-  expect_length(s_cv, 2L)
-  expect_gte(.obj(s_pw, M), .obj(s_cv, M))
+test_that("the GA_coverage engine is gone (0.7.4)", {
+  expect_error(ohs_selection(.ohs_lg, n_parents = 2L, method = "GA_coverage"),
+               "arg")
 })
 
 test_that("ohs_selection returns all samples when n_parents >= n", {
@@ -206,6 +201,4 @@ test_that("elite arguments are validated", {
   lg <- .ohs_random_lg(5L, 6L, seed = 1L)
   expect_error(ohs_selection(lg, n_parents = 2L, elite_ratio = 0), "elite_ratio")
   expect_error(ohs_selection(lg, n_parents = 2L, elite_ratio = 1.5), "elite_ratio")
-  expect_error(ohs_selection(lg, n_parents = 2L, method = "GA_coverage", elite_ratio = 0.5),
-               "GA_coverage")
 })

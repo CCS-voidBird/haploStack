@@ -134,7 +134,7 @@ test_that("selection_unit = 'pairs' refuses what has no family form", {
     num_offspring = 2L, selection_unit = "pairs", pair_budget = "families",
     select_top_blocks = 50L, output_dir = NULL, verbose = FALSE, ...)
   expect_error(run(scheme = "OCS"), "no direct-pair form")
-  expect_error(run(scheme = "OHS", ohs_method = "GA_coverage"), "GA_coverage")
+  expect_error(run(scheme = "OHS", ohs_method = "GA_coverage"), "arg")   # removed 0.7.4
   expect_error(run(scheme = "GBS", gbs_engine = "GA", gbs_objective = "set"),
                "family sets")
 })

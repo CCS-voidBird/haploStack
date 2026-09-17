@@ -9,7 +9,7 @@ ohs_pair_selection(
   pair_budget = c("families", "parents"),
   top_founders = 8L,
   allow_selfing = FALSE,
-  ohs_method = c("GA_pairwise", "Greedy", "GA_coverage"),
+  ohs_method = c("GA_pairwise", "Greedy"),
   elite_ratio = 1,
   elite_level = c("pair", "block"),
   shortlist_families = NULL,
@@ -75,9 +75,8 @@ parents, families free") the optimum is the best parent \emph{set} and every
 family among it — \code{sum(M[S, S])}, the parents-first objective — so this
 budget runs \code{\link{ohs_selection}} with the chosen \code{ohs_method}
 (\code{"GA_pairwise"} or \code{"Greedy"}) and returns the traversal of its
-set, ranked by \code{M}. \code{"GA_coverage"} scores a parent set by block
-coverage and has no family reading; it is refused. A finite \code{max_use}
-under \code{"parents"} falls back to the best-first greedy over families.
+set, ranked by \code{M}. A finite \code{max_use} under \code{"parents"}
+falls back to the best-first greedy over families.
 }
 
 \section{Elite subsetting}{

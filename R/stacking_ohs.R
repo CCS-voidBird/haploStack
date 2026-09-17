@@ -30,13 +30,14 @@
 #   .ohs_objective()             — internal: the set objective for a ratio/level
 #   .ga_pairwise() / .greedy_pairwise() — internal: GA / greedy on the objective
 #   .collapse_hap_to_geno()      — internal: haplotype -> genotype wide GEBV
+#                                  (used by the driver's truncation scorer)
 #
 # Engines (PRD #013, issue 01):
 #   "GA_pairwise" — origin GA maximising the set objective (sum(M[S,S]) by default).
-#   "GA_coverage" — project genetic_algorithm_selection() (binary block coverage).
 #   "Greedy"      — greedy marginal gain on the set objective, seeded with the
 #                   best row sum of M (0.7.3; the origin's first pick was the
 #                   first sample column, whatever the data).
+#   "GA_coverage" (binary block coverage) was removed in 0.7.4.
 #
 # Input: haplotype-level local GEBV from
 #   compute_profile_localgebv(geno_meta, effect_df, level = "haplotype")
@@ -47,12 +48,13 @@
 #' Optimal Haplotype Selection of parents
 #'
 #' Selects \code{n_parents} candidates that maximise expected next-cross gain,
-#' using one of three engines (\code{method}). \code{GA_pairwise} and
+#' using one of two engines (\code{method}): \code{GA_pairwise} and
 #' \code{Greedy} optimise the set objective built on the block-value matrix
 #' \code{\link{.pairwise_block_value_matrix}} — by default
-#' \code{sum(M[S, S])}, every family's stacking ceiling summed;
-#' \code{GA_coverage} delegates to \code{\link{genetic_algorithm_selection}}
-#' (binary block coverage) after collapsing haplotypes to genotype level.
+#' \code{sum(M[S, S])}, every family's stacking ceiling summed. (The former
+#' \code{"GA_coverage"} engine — binary block coverage via
+#' \code{\link{genetic_algorithm_selection}} — was removed in 0.7.4 for its
+#' poor performance; the function itself remains exported.)
 #'
 #' @section Elite subsetting:
 #' With \code{elite_ratio < 1} the objective counts only the best
@@ -84,17 +86,14 @@
 #'   \code{"<Sample>.<haplotype_idx>"} (the output of
 #'   \code{compute_profile_localgebv(level = "haplotype")}).
 #' @param n_parents Integer number of parents to select. Default \code{8}.
-#' @param method One of \code{"GA_pairwise"} (default), \code{"GA_coverage"},
-#'   \code{"Greedy"}.
+#' @param method \code{"GA_pairwise"} (default) or \code{"Greedy"}.
 #' @param ploidy Haplotypes per sample. \code{NULL} (default) infers it from the
 #'   column names.
 #' @param elite_ratio Fraction in \code{(0, 1]} of the set's families the
 #'   objective counts (see the section above). Default \code{1} = every family.
-#'   Not available with \code{method = "GA_coverage"}.
 #' @param elite_level \code{"pair"} (default) or \code{"block"}: whether the
 #'   elite families are chosen once per set or once per block.
-#' @param pop_size,n_generations,mutation_rate GA controls (used by
-#'   \code{GA_pairwise} and \code{GA_coverage}).
+#' @param pop_size,n_generations,mutation_rate GA controls (\code{GA_pairwise}).
 #' @param seed Random seed for the GA engines. \code{GA_pairwise} restores the
 #'   global RNG stream on exit (0.7.3). Default \code{42L}.
 #' @param verbose Logical; print GA progress. Default \code{FALSE}.
@@ -106,7 +105,7 @@
 #' @export
 ohs_selection <- function(localgebv,
                           n_parents     = 8L,
-                          method        = c("GA_pairwise", "GA_coverage", "Greedy"),
+                          method        = c("GA_pairwise", "Greedy"),
                           ploidy        = NULL,
                           elite_ratio   = 1,
                           elite_level   = c("pair", "block"),
@@ -123,18 +122,6 @@ ohs_selection <- function(localgebv,
     stop("ohs_selection: 'localgebv' must have a 'Block' column.")
   if (length(setdiff(names(dt), "Block")) == 0L)
     stop("ohs_selection: 'localgebv' has no sample columns.")
-
-  if (method == "GA_coverage") {
-    if (elite_ratio < 1)
-      stop("ohs_selection: 'elite_ratio' applies to the pairwise objective; ",
-           "method = \"GA_coverage\" scores block coverage and has no family ",
-           "reading. Use \"GA_pairwise\" or \"Greedy\".")
-    geno <- .collapse_hap_to_geno(dt)
-    return(genetic_algorithm_selection(
-      geno, n_parents = n_parents, pop_size = pop_size,
-      n_generations = n_generations, mutation_rate = mutation_rate,
-      seed = seed, verbose = verbose))
-  }
 
   need_array <- elite_level == "block" && elite_ratio < 1
   pm <- .pairwise_block_value_matrix(dt, ploidy = ploidy, return_array = need_array)

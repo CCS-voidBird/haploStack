@@ -7,7 +7,7 @@
 ohs_selection(
   localgebv,
   n_parents = 8L,
-  method = c("GA_pairwise", "GA_coverage", "Greedy"),
+  method = c("GA_pairwise", "Greedy"),
   ploidy = NULL,
   elite_ratio = 1,
   elite_level = c("pair", "block"),
@@ -26,21 +26,18 @@ ohs_selection(
 
 \item{n_parents}{Integer number of parents to select. Default \code{8}.}
 
-\item{method}{One of \code{"GA_pairwise"} (default), \code{"GA_coverage"},
-\code{"Greedy"}.}
+\item{method}{\code{"GA_pairwise"} (default) or \code{"Greedy"}.}
 
 \item{ploidy}{Haplotypes per sample. \code{NULL} (default) infers it from the
 column names.}
 
 \item{elite_ratio}{Fraction in \code{(0, 1]} of the set's families the
-objective counts (see the section above). Default \code{1} = every family.
-Not available with \code{method = "GA_coverage"}.}
+objective counts (see the section above). Default \code{1} = every family.}
 
 \item{elite_level}{\code{"pair"} (default) or \code{"block"}: whether the
 elite families are chosen once per set or once per block.}
 
-\item{pop_size, n_generations, mutation_rate}{GA controls (used by
-\code{GA_pairwise} and \code{GA_coverage}).}
+\item{pop_size, n_generations, mutation_rate}{GA controls (\code{GA_pairwise}).}
 
 \item{seed}{Random seed for the GA engines. \code{GA_pairwise} restores the
 global RNG stream on exit (0.7.3). Default \code{42L}.}
@@ -52,12 +49,13 @@ A character vector of selected sample names (length \code{n_parents}).
 }
 \description{
 Selects \code{n_parents} candidates that maximise expected next-cross gain,
-using one of three engines (\code{method}). \code{GA_pairwise} and
+using one of two engines (\code{method}): \code{GA_pairwise} and
 \code{Greedy} optimise the set objective built on the block-value matrix
 \code{\link{.pairwise_block_value_matrix}} — by default
-\code{sum(M[S, S])}, every family's stacking ceiling summed;
-\code{GA_coverage} delegates to \code{\link{genetic_algorithm_selection}}
-(binary block coverage) after collapsing haplotypes to genotype level.
+\code{sum(M[S, S])}, every family's stacking ceiling summed. (The former
+\code{"GA_coverage"} engine — binary block coverage via
+\code{\link{genetic_algorithm_selection}} — was removed in 0.7.4 for its
+poor performance; the function itself remains exported.)
 }
 \section{Elite subsetting}{
 
