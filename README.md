@@ -5,6 +5,17 @@
 Developed for the GRDC Barley Phase 2 project at the University of Queensland.
 Generalised for use with any biparental or multiparental diploid breeding programme.
 
+> ### 0.7.5 — `max_F1mean` (top elite) in the simulation summary
+>
+> `run_stacking_simulation()$summary` gains `max_F1mean`, the breeding value
+> of the cycle's best single offspring, beside the population mean — the
+> realised counterpart of a set-level "ultimate genotype" objective. The
+> genomicSimulation backend now restores missing alleles to `NA` on read-back
+> (they came back as a literal `"N"` allele and `is_geno_meta()` warned every
+> cycle). The barley benchmark was re-run on both crossing backends at 100
+> cycles with Kemper's GBS preset added; the backend does not change the
+> ranking — see the changelog.
+>
 > ### 0.7.4 — `ohs_method = "GA_coverage"` removed
 >
 > The binary block-coverage engine is gone (it was the worst set on every
@@ -69,7 +80,7 @@ remotes::install_github("CCS-voidBird/haploStack")
 devtools::install("path/to/haploStack")
 
 # From a release source tarball
-install.packages("haploStack_0.7.4.tar.gz", repos = NULL, type = "source")
+install.packages("haploStack_0.7.5.tar.gz", repos = NULL, type = "source")
 
 library(haploStack)
 ```
