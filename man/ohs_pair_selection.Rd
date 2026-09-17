@@ -10,6 +10,9 @@ ohs_pair_selection(
   top_founders = 8L,
   allow_selfing = FALSE,
   ohs_method = c("GA_pairwise", "Greedy", "GA_coverage"),
+  elite_ratio = 1,
+  elite_level = c("pair", "block"),
+  shortlist_families = NULL,
   max_use = Inf,
   overshoot = c("skip", "stop"),
   ploidy = NULL,
@@ -32,6 +35,13 @@ self's ceiling is the parent's haplotypes doubled, top-\code{ploidy} per
 block). Default \code{FALSE}.}
 
 \item{ohs_method}{Set engine used under \code{pair_budget = "parents"}.}
+
+\item{elite_ratio, elite_level}{Elite subsetting (see the section above and
+\code{\link{ohs_selection}}). Defaults \code{1} and \code{"pair"}.}
+
+\item{shortlist_families}{Block level only: candidate families held with
+their per-block values, the best by \code{M}. \code{NULL} (default) =
+the larger of \code{4 * n_families} and \code{100}.}
 
 \item{max_use}{Per-parent usage cap (families a parent may appear in).
 Default \code{Inf}.}
@@ -68,6 +78,22 @@ budget runs \code{\link{ohs_selection}} with the chosen \code{ohs_method}
 set, ranked by \code{M}. \code{"GA_coverage"} scores a parent set by block
 coverage and has no family reading; it is refused. A finite \code{max_use}
 under \code{"parents"} falls back to the best-first greedy over families.
+}
+
+\section{Elite subsetting}{
+
+\code{elite_ratio} and \code{elite_level} are the knobs of
+\code{\link{ohs_selection}}. When the set engine runs (\code{"parents"}
+budget, no usage cap) they are passed to it. Under the family greedy:
+\code{elite_level = "pair"} leaves the ranking unchanged — the families
+taken best-first \emph{are} the elite subset of the pool, whatever the
+ratio; \code{elite_level = "block"} scores the family set by
+\code{sum_b} of the \code{q = ceiling(elite_ratio * n_families)} largest
+per-block ceilings over its families, re-scored after every pick (the
+family whose blocks add most to the set's "ultimate genotype"), over the
+\code{shortlist_families} best families of the pool by \code{M}. At
+\code{elite_ratio = 1} the block level ranks exactly as the pair level.
+The budget, and so the number of families made, is the same at every ratio.
 }
 
 \seealso{

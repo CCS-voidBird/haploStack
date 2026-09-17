@@ -50,10 +50,15 @@ selfs).
 ### OHS
 | Argument | Values | Unit | Note |
 |---|---|---|---|
-| `ohs_method` | `"GA_pairwise"` (default) / `"Greedy"` / `"GA_coverage"` | parents | GA engines re-seed the RNG each cycle — replicates in one multi-rep call are identical (§5) |
+| `ohs_method` | `"GA_pairwise"` (default) / `"Greedy"` / `"GA_coverage"` | parents | 0.7.3: the GA engines restore the RNG on exit (replicates differ again) and `Greedy` starts from the best row sum of `M` (it used to start from the first sample column) |
 | `ohs_method` | `"GA_pairwise"` / `"Greedy"` | pairs, `"parents"` budget | runs the set engine, returns its traversal |
 | `ohs_method` | irrelevant | pairs, `"families"` budget | the sort on `M` is exact |
 | `ohs_method = "GA_coverage"` | — | pairs | ✖ refused (set-coverage objective, no family reading) |
+| `ohs_elite_ratio` | `(0, 1]`, default `1` | both | 0.7.3: the objective counts only the best `ceiling(ratio · P)` of the set's `P` families; the crossing design is the same size at every ratio. ✖ with `GA_coverage` |
+| `ohs_elite_level` | `"pair"` (default) / `"block"` | both | `"pair"`: the elite families of the set (ratio → 0: the best single cross). `"block"`: the elite families of every block (ratio → 0: the best two haplotypes per block from any two parents — Kemper's ultimate genotype, HapSelect `Haploid_OHS`) |
+| `ohs_elite_ratio` / `ohs_elite_level` | as above | pairs, `"parents"` budget | passed to the set engine; its traversal is returned |
+| `ohs_elite_level = "pair"` | any ratio | pairs, family greedy | no effect — the families taken best-first are the pool's elite subset already |
+| `ohs_elite_level = "block"`, ratio < 1 | `ohs_shortlist_families` (default max(4 · F, 100)) | pairs, family greedy | the family *set* scored by its per-block elite, re-scored after every pick (`.pair_scorer_ohs_block()`); ratio 1 ranks as the pair level |
 
 ### GBS
 | Argument | Values | Unit | Note |

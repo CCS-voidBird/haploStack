@@ -139,6 +139,16 @@ genetic_algorithm_selection <- function(gebv_matrix,
                                          seed           = 42L,
                                          verbose        = FALSE) {
 
+  # The global RNG stream is restored on exit (0.7.3; discrepancy 28) so a
+  # driver's crossing step is not reseeded by the selection call.
+  old_seed <- if (exists(".Random.seed", envir = globalenv(), inherits = FALSE))
+    get(".Random.seed", envir = globalenv()) else NULL
+  on.exit({
+    if (is.null(old_seed)) {
+      if (exists(".Random.seed", envir = globalenv(), inherits = FALSE))
+        rm(list = ".Random.seed", envir = globalenv())
+    } else assign(".Random.seed", old_seed, envir = globalenv())
+  }, add = TRUE)
   set.seed(seed)
   mat <- as.data.table(gebv_matrix)
   if (!"Block" %in% names(mat))

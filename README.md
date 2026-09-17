@@ -5,6 +5,20 @@
 Developed for the GRDC Barley Phase 2 project at the University of Queensland.
 Generalised for use with any biparental or multiparental diploid breeding programme.
 
+> ### 0.7.3 — OHS: elite subsetting of the families
+>
+> `ohs_selection()`, `ohs_pair_selection()` and `run_stacking_simulation()`
+> gain `elite_ratio` / `elite_level` (`ohs_elite_ratio` / `ohs_elite_level` in
+> the driver): the OHS objective may count only the best
+> `ceiling(ratio · P)` of a set's `P` families — per set (`"pair"`, default;
+> ratio → 0 = the best single cross) or per block (`"block"`; ratio → 0 = the
+> best two haplotypes of every block from any two parents, Kemper's "ultimate
+> genotype"). Ratio 1 is the previous objective, and the crossing design has
+> the same size at every ratio. **Changes published OHS numbers:** the `Greedy`
+> engine now starts from the best row sum of `M` (it used to start from the
+> first sample column), and the OHS GA engines restore the RNG on exit, so
+> replicates of a multi-rep OHS run differ again.
+>
 > ### 0.7.2 — direct pair selection
 >
 > The stacking driver can now **select the crosses themselves** instead of a
@@ -23,9 +37,9 @@ Generalised for use with any biparental or multiparental diploid breeding progra
 > **Focus on `TS`, `OHS`, `GBS`.** `OCS` is kept for compatibility but has known
 > issues (kinship-penalised truncation with a silent fall-back — not true
 > optimum-contribution selection) and has no family form; a `KCT` rename and a
-> real `OPT` scheme are planned. In a single call with `replications > 1` the
-> OHS genetic-algorithm engines and OCS re-seed the RNG each cycle, so their
-> replicates are identical — use `ohs_method = "Greedy"` or one call per seed.
+> real `OPT` scheme are planned. In a single call with `replications > 1`
+> OCS re-seeds the RNG each cycle, so its replicates are identical — run one
+> call per seed (the OHS GA engines restore the RNG since 0.7.3).
 >
 > **0.7.0 changed published GBS numbers** (`gbs_preset = "kemper"`, Kemper's
 > `LOG`, the bounded risk × hope penalty scale, `ideal_scope = "founder"`), and
@@ -48,7 +62,7 @@ remotes::install_github("CCS-voidBird/haploStack")
 devtools::install("path/to/haploStack")
 
 # From a release source tarball
-install.packages("haploStack_0.7.2.tar.gz", repos = NULL, type = "source")
+install.packages("haploStack_0.7.3.tar.gz", repos = NULL, type = "source")
 
 library(haploStack)
 ```

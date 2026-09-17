@@ -608,6 +608,108 @@ published repo ships:
   holder is still "University of Queensland", which is a rights statement, not an
   authorship one, and it already matches the published copy byte for byte.
 
+## [0.7.3] - 2026-09-17 — OHS: elite subsetting of the families, the greedy's first pick, the GA's RNG
+
+The OHS objective gains an optional **elite ratio**: instead of every family a
+parent set implies, the search may value only the best `q = ceiling(ratio · P)`
+of its `P = k (k − 1) / 2` families (owner's request, 2026-09-17, after the
+review `dev/review_ohs_gbs_2026-09-17.md`). At ratio 1 nothing changes; the
+crossing design has the same size at every ratio — the ratio changes what the
+search values, not which crosses are made. Thread
+[#013](project_record/threads/013-stacking-simulation.md) (OHS issue 01) and
+[#031](project_record/threads/031-direct-pair-selection.md) (the pairs side).
+
+### ⚠ Changes published numbers — OHS runs only
+
+1. **`ohs_method = "Greedy"` starts from the best row sum of `M`.** The
+   0.6.0–0.7.2 greedy started from the *first sample column* whatever the data
+   (the diagonal of `M` is 0, so the first marginal-gain vector was all zeros
+   and `which.max()` returned index 1 — the origin `greedy_selection()` had
+   the same defect). Reversing the column order changed its answer; on the
+   review's 80 × 60 panel the fix lifts the greedy from 4607.9 to 4693.0 =
+   the GA optimum. Pinned by test (first pick, column-order invariance, never
+   worse than the old start).
+2. **`GA_pairwise` and `GA_coverage` (`genetic_algorithm_selection()`) restore
+   the global RNG stream on exit** (the `.gbs_ga_set()` pattern). The GAs' own
+   draws are unchanged, so their picks are byte-identical to 0.7.2 at ratio 1
+   (parity script, 3 random fixtures), but the driver's crossing step no longer
+   runs on a stream reseeded by the selection call: OHS replicates in one
+   multi-rep call now differ, as they should. **Closes discrepancy 28 for OHS**
+   (`ocs_selection()` still reseeds; Q24 o).
+
+### Added
+- `ohs_selection(elite_ratio = 1, elite_level = c("pair", "block"))`:
+  - `"pair"` (default): the objective is the sum of the `q` largest family
+    ceilings `M[i, j]` within the set. As the ratio shrinks it tends to the
+    **single best cross**; a tie-break of `1e-6 ×` the mean family ceiling keeps
+    the non-elite parents ordered (below ratio `(k − 1) / P` some parents can
+    sit in no elite family and are fillers as far as the elite objective goes).
+  - `"block"`: per block, the `q` largest per-block family ceilings
+    `M_b[i, j]`, summed over blocks — the elite families may differ from block
+    to block, so the small-ratio limit is the **best two haplotypes of every
+    block from any two parents**: Kemper et al. (2012)'s "ultimate genotype",
+    HapSelect's `Haploid_OHS` (pinned by test against a transcription of that
+    fitness; HapSelect's `OHS` differs only by forcing the two haplotypes onto
+    different parents). At ratio 1 both levels are the full objective
+    `sum(M[S, S])`.
+  - Both engines take the objective: `GA_pairwise` through its fitness,
+    `Greedy` by re-evaluating the objective for every candidate (the closed-form
+    marginal gain is kept at ratio 1). `GA_coverage` has no family reading and
+    refuses a ratio below 1.
+  - Internals: `.ohs_objective()` (the set objective for a ratio / level),
+    `.ohs_pair_block_values()` (per-block family ceilings from the sorted
+    haplotype array, vectorised for ploidy 2), `.ohs_col_topq_sum()`,
+    `.ohs_elite_q()`, `.ohs_check_elite()`;
+    `.pairwise_block_value_matrix(return_array = TRUE)` returns the array too.
+- `ohs_pair_selection(elite_ratio, elite_level, shortlist_families)` (direct
+  pairing): under the `"parents"` budget the knobs go to the set engine and its
+  traversal is returned as before. Under the family greedy, `"pair"` leaves the
+  ranking unchanged (the families taken best-first *are* the pool's elite
+  subset, whatever the ratio); `"block"` with a ratio below 1 scores the
+  **family set** by `sum_b` of the `q = ceiling(ratio · n_families)` largest
+  per-block ceilings over its families, re-scored after every pick — the
+  marginal gain of a family is `sum_b max(0, v_fb − τ_b)`, `τ_b` the `q`-th
+  largest chosen value at block `b` (`.pair_scorer_ohs_block()`, non-additive)
+  — over the `shortlist_families` best families of the pool by `M` (default the
+  larger of `4 · n_families` and 100). At ratio 1 it ranks exactly as the pair
+  level (pinned). The budget, and so the number of families made, is the same at
+  every ratio.
+- `run_stacking_simulation(ohs_elite_ratio = 1, ohs_elite_level = "pair",
+  ohs_shortlist_families = NULL)`, passed to both units; `GA_coverage` with a
+  ratio below 1 is refused up front.
+- Tests: 8 in `test-stacking-ohs.R` (ratio 1 = the pre-0.7.3 picks for both
+  levels; the pair and block objectives against independent transcriptions;
+  the block level at ratio → 0 = HapSelect's `Haploid_OHS`; a small pair ratio
+  keeps the best single cross; the greedy's first pick and column-order
+  invariance; the RNG; validation) and 4 in `test-stacking-pairs-schemes.R`
+  (pass-through under `"parents"`; block level at ratio 1 = pair level and the
+  pair level unchanged by the ratio; the hand greedy of the first two families
+  at a small block ratio; shortlist and budgets; the driver under both units).
+- `dev/review_ohs_gbs_2026-09-17.md` (+ `dev/review_ohs_gbs_2026-09-17/`
+  scripts and outputs): the review that motivated this release — haploStack's
+  `GA_pairwise` (sum of every family's ceiling) vs HapSelect's built-in OHS GA
+  (Kemper's set-level ultimate genotype, Yadav et al. 2025 TAG `Σ a_ij = 2`),
+  cross-scored on one panel; GBS presets × modes with a 10-cycle grid.
+
+### Changed
+- `dev/UPGRADE_PLAN_opt_kemper.md` §2: the claim that `GA_pairwise` is "the
+  group's port of that GA (Tong et al. 2025)" is corrected — it is the port of
+  the origin's pairwise-sum GA; Yadav / Tong 2025 and HapSelect implement
+  Kemper's set-level objective, which the block-level elite limit now reaches.
+- No export change (130).
+
+### Verified
+- Full suite under `devtools::load_all()` on the final code: **2118 tests, 0
+  failed, 0 errors** (12 pre-existing skips for absent optional dependencies).
+- Parity with the installed 0.7.2 (separate process, 3 random fixtures):
+  `GA_pairwise` picks identical; `Greedy` objective 4741.8 → 4838.5,
+  9201.2 → 9225.3, 1912.8 → 2096.0.
+- `ready_to_use/haploStack_0.7.3.tar.gz` (264 files, 521 KB, no `.o`/`.dll`)
+  installed from source into a throwaway library: 130 exports, kernels live,
+  `Greedy`, `GA_pairwise(elite_level = "block")`, `ohs_pair_selection(elite_level
+  = "block")` and the driver with `ohs_elite_ratio` run; two replicates of an
+  OHS-GA run now differ at cycle 2.
+
 ## [0.7.2] - 2026-09-15 — Direct pair selection: the selector
 
 The 0.7.1 placeholder becomes a working unit. Under `selection_unit = "pairs"`

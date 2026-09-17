@@ -9,6 +9,8 @@ ohs_selection(
   n_parents = 8L,
   method = c("GA_pairwise", "GA_coverage", "Greedy"),
   ploidy = NULL,
+  elite_ratio = 1,
+  elite_level = c("pair", "block"),
   pop_size = 100L,
   n_generations = 200L,
   mutation_rate = 0.1,
@@ -30,10 +32,18 @@ ohs_selection(
 \item{ploidy}{Haplotypes per sample. \code{NULL} (default) infers it from the
 column names.}
 
+\item{elite_ratio}{Fraction in \code{(0, 1]} of the set's families the
+objective counts (see the section above). Default \code{1} = every family.
+Not available with \code{method = "GA_coverage"}.}
+
+\item{elite_level}{\code{"pair"} (default) or \code{"block"}: whether the
+elite families are chosen once per set or once per block.}
+
 \item{pop_size, n_generations, mutation_rate}{GA controls (used by
 \code{GA_pairwise} and \code{GA_coverage}).}
 
-\item{seed}{Random seed. Default \code{42L}.}
+\item{seed}{Random seed for the GA engines. \code{GA_pairwise} restores the
+global RNG stream on exit (0.7.3). Default \code{42L}.}
 
 \item{verbose}{Logical; print GA progress. Default \code{FALSE}.}
 }
@@ -43,12 +53,40 @@ A character vector of selected sample names (length \code{n_parents}).
 \description{
 Selects \code{n_parents} candidates that maximise expected next-cross gain,
 using one of three engines (\code{method}). \code{GA_pairwise} and
-\code{Greedy} optimise the pairwise objective \code{sum(M[S, S])} on the
-block-value matrix \code{\link{.pairwise_block_value_matrix}};
+\code{Greedy} optimise the set objective built on the block-value matrix
+\code{\link{.pairwise_block_value_matrix}} — by default
+\code{sum(M[S, S])}, every family's stacking ceiling summed;
 \code{GA_coverage} delegates to \code{\link{genetic_algorithm_selection}}
 (binary block coverage) after collapsing haplotypes to genotype level.
 }
+\section{Elite subsetting}{
+
+With \code{elite_ratio < 1} the objective counts only the best
+\code{q = ceiling(elite_ratio * P)} of the \code{P = k (k - 1) / 2} families
+a set of \code{k} parents implies:
+\describe{
+\item{\code{elite_level = "pair"} (default)}{the \code{q} largest family
+ceilings \code{M[i, j]} within the set. As the ratio shrinks the objective
+tends to the single best cross; a set is then judged by its elite
+families and the other parents matter only through a tie-break on the
+full sum.}
+\item{\code{elite_level = "block"}}{per block, the \code{q} largest
+per-block family ceilings \code{M_b[i, j]}, summed over blocks. Elite
+families may differ from block to block, so as the ratio shrinks the
+objective tends to the best two haplotypes of every block from any two
+parents — the "ultimate genotype" a gene pool could eventually build
+(Kemper et al. 2012; HapSelect's \code{Haploid_OHS}), rather than the
+best single cross.}
+}
+At \code{elite_ratio = 1} both levels equal the full objective. The ratio
+changes what the search values, not the crossing design: the driver still
+crosses the selected set in its full traversal. When \code{q < k - 1} some
+parents cannot appear in any elite family; a tie-break of \code{1e-6} times
+the mean family ceiling keeps them ordered, but they are fillers as far as
+the elite objective is concerned.
+}
+
 \seealso{
 \code{\link{ocs_selection}}, \code{\link{genetic_algorithm_selection}},
-\code{\link{make_cross_design}}
+\code{\link{ohs_pair_selection}}, \code{\link{make_cross_design}}
 }

@@ -118,7 +118,10 @@
     scheme,
     TS  = .stk_select_truncation(localgebv, n_parents, opts$select_priority),
     OHS = ohs_selection(localgebv, n_parents = n_parents,
-                        method = opts$ohs_method, seed = opts$seed),
+                        method = opts$ohs_method,
+                        elite_ratio = opts$ohs_elite_ratio %||% 1,
+                        elite_level = opts$ohs_elite_level %||% "pair",
+                        seed = opts$seed),
     OCS = {
       v   <- .stk_total_gebv(localgebv)
       grm <- tryCatch(suppressMessages(compute_grm(geno_meta)),
@@ -218,6 +221,9 @@
                              top_founders = b$n_parents_ref,
                              allow_selfing = b$allow_selfing,
                              ohs_method = opts$ohs_method,
+                             elite_ratio = opts$ohs_elite_ratio %||% 1,
+                             elite_level = opts$ohs_elite_level %||% "pair",
+                             shortlist_families = opts$ohs_shortlist_families,
                              max_use = opts$max_use, overshoot = opts$overshoot,
                              seed = opts$seed),
     OCS = stop("run_stacking_simulation: scheme \"OCS\" has no direct-pair form ",
@@ -605,7 +611,9 @@
 #'     by total local GEBV.}
 #'   \item{\code{"OHS"}}{Optimal Haplotype Selection — maximise next-cross gain
 #'     via \code{\link{ohs_selection}} (\code{ohs_method}: \code{"GA_pairwise"},
-#'     \code{"GA_coverage"}, \code{"Greedy"}).}
+#'     \code{"GA_coverage"}, \code{"Greedy"}; \code{ohs_elite_ratio} /
+#'     \code{ohs_elite_level} restrict the objective to the set's elite
+#'     families — the crossing design is unchanged).}
 #'   \item{\code{"OCS"}}{Optimal Contribution Selection — kinship-constrained
 #'     (\code{\link{ocs_selection}} on a VanRaden GRM, \code{max_kinship}).}
 #'   \item{\code{"GBS"}}{Genotype Building Strategy — drive block-haplotype
@@ -632,7 +640,10 @@
 #'     \code{usefulness_k} F1 standard deviations (exact under the block model).}
 #'   \item{\code{"OHS"}}{the family's stacking ceiling \code{M[i, j]}
 #'     (\code{\link{ohs_pair_selection}}; under \code{"parents"} the best
-#'     parent set and its traversal — \code{ohs_method = "GA_coverage"} is refused).}
+#'     parent set and its traversal — \code{ohs_method = "GA_coverage"} is
+#'     refused). With \code{ohs_elite_level = "block"} and a ratio below 1 the
+#'     family set's per-block elite is scored instead
+#'     (\code{ohs_shortlist_families} candidate families).}
 #'   \item{\code{"GBS"}}{the ideal-genotype objective on the family's expected
 #'     offspring (\code{\link{gbs_pair_selection}}: \code{gbs_pair_level},
 #'     \code{pair_freq}, \code{pair_penalty}, \code{pair_pool}; the default
@@ -714,6 +725,16 @@
 #' @param scheme Character vector of schemes to run/compare: any of \code{"TS"},
 #'   \code{"OHS"}, \code{"OCS"}, \code{"GBS"}.
 #' @param ohs_method OHS engine (see \code{\link{ohs_selection}}).
+#' @param ohs_elite_ratio Fraction in \code{(0, 1]} of a set's families the OHS
+#'   objective counts (see \code{\link{ohs_selection}}). Default \code{1} =
+#'   every family; the crossing design has the same size at every ratio.
+#' @param ohs_elite_level \code{"pair"} (default) or \code{"block"}: the elite
+#'   families are chosen once per set, or once per block (the ratio's small
+#'   limit is then the best two haplotypes of every block — Kemper's ultimate
+#'   genotype — rather than the best single cross).
+#' @param ohs_shortlist_families Direct pairing, OHS block level: candidate
+#'   families held with their per-block values; \code{NULL} = the larger of
+#'   \code{4 * n_families} and \code{100} (see \code{\link{ohs_pair_selection}}).
 #' @param gbs_method GBS deviation form, \code{"ARCSIN"} (default) or
 #'   \code{"LOG"} — Kemper's two modes (see \code{\link{gbs_selection}}).
 #' @param gbs_preset \code{"haploStack"} (default) or \code{"kemper"} (the
@@ -838,6 +859,9 @@ run_stacking_simulation <- function(
   usefulness_k        = 1,
   scheme              = c("TS", "OHS", "OCS", "GBS"),
   ohs_method          = c("GA_pairwise", "GA_coverage", "Greedy"),
+  ohs_elite_ratio     = 1,
+  ohs_elite_level     = c("pair", "block"),
+  ohs_shortlist_families = NULL,
   gbs_method          = c("ARCSIN", "LOG"),
   gbs_preset          = c("haploStack", "kemper"),
   gbs_objective       = NULL,
@@ -891,6 +915,11 @@ run_stacking_simulation <- function(
   scheme           <- match.arg(scheme, c("TS", "OHS", "OCS", "GBS"),
                                 several.ok = TRUE)
   ohs_method       <- match.arg(ohs_method)
+  ohs_elite_level  <- match.arg(ohs_elite_level)
+  .ohs_check_elite(ohs_elite_ratio)
+  if ("OHS" %in% scheme && ohs_method == "GA_coverage" && ohs_elite_ratio < 1)
+    stop("run_stacking_simulation: ohs_elite_ratio applies to the pairwise ",
+         "objective; ohs_method = \"GA_coverage\" has no family reading.")
   gbs_method       <- match.arg(gbs_method)
   gbs_preset       <- match.arg(gbs_preset)
   ideal_scope      <- match.arg(ideal_scope)
@@ -999,6 +1028,9 @@ run_stacking_simulation <- function(
     ts_pair_score     = ts_pair_score,
     usefulness_k      = usefulness_k,
     ohs_method        = ohs_method,
+    ohs_elite_ratio   = ohs_elite_ratio,
+    ohs_elite_level   = ohs_elite_level,
+    ohs_shortlist_families = ohs_shortlist_families,
     gbs_method        = gbs_method,
     gbs_objective     = gbs_spec$gbs_objective,
     gbs_engine        = gbs_spec$gbs_engine,

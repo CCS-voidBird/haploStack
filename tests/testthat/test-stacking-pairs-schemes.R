@@ -294,3 +294,68 @@ test_that("the driver runs 'pairs' with the genomicSimulation backend", {
     select_top_blocks = 50L, output_dir = NULL, verbose = FALSE)
   expect_true(all(res$summary[cycle > 0L]$n_families == 6L))
 })
+
+# ── OHS pairs, elite subsetting (0.7.3) ──────────────────────────────────────
+
+test_that("OHS pairs pass the elite knobs to the set engine under 'parents'", {
+  fx  <- .pairs_fixture()
+  out <- ohs_pair_selection(fx$lg, "parents", top_founders = 4, ohs_method = "Greedy",
+                            elite_ratio = 0.2)
+  S   <- ohs_selection(fx$lg, n_parents = 4L, method = "Greedy", elite_ratio = 0.2)
+  expect_setequal(unique(c(out$Parent1, out$Parent2)), S)
+  expect_equal(nrow(out), choose(4L, 2L))               # the traversal, whatever the ratio
+})
+
+test_that("OHS pairs, block level: ratio 1 ranks as the pair level; a small ratio is the per-block elite", {
+  fx <- .pairs_fixture()
+  a  <- ohs_pair_selection(fx$lg, "families", top_founders = 4)
+  b  <- ohs_pair_selection(fx$lg, "families", top_founders = 4, elite_level = "block",
+                           elite_ratio = 1)
+  expect_identical(a$Parent1, b$Parent1); expect_identical(a$Parent2, b$Parent2)
+  # a ratio below 1 at the pair level leaves the family ranking unchanged
+  c_ <- ohs_pair_selection(fx$lg, "families", top_founders = 4, elite_ratio = 0.3)
+  expect_identical(a$Parent1, c_$Parent1); expect_identical(a$Parent2, c_$Parent2)
+  # block level, small ratio: the first family is the best by M, the second is
+  # the one adding most per-block ceiling above the first (hand greedy)
+  d <- ohs_pair_selection(fx$lg, "families", top_founders = 4, elite_level = "block",
+                          elite_ratio = 0.001, shortlist_families = NULL)
+  expect_equal(nrow(d), 6L)                              # the budget is unchanged
+  pm <- haploStack:::.pairwise_block_value_matrix(fx$lg, return_array = TRUE)
+  cand <- haploStack:::.pair_candidates(nrow(pm$M))
+  V <- haploStack:::.ohs_pair_block_values(pm$A, cand$i, cand$j)
+  f1 <- which.max(rowSums(V))
+  expect_setequal(c(d$Parent1[1L], d$Parent2[1L]),
+                  rownames(pm$M)[c(cand$i[f1], cand$j[f1])])
+  gain2 <- rowSums(pmax(sweep(V, 2L, V[f1, ], "-"), 0)); gain2[f1] <- -Inf
+  f2 <- which.max(gain2)
+  expect_setequal(c(d$Parent1[2L], d$Parent2[2L]),
+                  rownames(pm$M)[c(cand$i[f2], cand$j[f2])])
+})
+
+test_that("OHS pairs, block level, honours the shortlist and the budgets", {
+  fx <- .pairs_fixture()
+  s  <- ohs_pair_selection(fx$lg, "families", top_founders = 4, elite_level = "block",
+                           elite_ratio = 0.5, shortlist_families = 8L)
+  expect_equal(nrow(s), 6L)
+  p  <- ohs_pair_selection(fx$lg, "parents", top_founders = 4, elite_level = "block",
+                           elite_ratio = 0.5, max_use = 2L)
+  expect_lte(attr(p, "n_parents_used"), 4L)
+  expect_true(all(table(c(p$Parent1, p$Parent2)) <= 2L))
+})
+
+test_that("the driver runs the OHS elite knobs under both units", {
+  fx <- .pairs_fixture()
+  for (unit in c("parents", "pairs")) {
+    res <- run_stacking_simulation(
+      fx$meta, fx$eff, replications = 1L, select_cycles = 2L, top_founders = 4L,
+      num_offspring = 2L, scheme = "OHS", selection_unit = unit,
+      pair_budget = if (unit == "pairs") "families" else NULL,
+      ohs_method = "Greedy", ohs_elite_ratio = 0.2, ohs_elite_level = "block",
+      select_top_blocks = 50L, output_dir = NULL, verbose = FALSE)
+    expect_true(all(res$summary[cycle > 0L]$n_families == 6L), info = unit)
+  }
+  expect_error(run_stacking_simulation(
+    fx$meta, fx$eff, replications = 1L, select_cycles = 1L, top_founders = 4L,
+    scheme = "OHS", ohs_method = "GA_coverage", ohs_elite_ratio = 0.5,
+    output_dir = NULL, verbose = FALSE), "GA_coverage")
+})

@@ -24,7 +24,10 @@
 #        Under the "parents" budget the optimum of an additive family value
 #        with a name limit is the best parent SET and every family among it,
 #        i.e. sum(M[S, S]) — the parents-first objective — so that budget routes
-#        through ohs_selection() and the traversal.
+#        through ohs_selection() and the traversal (elite_ratio / elite_level
+#        passed along). With elite_level = "block" and a ratio < 1 the family
+#        greedy scores the set's per-block elite instead
+#        (.pair_scorer_ohs_block(), non-additive).
 #   GBS  the ideal-genotype objective on the family's expected offspring,
 #        q_t(i, j) = (HapN[i, t] + HapN[j, t]) / (2m). Level "population": the
 #        marginal gain of the set objective F(P) at the offspring-pool frequency
@@ -269,6 +272,64 @@ print.pair_selection <- function(x, n = 10L, ...) {
        update = function(state, i, j) state)
 }
 
+# OHS, block-level elite (0.7.3): the chosen family SET is scored by
+# sum_b of the q largest per-block ceilings M_b[i, j] over its families,
+# q = ceiling(elite_ratio * n_target) with n_target the budget's family count
+# (its cap under "parents"). Non-additive: the marginal gain of a candidate
+# family is sum_b max(0, v_fb - tau_b), tau_b the q-th largest chosen value at
+# block b (the family's full ceiling while fewer than q families are chosen —
+# so at ratio 1 the ranking is the additive one, M[i, j]). A tie-break of
+# 1e-6 * M[i, j] orders families with equal gain. The per-block values are held
+# for the `shortlist_families` best families by M only (default the larger of
+# 4 x n_target and 100; NULL and a small pool = every family).
+.pair_scorer_ohs_block <- function(localgebv, budget, elite_ratio = 1,
+                                   allow_selfing = FALSE, ploidy = NULL,
+                                   shortlist_families = NULL) {
+  pm      <- .pairwise_block_value_matrix(localgebv, ploidy = ploidy,
+                                          return_array = TRUE)
+  M       <- pm$M
+  A       <- pm$A
+  samples <- rownames(M)
+  if (isTRUE(allow_selfing))
+    diag(M) <- .pair_self_ceiling(localgebv, samples, pm$ploidy)
+  n_target <- if (identical(budget$pair_budget, "parents")) budget$n_families_max
+              else budget$n_families
+  q <- .ohs_elite_q(n_target, elite_ratio)
+
+  cand0 <- .pair_candidates(length(samples), allow_selfing)
+  if (is.null(shortlist_families)) shortlist_families <- max(4L * n_target, 100L)
+  if (nrow(cand0) > shortlist_families) {
+    keep  <- order(-M[cbind(cand0$i, cand0$j)])[seq_len(shortlist_families)]
+    cand0 <- cand0[sort(keep)]
+  }
+  V   <- .ohs_pair_block_values(A, cand0$i, cand0$j)      # families x blocks
+  nb  <- ncol(V)
+  ckey <- paste(cand0$i, cand0$j)
+  key  <- function(i, j) match(paste(i, j), ckey)
+  eps  <- 1e-6
+
+  list(scheme = "OHS", samples = samples, additive = FALSE,
+       init = list(chosen = matrix(0, 0L, nb)),
+       stop_when_no_gain = FALSE,
+       q = q, n_candidates = nrow(cand0),
+       candidates = function(state) cand0,
+       score = function(state, cand) {
+         Vc <- V[key(cand$i, cand$j), , drop = FALSE]
+         ch <- state$chosen
+         gain <- if (nrow(ch) < q) {
+           rowSums(Vc)
+         } else {
+           tau <- apply(ch, 2L, function(x) sort(x, decreasing = TRUE)[q])
+           rowSums(pmax(sweep(Vc, 2L, tau, "-"), 0))
+         }
+         -(gain + eps * M[cbind(cand$i, cand$j)])
+       },
+       update = function(state, i, j) {
+         state$chosen <- rbind(state$chosen, V[key(i, j), ])
+         state
+       })
+}
+
 # GBS: the ideal-genotype objective on families. `mm` from .gbs_hapn_matrix(),
 # `ctx` from .gbs_context() (its `beta` sized with the reference protocol's
 # parent count, plan Q24 f). State: sumq = sum_f q_t(f) over the chosen
@@ -439,6 +500,20 @@ print.pair_selection <- function(x, n = 10L, ...) {
 #' coverage and has no family reading; it is refused. A finite \code{max_use}
 #' under \code{"parents"} falls back to the best-first greedy over families.
 #'
+#' @section Elite subsetting:
+#' \code{elite_ratio} and \code{elite_level} are the knobs of
+#' \code{\link{ohs_selection}}. When the set engine runs (\code{"parents"}
+#' budget, no usage cap) they are passed to it. Under the family greedy:
+#' \code{elite_level = "pair"} leaves the ranking unchanged — the families
+#' taken best-first \emph{are} the elite subset of the pool, whatever the
+#' ratio; \code{elite_level = "block"} scores the family set by
+#' \code{sum_b} of the \code{q = ceiling(elite_ratio * n_families)} largest
+#' per-block ceilings over its families, re-scored after every pick (the
+#' family whose blocks add most to the set's "ultimate genotype"), over the
+#' \code{shortlist_families} best families of the pool by \code{M}. At
+#' \code{elite_ratio = 1} the block level ranks exactly as the pair level.
+#' The budget, and so the number of families made, is the same at every ratio.
+#'
 #' @param localgebv Haplotype-level local GEBV (see \code{\link{ohs_selection}}).
 #' @param pair_budget \code{"families"} or \code{"parents"} (see
 #'   \code{\link{pair_selection_budget}}).
@@ -447,6 +522,11 @@ print.pair_selection <- function(x, n = 10L, ...) {
 #'   self's ceiling is the parent's haplotypes doubled, top-\code{ploidy} per
 #'   block). Default \code{FALSE}.
 #' @param ohs_method Set engine used under \code{pair_budget = "parents"}.
+#' @param elite_ratio,elite_level Elite subsetting (see the section above and
+#'   \code{\link{ohs_selection}}). Defaults \code{1} and \code{"pair"}.
+#' @param shortlist_families Block level only: candidate families held with
+#'   their per-block values, the best by \code{M}. \code{NULL} (default) =
+#'   the larger of \code{4 * n_families} and \code{100}.
 #' @param max_use Per-parent usage cap (families a parent may appear in).
 #'   Default \code{Inf}.
 #' @param overshoot Under \code{"parents"}, what to do with a family that would
@@ -466,6 +546,9 @@ ohs_pair_selection <- function(localgebv,
                                top_founders  = 8L,
                                allow_selfing = FALSE,
                                ohs_method    = c("GA_pairwise", "Greedy", "GA_coverage"),
+                               elite_ratio   = 1,
+                               elite_level   = c("pair", "block"),
+                               shortlist_families = NULL,
                                max_use       = Inf,
                                overshoot     = c("skip", "stop"),
                                ploidy        = NULL,
@@ -473,17 +556,20 @@ ohs_pair_selection <- function(localgebv,
                                n_generations = 200L,
                                mutation_rate = 0.1,
                                seed          = 42L) {
-  ohs_method <- match.arg(ohs_method)
-  overshoot  <- match.arg(overshoot)
+  ohs_method  <- match.arg(ohs_method)
+  elite_level <- match.arg(elite_level)
+  overshoot   <- match.arg(overshoot)
+  .ohs_check_elite(elite_ratio)
   if (ohs_method == "GA_coverage")
     stop("ohs_pair_selection: 'GA_coverage' scores a parent set by block coverage ",
          "and has no family reading; use ohs_method = \"GA_pairwise\" or \"Greedy\".")
   budget <- pair_selection_budget(top_founders, pair_budget, allow_selfing)
-  scorer <- .pair_scorer_ohs(localgebv, allow_selfing = allow_selfing, ploidy = ploidy)
 
   if (budget$pair_budget == "parents" && !is.finite(max_use)) {
+    scorer  <- .pair_scorer_ohs(localgebv, allow_selfing = allow_selfing, ploidy = ploidy)
     parents <- ohs_selection(localgebv, n_parents = budget$n_parents_max,
                              method = ohs_method, ploidy = ploidy,
+                             elite_ratio = elite_ratio, elite_level = elite_level,
                              pop_size = pop_size, n_generations = n_generations,
                              mutation_rate = mutation_rate, seed = seed)
     idx  <- match(parents, scorer$samples)
@@ -495,6 +581,12 @@ ohs_pair_selection <- function(localgebv,
                        score = sc[o], rank = seq_along(o))
     return(.as_pair_selection(dt, "OHS", budget, length(parents)))
   }
+  scorer <- if (elite_level == "block" && elite_ratio < 1)
+    .pair_scorer_ohs_block(localgebv, budget, elite_ratio = elite_ratio,
+                           allow_selfing = allow_selfing, ploidy = ploidy,
+                           shortlist_families = shortlist_families)
+  else
+    .pair_scorer_ohs(localgebv, allow_selfing = allow_selfing, ploidy = ploidy)
   .pairs_greedy(scorer, budget, allow_selfing = allow_selfing,
                 max_use = max_use, overshoot = overshoot)
 }
