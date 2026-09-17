@@ -637,6 +637,17 @@ published repo ships:
   parents-first and direct pairing; TS with all / the top 10 % / the top 1
   families by mid-parent kept (offspring per family scaled to the same
   population size). Results in the thread #013 note and the endpoint table.
+  Same day, the same arms to **50 cycles** with the per-cycle step timing
+  recorded (`bench_arm.R <arm> [cycles]` → `cycles_50/`, `timing_<arm>.tsv`,
+  `timing_table.tsv`, `milestones.tsv`): every TS arm fixes by cycle 12–30
+  and is overtaken by the OHS / GBS arms at cycles 14–27; GBS direct pairing
+  reaches the founders' stacking ceiling, OHS stalls 0.5 below it, HapSelect's
+  set-level OHS GA is last but the only arm still segregating. Method cost per
+  cycle: TS 0.04 s, GBS 0.06 s (parents) / 0.5 s (pairs), OHS 2.2–3.0 s,
+  HapSelect GA 21.7 s. Finding: the `metrics = "all"` block-IBS coancestry
+  (`compute_parent_coancestry()`, an R double loop over offspring pairs ×
+  blocks) costs ~47 s of every ~50 s cycle-step — recorded under Q18, not
+  changed.
 
 ### Verified
 - Full suite under `devtools::load_all()`: **2114 tests, 0 failed, 0 errors**
