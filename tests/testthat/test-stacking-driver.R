@@ -23,11 +23,32 @@ PLANS_COLS <- c("CrossID", "Parent1", "Parent2", "F1count", "F1mean",
                 "select_type", "cycle", "rep", "sel_scheme",
                 "D2Ideal", "coancestry", "ideal_phenotype", "pair_score")
 SUMMARY_COLS <- c("cycle", "select_type", "rep", "sel_scheme", "mean_F1mean",
-                  "var_F1mean", "mean_D2Ideal", "mean_coancestry",
+                  "var_F1mean", "max_F1mean", "mean_D2Ideal", "mean_coancestry",
                   "mean_gene_diversity", "mean_ideal_phenotype", "ideal_hap_gebv",
                   "marker_size", "n_families", "n_parents_used")
 
 # ── output contract ───────────────────────────────────────────────────────────
+
+test_that("max_F1mean is the cycle's best single offspring (0.7.5)", {
+  fx  <- .driver_fixture()
+  res <- run_stacking_simulation(
+    fx$meta, fx$eff, scheme = "TS", replications = 1L, select_cycles = 2L,
+    top_founders = 4L, num_offspring = 3L, cross_backend = "block",
+    metrics = "gebv", seed = 7L, output_dir = NULL, verbose = FALSE)
+  s <- res$summary
+  expect_true("max_F1mean" %in% names(s))
+  expect_true(all(is.finite(s$max_F1mean)))
+  expect_true(all(s$max_F1mean >= s$mean_F1mean))
+  # founder row: the best founder's total local GEBV
+  lg <- compute_profile_localgebv(fx$meta, fx$eff, level = "haplotype")
+  expect_equal(s[s$cycle == 0L, ]$max_F1mean,
+               max(haploStack:::.stk_total_gebv(lg)), tolerance = 1e-8)
+  # a cycle row: the family means in `plans` cannot exceed the best offspring
+  p <- res$plans
+  for (cyc in unique(s$cycle[s$cycle > 0L]))
+    expect_true(s[s$cycle == cyc, ]$max_F1mean >=
+                  max(p[p$cycle == cyc, ]$F1mean) - 1e-8)
+})
 
 test_that("a single-scheme run returns the origin output contract", {
   fx  <- .driver_fixture()

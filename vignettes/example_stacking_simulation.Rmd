@@ -135,10 +135,13 @@ names(sim_ohs)
 ```
 
 The `summary` table has one row per cycle × replication; the `trajectories`
-table is the plotting view (`Rep, Cycle, Method, MeanGEBV, …`).
+table is the plotting view (`Rep, Cycle, Method, MeanGEBV, …`). `mean_F1mean`
+is the population mean and `max_F1mean` (0.7.5) the best single offspring of
+the cycle — the "top elite", the field a set-level ultimate-genotype objective
+(HapSelect's OHS) is aiming at.
 
 ```{r single-summary}
-head(sim_ohs$summary[, .(cycle, rep, sel_scheme, mean_F1mean, mean_D2Ideal)])
+head(sim_ohs$summary[, .(cycle, rep, sel_scheme, mean_F1mean, max_F1mean, mean_D2Ideal)])
 ```
 
 Plot the gain trajectory (mean ± SD ribbon across replications):

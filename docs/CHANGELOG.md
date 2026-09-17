@@ -608,6 +608,48 @@ published repo ships:
   holder is still "University of Queensland", which is a rights statement, not an
   authorship one, and it already matches the published copy byte for byte.
 
+## [0.7.5] - 2026-09-18 — `max_F1mean` (top elite) in the simulation summary; genomicSimulation read-back keeps missing alleles NA; benchmark on both backends
+
+### Added
+- `run_stacking_simulation()$summary` gains **`max_F1mean`** — the breeding
+  value of the cycle's best single offspring (the top elite), beside the
+  population mean `mean_F1mean`. It is the realised counterpart of a set-level
+  "ultimate genotype" objective (HapSelect's OHS GA), so the two OHS families
+  can be compared on the field each one optimises. The founder row carries the
+  best founder. Placed after `var_F1mean`; every other column is unchanged.
+- `dev/bench_barley_2026-09-17/`: `bench_arm.R` takes `key=value` options
+  (`reps=`, `seed=`, `out=`, `metrics=all|nocoan`, `tag=`, `backend=block|gs`)
+  and four Kemper-preset GBS arms (`GBSk_{LOG,ARCSIN}_{parents,pairs}`,
+  `gbs_preset = "kemper"`); `bench_aggregate.R` reports the top elite;
+  `bench_cap_aggregate.R` (single-arm cap runs) and `bench_backend_compare.R`
+  (block vs genomicSimulation side by side) are new. **Grid run:** 15 arms ×
+  2 backends × 100 cycles × 3 reps (`cycles_100_block/`, `cycles_100_gs/`,
+  `backend_compare/`). The genomicSimulation backend (real linkage, 1 cM/Mb)
+  reproduces the block ranking — GBS direct pairs at the founder ceiling on
+  both (4.81 / 4.84), every GBS / TS endpoint within ±0.07 — and costs the
+  OHS family: haploStack OHS ends 0.02–0.14 lower and needs 12–14 more cycles
+  to 90 % of its gain, HapSelect's OHS GA 0.23 lower and still segregating.
+  Linkage lifts the GEBV-driven arms early (+0.2–0.4 at cycle 10) and the gap
+  closes by cycle 20. Kemper's fixed penalty and the haploStack dynamic
+  penalty are indistinguishable (≤ 0.07, no consistent sign; LOG pairs fix on
+  the same stack). The top elite runs 0.05–0.5 ahead of the mean and reaches
+  its plateau one to two cycles earlier; HapSelect's realised elite is behind
+  every haploStack arm at every horizon ≤ 100 cycles. Results: thread #013.
+
+### Fixed
+- genomicSimulation backend: a missing founder allele travels to
+  genomicSimulation as the nucleotide missing token `"N"` and came back as a
+  literal allele in every offspring container, so `is_geno_meta()` warned on
+  each cycle of a gS-backend run ("1402 allele cell(s) across 83 marker(s)
+  hold a missing token" on the barley subset). `.gs_genes_to_array()` now
+  restores the nucleotide missing tokens to `NA` (the 0.6.0 container
+  contract). Breeding values were not affected on the barley subset (the
+  affected cells carry no effect); the warning is gone. Test added.
+
+### Verified
+- Suite: 0 failures, 12 skips (optional packages; genomicSimulation installed
+  so its bridge and session tests ran).
+
 ## [0.7.4] - 2026-09-17 — OHS: `GA_coverage` removed; barley benchmark of the selection arms
 
 ### Removed

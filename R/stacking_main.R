@@ -581,6 +581,7 @@
              sel_scheme           = sel_scheme,
              mean_F1mean          = mean(f1, na.rm = TRUE),
              var_F1mean           = stats::var(f1, na.rm = TRUE),
+             max_F1mean           = if (any(!is.na(f1))) max(f1, na.rm = TRUE) else NA_real_,
              mean_D2Ideal         = adv$d2,
              mean_coancestry      = adv$coan,
              mean_gene_diversity  = adv$gene_div,
@@ -814,11 +815,15 @@
 #'     coancestry, ideal_phenotype, pair_score} (the last is the family's
 #'     selection score under direct pairing, \code{NA} otherwise).}
 #'   \item{\code{summary}}{Per-cycle data.table: \code{cycle, select_type, rep,
-#'     sel_scheme, mean_F1mean, var_F1mean, mean_D2Ideal, mean_coancestry,
-#'     mean_gene_diversity, mean_ideal_phenotype, ideal_hap_gebv, marker_size,
-#'     n_families, n_parents_used} (with a \code{cycle = 0} founder row).
-#'     \code{mean_gene_diversity} is Nei's (1973) gene diversity of the cycle's
-#'     population (see \code{\link{compute_gene_diversity}}).}
+#'     sel_scheme, mean_F1mean, var_F1mean, max_F1mean, mean_D2Ideal,
+#'     mean_coancestry, mean_gene_diversity, mean_ideal_phenotype,
+#'     ideal_hap_gebv, marker_size, n_families, n_parents_used} (with a
+#'     \code{cycle = 0} founder row). \code{max_F1mean} is the breeding value
+#'     of the cycle's best single offspring (the top elite — the realised
+#'     counterpart of a set-level "ultimate genotype" objective), against the
+#'     population mean in \code{mean_F1mean}. \code{mean_gene_diversity} is
+#'     Nei's (1973) gene diversity of the cycle's population (see
+#'     \code{\link{compute_gene_diversity}}).}
 #'   \item{\code{ideal_genotypes}}{The founder ideal-genotype target:
 #'     \code{Block, Effect, CFreq, TargetFreq}.}
 #'   \item{\code{final_populations}}{Named list (\code{"<scheme>_rep<r>"} ->
@@ -1107,6 +1112,7 @@ run_stacking_simulation <- function(
     summ_recs[[1L]] <- data.table(
       cycle = 0L, select_type = "founder", rep = rep, sel_scheme = sch,
       mean_F1mean = mean(v0, na.rm = TRUE), var_F1mean = stats::var(v0, na.rm = TRUE),
+      max_F1mean = if (any(!is.na(v0))) max(v0, na.rm = TRUE) else NA_real_,
       mean_D2Ideal = if (wantm("d2ideal"))
         .distance_to_ideal(founder_lg, f_ideal, gbs_method = gbs_method)
         else NA_real_,

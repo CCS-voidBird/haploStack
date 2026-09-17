@@ -116,6 +116,12 @@
                dimnames = list(samples, markers, c("1", "2")))
   arr[, , 1L] <- t(h1)   # markers x samples -> samples x markers
   arr[, , 2L] <- t(h2)
+  # A missing founder allele goes out to genomicSimulation as the nucleotide
+  # missing token ("N") and is inherited by offspring as a literal allele; inside
+  # a GenoMeta a missing allele is NA and nothing else (0.6.0 contract), so
+  # restore it here — otherwise the offspring container carries "N" as an
+  # allele and is_geno_meta() warns on every cycle of a gS-backend run (0.7.5).
+  arr[arr %in% .missing_tokens("nucleotide")] <- NA_character_
   arr
 }
 

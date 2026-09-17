@@ -91,6 +91,20 @@ test_that(".gs_genes_to_array parses 2-character genotypes to a 3-D array", {
   expect_equal(dimnames(arr)[[1L]], c("s1","s2"))
 })
 
+test_that(".gs_genes_to_array restores the missing token to NA (0.7.5)", {
+  # a missing founder allele travels through genomicSimulation as "N" (the
+  # nucleotide missing token of the GS export preset) and comes back as a
+  # literal allele; inside a GenoMeta a missing allele is NA and nothing else
+  gm <- matrix(c("AN","NN","CA","T0"), nrow = 2L,
+               dimnames = list(c("m1","m2"), c("s1","s2")))
+  arr <- haploStack:::.gs_genes_to_array(gm)
+  expect_equal(unname(arr["s1","m1", ]), c("A", NA))
+  expect_true(all(is.na(arr["s1","m2", ])))
+  expect_equal(unname(arr["s2","m1", ]), c("C","A"))
+  expect_equal(unname(arr["s2","m2", ]), c("T", NA))
+  expect_false(any(arr %in% c("N", "0"), na.rm = TRUE))
+})
+
 # ── update_geno_meta_from_matrix (no genomicSimulation needed) ────────────────
 
 test_that("update_geno_meta_from_matrix round-trips a gene matrix to a GenoMeta", {
