@@ -647,7 +647,12 @@ published repo ships:
   HapSelect GA 21.7 s. Finding: the `metrics = "all"` block-IBS coancestry
   (`compute_parent_coancestry()`, an R double loop over offspring pairs ×
   blocks) costs ~47 s of every ~50 s cycle-step — recorded under Q18, not
-  changed.
+  changed. Sub-test `hapselect_cap/` (`bench_arm.R OHS_hapselect 200 reps=1
+  seed=<s> metrics=nocoan`, `bench_cap_aggregate.R`): HapSelect's set-level
+  OHS GA alone to 200 cycles reaches 97 % of the founder ceiling (gain 4.69 of
+  4.83), 90 % of its final gain at cycle 120 and 99 % at 181, passing the
+  fixed haploStack OHS endpoints at cycles 126–131 — its cap is the ceiling,
+  reached ~4× slower.
 
 ### Verified
 - Full suite under `devtools::load_all()`: **2114 tests, 0 failed, 0 errors**
