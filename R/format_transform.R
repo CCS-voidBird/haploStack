@@ -145,8 +145,16 @@ read_effect_file <- function(path,
                               extend        = TRUE) {
   if (!file.exists(path)) stop("read_effect_file: File not found: ", path)
 
-  raw <- utils::read.table(path, header = header, sep = sep,
-                           stringsAsFactors = FALSE, fill = TRUE)
+  # Read as text, then coerce the effect columns back. The allele column (2)
+  # must never be type-inferred: a table whose alleles are all "T" came back as
+  # logical TRUE, and an allele spelled "TRUE" matches no genotype, so every
+  # effect silently contributed 0 — no error, just a flat GEBV. See
+  # .read_table_chr(). Column 1 (Marker) stays character so an id like "0100"
+  # keeps its spelling; columns 3+ are the numeric effects.
+  raw <- .read_table_chr(path, header = header, sep = sep)
+  if (ncol(raw) >= 3L)
+    for (j in 3:ncol(raw))
+      raw[[j]] <- suppressWarnings(as.numeric(raw[[j]]))
 
   transform_effects(
     effects_df    = raw,

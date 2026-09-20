@@ -1171,6 +1171,111 @@ is_geno_meta <- function(x, verbose = TRUE) {
 # Format readers
 # ---------------------------------------------------------------------------
 
+# .read_table_chr(file, header = FALSE, sep = "auto", strict = FALSE)
+#
+# Read a whitespace/delimited text table with EVERY column as character, so
+# that R's type inference can never reinterpret a cell's contents.
+#
+# This exists because of one specific, silent failure. utils::read.table() runs
+# type.convert() on each column, and type.convert() maps a column whose every
+# value is "T" (or "F") to LOGICAL. In a nucleotide PED that is an ordinary
+# allele column: a T/A or T/G marker that happens to be monomorphic-T across
+# the panel. The column comes back TRUE, `mode(x) <- "character"` then yields
+# "TRUE", and .reshape_wide_alleles() refuses it —
+#
+#   .reshape_wide_alleles: cells contain multi-character values.
+#   Wide format requires exactly one character per cell.
+#
+# — so the whole file fails to read. It is not rare: on the GRDC barley AGG1
+# panel 511 of 19,712 allele columns are affected (and the count depends on
+# which lines are in the panel, so a subset can make it larger).
+#
+# The same trap reaches two more readers, for the same reason and with worse
+# consequences, so they share this primitive:
+#   * read_effect_file()   — an all-"T" Allele column becomes TRUE, and an
+#     allele spelled "TRUE" matches nothing, so every effect silently
+#     contributes 0. No error is raised anywhere.
+#   * read_dart_genotype() — a logical column breaks the metadata/sample column
+#     heuristic (as.numeric("TRUE") is NA), shifting where the sample block is
+#     judged to start.
+#
+# The rule this encodes: a genotype file is read as TEXT. Every column arrives
+# as character and the caller coerces, explicitly, the columns it knows to be
+# numeric (positions, effects, dosages). Nothing about a genotype's meaning is
+# left to a heuristic that cannot tell an allele from a boolean.
+#
+# data.table::fread is used rather than read.table(colClasses = "character")
+# because it is the package's existing reader everywhere else, it does not
+# type-convert when colClasses is given, and it is far faster on a wide PED
+# (a 43 MB / 19,718-column file reads in seconds rather than minutes).
+#
+# RAGGED INPUT — read this before changing `fill`.
+#
+# `fread(fill = FALSE)` does NOT reliably error on a ragged file. Given a PED
+# whose first line is longer than the rest, it settles on the narrower width and
+# **silently drops the wider row**, returning a table with one fewer sample and
+# no warning. That is strictly worse than the defect this function exists to
+# fix, so the fread call always uses `fill = TRUE` (short rows padded with NA,
+# no row ever discarded) and raggedness is detected here instead:
+#
+#   * every data line in the file must appear as a row (`n_lines` guard), and
+#   * with `strict = TRUE` the table must be rectangular — no padded cell in the
+#     last column. A PED/MAP line is fixed-width by construction, so a short one
+#     is a truncated file, not missing data, and must fail loudly rather than
+#     become a row of missing calls.
+#
+# `strict = FALSE` keeps the lenient read.table(fill = TRUE) behaviour the
+# effect-file and DArT readers always had.
+#
+# @keywords internal
+.read_table_chr <- function(file, header = FALSE, sep = "auto",
+                            strict = FALSE) {
+  file <- as.character(file)
+  if (!file.exists(file))
+    stop(".read_table_chr: file not found: ", file)
+  if (file.size(file) == 0L)
+    stop(".read_table_chr: file is empty: ", file)
+
+  # fill = TRUE always: see the note above. Dropping a row silently is the one
+  # failure mode this function must never have.
+  out <- data.table::fread(file, header = header, sep = sep, fill = TRUE,
+                           colClasses = "character", data.table = FALSE,
+                           check.names = FALSE, showProgress = FALSE)
+  if (nrow(out) == 0L || ncol(out) == 0L)
+    stop(".read_table_chr: no data read from ", file)
+
+  # Guard: no line may go missing. Counted from the file rather than trusted
+  # from the parser, because a parser that drops rows is exactly what we are
+  # defending against. One pass — a 43 MB PED is expensive to re-read.
+  lines    <- readLines(file, warn = FALSE)
+  n_blank  <- sum(!nzchar(trimws(lines)))
+  expected <- length(lines) - n_blank - if (isTRUE(header)) 1L else 0L
+  rm(lines)
+  if (nrow(out) != expected)
+    stop(".read_table_chr: read ", nrow(out), " row(s) from ", file,
+         " but the file holds ", expected, " data line(s). The file is ",
+         "ragged — lines do not all carry the same number of fields.")
+
+  # fread returns "" for an empty field; every caller treats an absent value as
+  # NA, and no allele vocabulary contains the empty string.
+  for (j in seq_len(ncol(out))) {
+    v <- out[[j]]
+    if (is.character(v)) out[[j]] <- ifelse(nzchar(v), v, NA_character_)
+  }
+
+  if (isTRUE(strict) && ncol(out) > 0L) {
+    short <- which(is.na(out[[ncol(out)]]))
+    if (length(short) > 0L)
+      stop(".read_table_chr: ", length(short), " line(s) in ", file,
+           " are shorter than the widest line (first: line ",
+           short[1L] + if (isTRUE(header)) 1L else 0L,
+           "). A fixed-width genotype file must be rectangular; padding a ",
+           "truncated line into missing calls would hide the damage.")
+  }
+  out
+}
+
+
 #' Read a Plink 1.9 PED + MAP file pair into a GenoMeta object
 #'
 #' Parses a \code{.ped} file (6-column header + allele pairs per marker) and
@@ -1194,8 +1299,10 @@ read_plink_ped <- function(ped_file, map_file, block_file = NULL,
   ped_file <- as.character(ped_file)
   map_file <- as.character(map_file)
 
-  # Parse MAP file (chr, snp_id, cM, bp) — use process_genotype map path
-  raw_map <- utils::read.table(map_file, header = FALSE, stringsAsFactors = FALSE)
+  # Parse MAP file (chr, snp_id, cM, bp) — use process_genotype map path.
+  # Read as text and coerce Pos here: a MAP column is an identifier until this
+  # function says otherwise (see .read_table_chr).
+  raw_map <- .read_table_chr(map_file, header = FALSE, strict = TRUE)
   if (ncol(raw_map) >= 4L) {
     map_df <- data.frame(
       Chrom  = as.character(raw_map[[1L]]),
@@ -1220,8 +1327,9 @@ read_plink_ped <- function(ped_file, map_file, block_file = NULL,
 
   n_markers <- nrow(map_df)
 
-  # Parse PED file
-  ped <- utils::read.table(ped_file, header = FALSE, stringsAsFactors = FALSE)
+  # Parse PED file. Read as text: an allele column must never be type-inferred
+  # (a monomorphic-T column would come back logical — see .read_table_chr).
+  ped <- .read_table_chr(ped_file, header = FALSE, strict = TRUE)
   # Columns 1-6: FID, IID, father, mother, sex, phenotype; then ploidy*n_markers allele cols
   n_allele_cols <- ncol(ped) - 6L
   if (n_allele_cols %% n_markers != 0L)
@@ -1593,10 +1701,12 @@ read_dart_genotype <- function(file,
     stop("read_dart_genotype: file not found: ", file)
 
   # ---- Read raw file -------------------------------------------------------
+  # Read as text. Every value this function needs as a number is re-derived
+  # below with as.numeric(as.character(.)) — dosages, positions, the
+  # metadata/sample column heuristic — so nothing depends on inference, and a
+  # T/F flag column can no longer arrive as logical (see .read_table_chr).
   sep <- if (grepl("[.]csv$", file, ignore.case = TRUE)) "," else "\t"
-  raw <- utils::read.table(file, header = TRUE, sep = sep,
-                           stringsAsFactors = FALSE, fill = TRUE,
-                           check.names = FALSE, comment.char = "")
+  raw <- .read_table_chr(file, header = TRUE, sep = sep)
 
   if (nrow(raw) == 0L || ncol(raw) < 2L)
     stop("read_dart_genotype: file appears empty or has fewer than 2 columns.")

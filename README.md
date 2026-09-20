@@ -5,6 +5,25 @@
 Developed for the GRDC Barley Phase 2 project at the University of Queensland.
 Generalised for use with any biparental or multiparental diploid breeding programme.
 
+> ### 0.7.7 — a genotype file is read as text
+>
+> `read_plink_ped()`, `read_effect_file()` and `read_dart_genotype()` parsed
+> their file with `utils::read.table()`, whose `type.convert()` accepts `T` and
+> `F` as logical literals — so a column whose every value is `"T"` came back as
+> `TRUE`, and in a nucleotide genotype file that column is an allele. A PED then
+> failed to read outright (*"cells contain multi-character values"*); an effect
+> table keyed on `TRUE` matched no genotype and, since an absent allele scores
+> 0, produced **flat GEBVs with no error at read time**; a DArT report
+> mis-parsed its sample-column boundary. Every reader now goes through the new
+> internal `.read_table_chr()`, which reads every column as `character` and
+> leaves numeric coercion to the caller. It is the allele *column* that has to
+> be uniform, not the marker — on a 1107 x 9856 barley PED, 511 of 19 712
+> columns, from 511 markers, none of them monomorphic. Side effect, intended:
+> identifiers keep their spelling, so a sample id written `007` no longer
+> becomes `"7"`. No export change; containers on disk are unaffected. The read
+> path from file to `metadata` is written up in
+> `docs/haploStack_io_reference_0.7.7.md`.
+>
 > ### 0.7.6 — views keep the observed allele of a half-called cell
 >
 > `geno_meta_views()` now builds its per-copy allele table straight from the
@@ -94,7 +113,7 @@ remotes::install_github("CCS-voidBird/haploStack")
 devtools::install("path/to/haploStack")
 
 # From a release source tarball
-install.packages("haploStack_0.7.6.tar.gz", repos = NULL, type = "source")
+install.packages("haploStack_0.7.7.tar.gz", repos = NULL, type = "source")
 
 library(haploStack)
 ```

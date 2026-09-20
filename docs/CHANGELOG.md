@@ -119,6 +119,16 @@ semantic versioning.
 > selector is implemented — `"pairs"` stops at the first cycle. Default runs are
 > byte-identical to 0.7.0. Tarball `ready_to_use/haploStack_0.7.1.tar.gz`.
 
+> **Updated 2026-09-20.** Added `[0.7.7]` — **a genotype file is read as text**.
+> `read_plink_ped()`, `read_effect_file()` and `read_dart_genotype()` route
+> their file read through the new internal `.read_table_chr()`, so R's
+> `type.convert()` can no longer turn an allele column into a logical. This
+> **closes INDEX discrepancy 30**, which the same day's `[Unreleased]` →
+> *Distribution and deliverables (2026-09-20)* note had recorded as found but
+> not fixed; the workshop's `read_plink_ped_safe()` workaround is withdrawn.
+> The read path from file to `metadata` is written up in
+> [`docs/haploStack_io_reference_0.7.7.md`](haploStack_io_reference_0.7.7.md).
+
 ## [Unreleased]
 
 _The remaining roadmap items (stacking-simulation rebuild #013, genomicSimulation
@@ -649,6 +659,118 @@ published repo ships:
   form, and the missing `CITATION.cff`. `LICENSE` is untouched — its copyright
   holder is still "University of Queensland", which is a rights statement, not an
   authorship one, and it already matches the published copy byte for byte.
+
+## [0.7.7] - 2026-09-20 — A genotype file is read as text
+
+Three readers parsed their file with `utils::read.table()`, which runs
+`type.convert()` on every column. `type.convert()` maps a column whose values
+are all `"T"` (or all `"F"`) to **logical** — and in a nucleotide genotype file
+that is an ordinary allele column. Nothing in the package could tell the
+difference afterwards, because by then the cells read `"TRUE"`.
+
+The rule now is explicit and shared: **a genotype file is read as text.** Every
+column arrives as `character` through the new internal `.read_table_chr()`, and
+each reader coerces, by name and on purpose, only the columns it knows to be
+numeric. Closes INDEX discrepancy **30**.
+
+### ⚠ Fixed — one silent wrong answer, one hard failure
+
+1. **`read_effect_file()` — a wrong answer, the serious one.** An effect table
+   whose `Allele` column is uniformly `"T"` (a single-allele export, a
+   substitution-effect table, a filtered subset) came back with the allele
+   `TRUE`. `TRUE` matches no genotype, and `.compute_effect_size()` scores an
+   absent allele as 0 (`R/catalogue_gebv.R`: `long_dt[is.na(Effect), Effect :=
+   0]`) — so **every marker contributed nothing and the GEBVs came out flat**.
+   Demonstrated on a 3-sample × 3-marker container: local GEBVs
+   `0, 0, 0` from the type-converted table against `0.6, 1.7, 0` from the same
+   file read as text.
+   Nothing warns at **read** time — `read_effect_file()` and
+   `transform_effects()` both accept the table without comment. The one guard
+   is downstream: `compute_profile_localgebv()` warns through
+   `.validate_effect_encoding()` (*"effect_df contains allele(s) not in the
+   'nucleotide' encoding dict: TRUE. These rows will not contribute to local
+   GEBV"*) and then continues with zeros. So the failure is loud enough to
+   catch if you read your warnings and fatal if you do not, and it is invisible
+   at the point where the mistake is actually made.
+   Effect files whose allele column carries more than one distinct letter — the
+   normal genome-wide case — were never affected.
+2. **`read_plink_ped()` — a hard failure.** After
+   `mode(allele_mat) <- "character"` a logical column reads `"TRUE"`, and
+   `.reshape_wide_alleles()` refuses it: *"cells contain multi-character values.
+   Wide format requires exactly one character per cell."* The file could not be
+   read at all. It is the **allele column** that must be uniform, not the
+   marker: for an A/T SNP whose first copy is fixed T across the panel, column
+   `2k−1` is all `"T"` while the marker itself still segregates. On
+   `data/GRDC/hordeum_vulgare/GRDC_barley_AGG1/plink/geno.ped` (1107 × 9856)
+   **511 of 19 712 allele columns** are logical on a full-file read, from 511
+   distinct markers, and no marker is monomorphic-T. The count is a property of
+   the panel, not the file: one missing call anywhere in a column is enough to
+   keep it character, so sub-setting lines moves the number in either
+   direction. That is why the defect stayed invisible — the fixture panels in
+   the test suite happen never to produce a uniform column.
+3. **`read_dart_genotype()` — a mis-parse.** The metadata/sample column split
+   is decided by `all(as.numeric(as.character(col)) %in% c(0, 1, 2))`.
+   `as.numeric("TRUE")` is `NA`, so a logical column fails the test and
+   `first_sample` moves, silently reclassifying a sample column as marker
+   metadata. Plausible on any DArT report carrying a T/F flag column.
+
+### Added
+- `.read_table_chr(file, header, sep, strict)` (internal,
+  `R/format_helper.R`) — the shared text reader.
+  `data.table::fread(colClasses = "character")`, an explicit not-found /
+  empty-file error, and `""` normalised to `NA`.
+  **Ragged input is handled here, not delegated to `fread`.** During this work
+  `fread(fill = FALSE)` was found *not* to error reliably on a ragged file:
+  given a PED whose first line is wider than the rest it settles on the
+  narrower width and **silently drops the wider row**, returning a table with
+  one fewer sample and no warning — strictly worse than the defect being
+  fixed. The fread call therefore always passes `fill = TRUE` (short rows
+  padded, no row ever discarded) and the reader checks the shape itself: every
+  data line in the file must appear as a row, and under `strict = TRUE` (the
+  PED and MAP) the table must be rectangular. A PED line is fixed-width by
+  construction, so a short one is a truncated file and is refused rather than
+  padded into missing calls. `strict = FALSE` keeps the lenient behaviour the
+  effect-file and DArT readers always had.
+- `tests/testthat/test-ped-text-read.R`, 47 assertions: the monomorphic-T
+  column that used to abort the read (T1), the all-F and mixed T/F columns
+  (T2), identifiers preserved verbatim (T3), a clean panel unchanged and a
+  1/2/3/4 PED still declared `selectiontools` (T4), the primitive itself (T5),
+  and **`read_effect_file()`'s first tests ever** (T6) — the all-T allele
+  column, the zeroed-GEBV consequence, and a mixed-allele file reading as it
+  always did. `read_effect_file()` had no test coverage at all before this
+  release, which is how the silent case stayed silent. T7 pins the ragged-input
+  guards: a wider-first-line file never loses a row, a truncated PED line is
+  refused instead of padded, and a trailing blank line still reads.
+
+### Changed
+- **Identifiers are no longer type-converted.** A sample or marker id is
+  whatever the file spells: `007` stays `"007"` (it used to arrive as integer 7
+  and become `"7"`), and an id that reads as a boolean stays `"TRUE"`. This is
+  a behaviour change on files with zero-padded or boolean-looking ids, and it
+  is the intended one — an identifier that silently changes cannot be joined
+  back to its source.
+- `read_plink_ped()` is also **substantially faster**: the 43 MB / 19 718-column
+  GRDC PED reads in ~52 s where `read.table()` needed minutes.
+- No export change (130). No argument added to any exported function.
+
+### Verified
+- Full suite under `devtools::load_all()`: **2 584 pass, 0 failed, 0 errors**
+  (12 pre-existing environmental skips) — 2 537 from 0.7.6 plus the 47 new.
+- On the real GRDC barley PED: `read_plink_ped()` now returns a valid container
+  — 1107 × 9856 × 2, ploidy 2, `encoding = "nucleotide"`,
+  `source_format = "plink_ped"`, `char_dict` = {T, A}, 396 750 `NA` cells, no
+  `"TRUE"` anywhere — and it is **`identical()` to the container the workshop's
+  `read_plink_ped_safe()` workaround produced**, for `geno_arrays` and
+  `map_info` both. That workaround is withdrawn from
+  `ready_to_use/workshop/_common.R`.
+- The read path from file to `metadata` is documented end to end in
+  `docs/haploStack_io_reference_0.7.7.md`.
+
+### Deliberately unchanged
+- `.read_block_file()` still uses `read.table()`. A block file holds
+  identifiers and coordinates, never allele codes, and `Start` / `End` are
+  wanted as integers — type inference is correct there and the columns cannot
+  be uniformly T/F.
 
 ## [0.7.6] - 2026-09-19 — Views keep the observed allele of a half-called cell
 
