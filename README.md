@@ -5,6 +5,20 @@
 Developed for the GRDC Barley Phase 2 project at the University of Queensland.
 Generalised for use with any biparental or multiparental diploid breeding programme.
 
+> ### 0.7.6 — views keep the observed allele of a half-called cell
+>
+> `geno_meta_views()` now builds its per-copy allele table straight from the
+> ploidy layers of `geno_arrays`. It used to re-split the collapsed genotype
+> string, which is `NA` whenever *any* copy is missing — so a half-called cell
+> `(A, NA)` came back as `(NA, NA)` and its observed allele was dropped from
+> every consumer: local GEBVs at both levels, the block catalogue, block
+> signatures, clustering, block IBD / signal scoring and the marker-stats
+> views, and with them every simulation offspring metric from cycle 1. Founders
+> read from a PED are never half-called, but derived populations carry
+> 1.6–3.6 % such cells. **Numbers change only on containers that hold a
+> half-called cell**; one without any is byte-identical to 0.7.5. No export
+> change.
+>
 > ### 0.7.5 — `max_F1mean` (top elite) in the simulation summary
 >
 > `run_stacking_simulation()$summary` gains `max_F1mean`, the breeding value
@@ -80,7 +94,7 @@ remotes::install_github("CCS-voidBird/haploStack")
 devtools::install("path/to/haploStack")
 
 # From a release source tarball
-install.packages("haploStack_0.7.5.tar.gz", repos = NULL, type = "source")
+install.packages("haploStack_0.7.6.tar.gz", repos = NULL, type = "source")
 
 library(haploStack)
 ```

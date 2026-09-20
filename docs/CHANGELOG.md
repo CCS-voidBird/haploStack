@@ -127,6 +127,48 @@ persistent session GSPS) are re-targeted to **v0.5.x** and tracked in
 remaining input formats (allelic DArT, VCF) is at
 `dev/PRD_input_formats_dart_vcf.md` — questions only, nothing scoped._
 
+### Distribution and deliverables (2026-09-20) — no package code changed
+
+Version stays **0.7.6**; nothing in `R/`, `src/` or `NAMESPACE` moved.
+
+**Released.** `ready_to_use/release_v0.7.6/` — the portable source tarball, a
+Windows binary built from it (`R CMD INSTALL --build`, R 4.4.3 ucrt + Rtools44),
+`SHA256SUMS.txt` and `RELEASE_NOTES.md`. Verified by installing the binary into
+the build machine's library and running the package's own suite **against the
+installed build**: 2 537 pass, 0 fail, 0 error, 12 environmental skips (9 ×
+`read_vcf_genotype` with `vcfR` absent, 1 × the monitor's `future.apply` path,
+2 guards that skip because `circlize` and `genomicSimulation` *are* installed).
+The GitHub mirror `ready_to_use/haploStack/` is synced to 0.7.6.
+
+**Workshop extended to annotation.** `ready_to_use/workshop/` gains a single
+path block, `_paths.R` (every file path, subset control and toolchain location,
+each with an `HS_*` environment override, plus `check_paths()`), and two
+modules: **`01c_build_geno_meta_PLINK.R`** (raw PLINK `.ped`/`.map` → GenoMeta →
+HapSelect LD blocks → rrBLUP effects → block coordinate files) and
+**`07_block_annotation.R`** (the three handover files → `block_annotation
+0.3.0` offline against a local GFF3 → joined back on `Block`).
+`00_run_all.R` takes `BUILD = "SIM" | "REAL" | "PLINK"`. Run end to end on the
+GRDC barley AGG1 panel (1H + 2H, 300 lines, 2 677 markers): 1 774 blocks, 228
+with at least one overlapping gene, 3 111 gene overlaps, 86 marker–gene
+co-localisations, ~8.5 min. Artefacts kept in
+`ready_to_use/workshop_products_0.7.7/`.
+
+**Bridge rewritten.** `docs/haplostack_annotation_bridge.md` is pinned to
+haploStack 0.7.6 / block_annotation 0.3.0 and now documents the raw-genotype
+entry point, the offline local-GFF3 route (including GO / InterPro through an
+xref dump), and the asymmetry that made the offline route silently mismatch:
+`annotate_blocks_ensembl()` falls back to `SPECIES_CONFIG[species]["chr_map"]`
+while `annotate_blocks_local()` does **not**, so barley blocks must be
+normalised to the plain integer and the species `chr_map` passed explicitly.
+
+**Found, not fixed.** `read_plink_ped()` cannot read a nucleotide PED whose
+panel contains a monomorphic-`T` allele column: `utils::read.table()` returns
+that column as **logical**, and `.reshape_wide_alleles()` rejects the resulting
+`"TRUE"`. 511 of 19 712 allele columns of the GRDC barley PED are affected.
+Proposed fix for 0.7.7 is `colClasses = "character"` on that call; the workshop
+ships `read_plink_ped_safe()` as a documented workaround. INDEX discrepancy
+**30**.
+
 ### ~~In progress (2026-08-24)~~ — **SHIPPED as [0.6.0]** the same day
 
 > Kept as the staged record of how the release was built: stages 1 and 2 landed
@@ -607,6 +649,54 @@ published repo ships:
   form, and the missing `CITATION.cff`. `LICENSE` is untouched — its copyright
   holder is still "University of Queensland", which is a rights statement, not an
   authorship one, and it already matches the published copy byte for byte.
+
+## [0.7.6] - 2026-09-19 — Views keep the observed allele of a half-called cell
+
+### Fixed
+- `geno_meta_views()` builds the per-copy allele table straight from the
+  ploidy layers of `geno_arrays` (new internal `.build_alleles_layers()`), no
+  longer by re-splitting `.meta_to_allele_matrix()`'s collapsed genotype
+  string. That string is `NA` whenever *any* copy is missing, so a half-called
+  cell `(A, NA)` came back as `(NA, NA)` and its observed allele was dropped
+  from every consumer of the views: `compute_profile_localgebv()` at both
+  levels — and with it every simulation offspring `mean_F1mean`, `max_F1mean`,
+  `D2Ideal`, `ideal_hap_gebv` and the haplotype table OHS / GBS / TS select on
+  from cycle 1 — `compute_block_catalogue()`, block signatures, clustering,
+  block IBD / signal scoring and the marker-stats views. Found 2026-09-18 by
+  the barley bench review (manuscript folder `06` §3): founders read from PED
+  are never half-called (missing is `0 0`, both copies), but block- and
+  genomicSimulation-backend offspring carry 1.6–3.6 % such cells, so the
+  founders' stacking ceiling rose from 4.8747 to 4.8842 at cycle 1 and
+  cycle-10 population means were 0.3–1.5 % off (individuals by up to 0.06;
+  rank agreement 0.98–0.99). The 0.6.0 contract already said "a half-called
+  cell keeps what was observed" — the reader honoured it, the views did not.
+  `.build_alleles_st()`, `.build_alleles_nuc()` and `.bind_haplotypes()` are
+  removed. `.meta_to_allele_matrix()` is unchanged and still serves encoding
+  detection and `geno_meta_to_matrix()` export, where a half-called cell is
+  written as missing (PED cannot carry one); `.meta_to_dosage_matrix()` still
+  counts it as `NA`. Dosage containers are untouched. **Numbers change only on
+  containers with half-called cells**; a container without any is
+  byte-identical to 0.7.5 (tested). INDEX discrepancy **29**; thread #029 note.
+
+### Verified
+- `tests/testthat/test-half-called-views.R`, 412 assertions: the views keep
+  the observed copy (nucleotide and SelectionTools encodings); byte-identical
+  to the 0.7.5 route when no cell is half-called; local GEBVs equal a hand
+  computation from the array at both levels on the Rcpp kernel and the pure-R
+  path; block signatures keep the observed copy and fill only the absent one;
+  a 3-cycle block-backend run's `ideal_hap_gebv` never rises above the
+  founders'.
+- `dev/half_called_check/verify_half_called_views.R` on the barley bench
+  subset (120 founders × 300 NFNB blocks): one TS cycle yields 2 351
+  half-called offspring cells (2.5 %); engine = hand to 1e-17 at both levels
+  on both engines; ceiling 4.8747 → 4.7745 → 4.4109 → 4.3618 over three cycles
+  (never above cycle 0); the review's single-cell puncture reproduces the
+  expected values. Results in `results.tsv` beside it. Every bench table
+  produced under ≤ 0.7.5 (`dev/bench_barley_2026-09-17/`, incl.
+  `hpc_grid01/`) is pre-fix: rankings stand, decimals are superseded by the
+  re-run.
+- Suite: 2 537 pass / 0 fail / 12 skips (the same optional-package skips as
+  0.7.5: vcfR, future.apply, and the genomicSimulation-absent guard).
 
 ## [0.7.5] - 2026-09-18 — `max_F1mean` (top elite) in the simulation summary; genomicSimulation read-back keeps missing alleles NA; benchmark on both backends
 

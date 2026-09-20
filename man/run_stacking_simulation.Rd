@@ -248,11 +248,15 @@ A named list:
     coancestry, ideal_phenotype, pair_score} (the last is the family's
 selection score under direct pairing, \code{NA} otherwise).}
 \item{\code{summary}}{Per-cycle data.table: \code{cycle, select_type, rep,
-    sel_scheme, mean_F1mean, var_F1mean, mean_D2Ideal, mean_coancestry,
-    mean_gene_diversity, mean_ideal_phenotype, ideal_hap_gebv, marker_size,
-    n_families, n_parents_used} (with a \code{cycle = 0} founder row).
-\code{mean_gene_diversity} is Nei's (1973) gene diversity of the cycle's
-population (see \code{\link{compute_gene_diversity}}).}
+    sel_scheme, mean_F1mean, var_F1mean, max_F1mean, mean_D2Ideal,
+    mean_coancestry, mean_gene_diversity, mean_ideal_phenotype,
+    ideal_hap_gebv, marker_size, n_families, n_parents_used} (with a
+\code{cycle = 0} founder row). \code{max_F1mean} is the breeding value
+of the cycle's best single offspring (the top elite — the realised
+counterpart of a set-level "ultimate genotype" objective), against the
+population mean in \code{mean_F1mean}. \code{mean_gene_diversity} is
+Nei's (1973) gene diversity of the cycle's population (see
+\code{\link{compute_gene_diversity}}).}
 \item{\code{ideal_genotypes}}{The founder ideal-genotype target:
 \code{Block, Effect, CFreq, TargetFreq}.}
 \item{\code{final_populations}}{Named list (\code{"<scheme>_rep<r>"} ->

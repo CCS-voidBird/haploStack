@@ -65,25 +65,29 @@ geno_meta_views <- function(geno_meta, encoding = NULL) {
   sample_names <- dimnames(arr)[[1L]]
   marker_names <- dimnames(arr)[[2L]]
 
-  # Reconstruct 2-D character matrix for encoding detection and allele builders
-  geno_mat <- .meta_to_allele_matrix(geno_meta)     # [n_samples × n_markers]
-
-  # Resolve encoding: explicit arg > metadata$encoding > auto-detect
+  # Resolve encoding: explicit arg > metadata$encoding > auto-detect. The
+  # collapsed [n_samples x n_markers] genotype matrix is used for DETECTION
+  # only: .meta_to_allele_matrix() writes NA for any cell with a missing copy,
+  # so it must never be the source of the per-copy allele table (0.7.6,
+  # discrepancy 29 — before that fix a half-called cell (A, NA) was re-split
+  # into (NA, NA) here and lost its observed allele in every consumer).
   if (is.null(encoding)) encoding <- geno_meta$metadata$encoding
   if (is.null(encoding)) {
-    encoding <- detect_genotype_encoding(geno_mat)
+    encoding <- detect_genotype_encoding(.meta_to_allele_matrix(geno_meta))
   } else {
     encoding <- match.arg(encoding, c("selectiontools", "nucleotide", "numeric"))
   }
 
-  geno_t <- geno_mat   # [n_samples × n_markers] (builders expect samples-as-rows)
-
-  # Build wide alleles table using existing encoding-specific builders
+  # Build the wide alleles table. For the diploid (allele) encodings the 3-D
+  # array IS the per-copy view: layer k of geno_arrays is haplotype k, one
+  # allele or NA per cell, already normalised by new_geno_meta(). The dosage
+  # encoding keeps its one-row-per-sample layout from the collapsed matrix.
   alleles_wide <- switch(
     encoding,
-    selectiontools = .build_alleles_st(geno_t, sample_names, marker_names),
-    nucleotide     = .build_alleles_nuc(geno_t, sample_names, marker_names),
-    numeric        = .build_alleles_num(geno_t, sample_names, marker_names),
+    selectiontools = ,
+    nucleotide     = .build_alleles_layers(arr, sample_names, marker_names),
+    numeric        = .build_alleles_num(.meta_to_allele_matrix(geno_meta),
+                                        sample_names, marker_names),
     stop("geno_meta_views: unsupported encoding '", encoding, "'.")
   )
 
@@ -381,37 +385,37 @@ recode_geno_meta <- function(geno_meta, to_type = "nucleotide",
 
 # ── Internal builders ─────────────────────────────────────────────────────────
 
-.build_alleles_st <- function(geno_t, sample_names, marker_names) {
-  n_samp <- nrow(geno_t); n_mark <- ncol(geno_t)
-  hap1 <- matrix(NA_character_, n_samp, n_mark)
-  hap2 <- matrix(NA_character_, n_samp, n_mark)
-  for (j in seq_len(n_mark)) {
-    parts <- strsplit(as.character(geno_t[, j]), "/", fixed = TRUE)
-    hap1[, j] <- vapply(parts, function(p) if (length(p) >= 1L) p[1L] else NA_character_, character(1L))
-    hap2[, j] <- vapply(parts, function(p) if (length(p) >= 2L) p[2L] else NA_character_, character(1L))
+# .build_alleles_layers(arr, sample_names, marker_names)
+#
+# Per-copy allele table straight from the ploidy layers of geno_arrays: one
+# block of rows per layer k (Haplotype_idx = k), one column per marker, cells
+# exactly as stored (an allele or NA). This is the only place the views may
+# read alleles from, because it is the only route that keeps a half-called
+# cell's observed copy: (A, NA) stays A on copy 1 and NA on copy 2. The old
+# builders re-split the collapsed genotype string, which is NA whenever ANY
+# copy is missing, and so turned (A, NA) into (NA, NA) (found 2026-09-18 in
+# the barley bench; 0.7.6). Layer order is preserved; nothing is sorted.
+.build_alleles_layers <- function(arr, sample_names, marker_names) {
+  n_samp   <- length(sample_names)
+  n_mark   <- length(marker_names)
+  n_ploidy <- dim(arr)[3L]
+  parts <- vector("list", n_ploidy)
+  for (k in seq_len(n_ploidy)) {
+    # matrix(): a 1-sample or 1-marker slice drops to a vector; refill it in
+    # the array's column-major order so the shape is always [n_samp x n_mark].
+    hap <- matrix(as.character(arr[, , k]), nrow = n_samp, ncol = n_mark)
+    colnames(hap) <- marker_names
+    # check.names = FALSE: preserve non-syntactic marker IDs (e.g. "1H-123")
+    # verbatim so they match geno_meta$map_info$Marker downstream.
+    dt <- as.data.table(as.data.frame(hap, check.names = FALSE,
+                                      stringsAsFactors = FALSE))
+    dt[, Sample := sample_names]
+    dt[, Haplotype_idx := as.integer(k)]
+    parts[[k]] <- dt
   }
-  .bind_haplotypes(hap1, hap2, sample_names, marker_names)
-}
-
-.build_alleles_nuc <- function(geno_t, sample_names, marker_names) {
-  n_samp <- nrow(geno_t); n_mark <- ncol(geno_t)
-  sample_vals <- as.character(geno_t[1L, ])
-  has_slash <- any(grepl("/", sample_vals, fixed = TRUE))
-  hap1 <- matrix(NA_character_, n_samp, n_mark)
-  hap2 <- matrix(NA_character_, n_samp, n_mark)
-  for (j in seq_len(n_mark)) {
-    vals <- as.character(geno_t[, j])
-    if (has_slash) {
-      parts <- strsplit(vals, "/", fixed = TRUE)
-      hap1[, j] <- vapply(parts, function(p) if (length(p) >= 1L) p[1L] else NA_character_, character(1L))
-      hap2[, j] <- vapply(parts, function(p) if (length(p) >= 2L) p[2L] else NA_character_, character(1L))
-    } else {
-      hap1[, j] <- substr(vals, 1L, 1L)
-      hap2[, j] <- substr(vals, 2L, 2L)
-      hap2[nchar(hap2[, j]) == 0L, j] <- NA_character_
-    }
-  }
-  .bind_haplotypes(hap1, hap2, sample_names, marker_names)
+  dt <- rbindlist(parts)
+  setcolorder(dt, c("Sample", "Haplotype_idx", marker_names))
+  dt
 }
 
 .build_alleles_num <- function(geno_t, sample_names, marker_names) {
@@ -421,17 +425,6 @@ recode_geno_meta <- function(geno_meta, to_type = "nucleotide",
   setnames(dt, marker_names)
   dt[, Sample := sample_names]
   dt[, Haplotype_idx := 1L]
-  setcolorder(dt, c("Sample", "Haplotype_idx", marker_names))
-  dt
-}
-
-.bind_haplotypes <- function(hap1, hap2, sample_names, marker_names) {
-  colnames(hap1) <- marker_names; colnames(hap2) <- marker_names
-  # check.names = FALSE: preserve non-syntactic marker IDs (e.g. "1H-123")
-  # verbatim so they match geno_meta$map_info$Marker downstream.
-  dt1 <- as.data.table(as.data.frame(hap1, check.names = FALSE)); dt1[, Sample := sample_names]; dt1[, Haplotype_idx := 1L]
-  dt2 <- as.data.table(as.data.frame(hap2, check.names = FALSE)); dt2[, Sample := sample_names]; dt2[, Haplotype_idx := 2L]
-  dt  <- rbindlist(list(dt1, dt2))
   setcolorder(dt, c("Sample", "Haplotype_idx", marker_names))
   dt
 }
