@@ -104,19 +104,36 @@ transform_genotype <- function(metadata,
 
 #' Read a marker effect file into a standardised data frame
 #'
-#' Reads a whitespace- or tab-separated effect file and returns a data frame
-#' with columns \code{Marker}, \code{Allele}, and \code{Effect}. Additional
-#' trait columns are preserved as \code{Effect2}, \code{Effect3}, etc.
+#' Reads a space-, tab- or comma-separated effect file, with or without a
+#' header row, and returns a data frame with columns \code{Marker},
+#' \code{Allele}, and \code{Effect}. Additional trait columns are preserved as
+#' \code{Effect2}, \code{Effect3}, etc.
 #'
 #' Allele encoding is auto-detected (SelectionTools numeric or nucleotide
 #' characters) and can optionally be converted to a target encoding.
 #'
+#' With the defaults, the tab-separated file with a header that
+#' \code{\link{export_marker_effects}} writes reads straight back (since
+#' 0.7.8; before, it needed \code{sep = "\t", header = TRUE}). A
+#' space-separated file without a header — the long-standing effect-file
+#' layout — is read exactly as the old defaults read it.
+#'
 #' @param path          Path to the effect file. Should have at least three
 #'   columns: marker ID, allele state, effect size.
-#' @param sep           Column separator. Default \code{" "} (space). Use
-#'   \code{"\t"} for tab-separated files.
-#' @param header        Logical; whether the file has a header row. Default
-#'   \code{FALSE} (effect files typically have no header).
+#' @param sep           Column separator. \code{"auto"} (default) takes a tab
+#'   when the first non-blank line holds one, else a comma when it holds one,
+#'   else a space. The choice is made on that line only, never by guessing
+#'   across candidate separators, so a marker ID containing \code{|} or
+#'   \code{:} (DArT allele IDs) cannot split a space-separated file. Pass
+#'   \code{" "}, \code{"\t"} or \code{","} to force one. (Default was
+#'   \code{" "} up to 0.7.7.)
+#' @param header        \code{TRUE}, \code{FALSE}, or \code{"auto"} (default).
+#'   With \code{"auto"} the first line is a header when its third field is
+#'   present, is not a missing-value token (\code{NA}, \code{NaN}, \code{.})
+#'   and is not a number — e.g. \code{Marker Allele Effect}. A first data row
+#'   whose effect is \code{NA} is therefore still data. (Default was
+#'   \code{FALSE} up to 0.7.7, which read a header line as a data row with an
+#'   \code{NA} effect.)
 #' @param output_encode Optional target encoding: \code{"nucleotide"} or
 #'   \code{"selectiontools"}. When \code{NULL} (default) the original encoding
 #'   is preserved.
@@ -134,16 +151,24 @@ transform_genotype <- function(metadata,
 #' \dontrun{
 #' eff <- read_effect_file("effects/trait1.GS.Eff")
 #' head(eff)
+#'
+#' # what export_marker_effects() writes reads straight back
+#' export_marker_effects(meta, traits = "Yield", output_dir = tempdir())
+#' eff <- read_effect_file(file.path(tempdir(), "marker_effects_Yield.txt"))
 #' }
 #'
 #' @export
 read_effect_file <- function(path,
-                              sep           = " ",
-                              header        = FALSE,
+                              sep           = "auto",
+                              header        = "auto",
                               output_encode = NULL,
                               char_dict     = DEFAULT_ENCODING_DICT,
                               extend        = TRUE) {
   if (!file.exists(path)) stop("read_effect_file: File not found: ", path)
+  auto_header <- identical(header, "auto")
+  if (!auto_header && !(isTRUE(header) || isFALSE(header)))
+    stop("read_effect_file: 'header' must be TRUE, FALSE or \"auto\".")
+  if (identical(sep, "auto")) sep <- .effect_file_sep(path)
 
   # Read as text, then coerce the effect columns back. The allele column (2)
   # must never be type-inferred: a table whose alleles are all "T" came back as
@@ -151,7 +176,17 @@ read_effect_file <- function(path,
   # effect silently contributed 0 — no error, just a flat GEBV. See
   # .read_table_chr(). Column 1 (Marker) stays character so an id like "0100"
   # keeps its spelling; columns 3+ are the numeric effects.
-  raw <- .read_table_chr(path, header = header, sep = sep)
+  #
+  # An auto header is read as a data row first and dropped after the check, so
+  # the header decision and the table come from the same parse.
+  raw <- .read_table_chr(path, header = if (auto_header) FALSE else header,
+                         sep = sep)
+  if (auto_header && .is_effect_header(raw)) {
+    raw <- raw[-1L, , drop = FALSE]
+    rownames(raw) <- NULL
+    if (nrow(raw) == 0L)
+      stop("read_effect_file: ", path, " holds a header line and no effects.")
+  }
   if (ncol(raw) >= 3L)
     for (j in 3:ncol(raw))
       raw[[j]] <- suppressWarnings(as.numeric(raw[[j]]))
@@ -163,6 +198,37 @@ read_effect_file <- function(path,
     char_dict     = char_dict,
     extend        = extend
   )
+}
+
+# Separator for read_effect_file(sep = "auto"), decided on the first non-blank
+# line and nothing else: a tab if it holds one, else a comma, else a space.
+# fread's own sep = "auto" scores every candidate in [,\t |;:] over a sample of
+# lines, and a space-separated file of DArT allele IDs ("100013|F|0-12:A>G A
+# 0.5") splits into three fields on "|" as consistently as on " " — so the
+# guess is not left to it. A space-separated file therefore reaches
+# .read_table_chr() with sep = " ", exactly as the pre-0.7.8 default did.
+.effect_file_sep <- function(path) {
+  con <- file(path, "r")
+  on.exit(close(con), add = TRUE)
+  repeat {
+    line <- readLines(con, n = 1L, warn = FALSE)
+    if (length(line) == 0L) return(" ")            # empty file: let the reader say so
+    if (nzchar(trimws(line))) break
+  }
+  if (grepl("\t", line, fixed = TRUE)) "\t"
+  else if (grepl(",", line, fixed = TRUE)) ","
+  else " "
+}
+
+# Is the first row of an effect table (read as text, no header) a header line?
+# Yes when its third field is present, is not a missing-value token and does
+# not parse as a number ("Effect", "beta", "NFNB_BLUE_0613"). A first data row
+# whose effect is NA is data, not a header.
+.is_effect_header <- function(raw) {
+  if (nrow(raw) < 1L || ncol(raw) < 3L) return(FALSE)
+  v <- trimws(as.character(raw[[3L]][1L]))
+  !is.na(v) && nzchar(v) && !toupper(v) %in% c("NA", "NAN", ".") &&
+    is.na(suppressWarnings(as.numeric(v)))
 }
 
 

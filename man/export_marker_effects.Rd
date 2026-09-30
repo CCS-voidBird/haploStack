@@ -58,7 +58,9 @@ and returns them as one tidy table, optionally writing one tab-separated file
 per trait. The written files carry \strong{exactly the columns stored on the
 GenoMeta} (\code{Marker}, \code{Allele}, \code{Effect}); the trait is
 identified by the file name rather than by an extra column, so a written file
-round-trips through \code{\link{read_effect_file}} unchanged.
+round-trips through \code{\link{read_effect_file}} unchanged — with that
+reader's defaults since 0.7.8 (up to 0.7.7 it needed \code{sep = "\t",
+header = TRUE}).
 }
 \details{
 This function only reads the GenoMeta — it never modifies it.

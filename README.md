@@ -5,6 +5,18 @@
 Developed for the GRDC Barley Phase 2 project at the University of Queensland.
 Generalised for use with any biparental or multiparental diploid breeding programme.
 
+> ### 0.7.8 — an exported effect file reads back with the defaults
+>
+> `export_marker_effects()` writes one **tab-separated file with a header
+> row** (`Marker\tAllele\tEffect`) per trait, and its roxygen has promised
+> since 0.5.2 that *"a written file round-trips through `read_effect_file()`
+> unchanged"*. It never did with the reader's defaults (`sep = " ", header =
+> FALSE`): the whole line landed in one column and the read stopped with
+> *"transform_effects: need at least 3 columns"*. Found by the `haplostack-
+> analysis` skill's contract smoke test (intake 01); closes INDEX discrepancy
+> **31**. Released with the workshop blocking fix (intake 03, discrepancy
+> **32**, see *Deliverables*).
+>
 > ### 0.7.7 — a genotype file is read as text
 >
 > `read_plink_ped()`, `read_effect_file()` and `read_dart_genotype()` parsed
@@ -106,20 +118,10 @@ Generalised for use with any biparental or multiparental diploid breeding progra
 ### Install
 
 ```r
-# From GitHub
-remotes::install_github("CCS-voidBird/haploStack")
-
-# From a local clone of this repository
-devtools::install("path/to/haploStack")
-
-# From a release source tarball
-install.packages("haploStack_0.7.7.tar.gz", repos = NULL, type = "source")
-
+# From local source
+devtools::install("path/to/Haplotype_workflow_R")
 library(haploStack)
 ```
-
-Compiling `src/*.cpp` needs the usual R build toolchain (Rtools on Windows,
-`r-base-dev` / Xcode command-line tools elsewhere).
 
 ### Minimal Example (Simulated Data)
 
@@ -193,7 +195,7 @@ into the GenoMeta and on into `compute_profile_localgebv()`.
 ## Package Structure
 
 ```
-haploStack/
+Haplotype_workflow_R/
 ├── DESCRIPTION                  Package metadata
 ├── NAMESPACE                    Exported functions
 ├── R/
@@ -210,11 +212,9 @@ haploStack/
 │   ├── catalogue_family.R       trace_haplotype_family()
 │   ├── catalogue_main.R         run_haplotype_catalogue() orchestrator
 │   ├── fitness_functions.R      create/update/write fitness index
-│   ├── stacking_selection.R     greedy, GA, OCS selection; make_cross_design(); pair_selection_budget()
-│   ├── stacking_ohs.R           ohs_selection() — Optimal Haplotype Selection
-│   ├── stacking_gbs.R           gbs_selection() — Genotype Building Strategy (Kemper 2012)
-│   ├── stacking_pairs.R         direct pair selection: ohs_pair_selection(), gbs_pair_selection()
+│   ├── stacking_selection.R     greedy, GA, OCS selection; make_cross_design()
 │   ├── stacking_main.R          run_stacking_simulation()
+│   ├── stacking_pairs.R         direct pair selection: ohs_pair_selection(), gbs_pair_selection()
 │   └── stacking_monitor.R       plot_simulation_trajectories(), summarise_simulation()
 ├── tests/testthat/
 │   ├── helper-sim_data.R        Simulation data generators
@@ -224,16 +224,13 @@ haploStack/
 │   └── test-stacking.R          Stacking module QA (12 tests)
 ├── vignettes/
 │   ├── quick_start.Rmd          ← START HERE: beginner guide
-│   ├── example_stacking_simulation.Rmd   Stacking simulation: one method, a comparison, direct pairs
-│   ├── selection_grid.md        Which selection settings combine (scheme × unit × budget × options)
 │   ├── simulation_catalogue.Rmd Full catalogue workflow with simulated data
 │   └── simulation_stacking.Rmd  Full stacking workflow with simulated data
-├── src/                         Rcpp kernels (compiled on install)
-└── docs/
-    ├── CHANGELOG.md             Version history
-    ├── geno_meta_structure.md   GenoMeta container reference
-    ├── haploStack_io_reference_0.6.0.md   I/O contract for the current release
-    └── haploStack_io_reference_0.5.5.md   (and earlier releases)
+├── dev/
+│   ├── development_sheet.md     Status, open issues, milestones
+│   ├── questions_sheet.md       Design questions needing user input
+│   └── qa_suggestions.md        Future development ideas
+└── inst/extdata/                (Example data files — to be added)
 ```
 
 ---
@@ -324,25 +321,22 @@ testthat::test_file("tests/testthat/test-catalogue.R")
 
 ---
 
-## Documentation
+## Development Status
 
-- [`docs/CHANGELOG.md`](docs/CHANGELOG.md) — version history and release notes
-- [`docs/geno_meta_structure.md`](docs/geno_meta_structure.md) — full `GenoMeta`
-  element / provenance reference
-- [`docs/haploStack_io_reference_0.6.0.md`](docs/haploStack_io_reference_0.6.0.md) —
-  I/O contract for the current release: what a missing allele is, and what each
-  centring mode preserves
-- [`docs/haploStack_io_reference_0.5.5.md`](docs/haploStack_io_reference_0.5.5.md) —
-  and the sheets for earlier releases beside it
-- [`vignettes/selection_grid.md`](vignettes/selection_grid.md) — the matrix of
-  selection scheme × unit × budget × options for `run_stacking_simulation()`,
-  with the caveats (OCS, replicate seeding)
-- `vignettes/` — worked examples; start with `quick_start.Rmd`, then
-  `example_stacking_simulation.Rmd` for the simulation
+See [`dev/development_sheet.md`](dev/development_sheet.md) for detailed status.
+
+Open questions requiring user input: [`dev/questions_sheet.md`](dev/questions_sheet.md)
+
+Future development suggestions: [`dev/qa_suggestions.md`](dev/qa_suggestions.md)
 
 ---
 
-## Citation & Licence
+## Reference Pipeline
 
-Developed at the University of Queensland for the GRDC Barley Phase 2 project.
-Released under the MIT licence — see [`LICENSE`](LICENSE).
+This package converts the workflow in:
+`../Block_analysis/Haplotype_Workflow/`
+
+Original pipeline documentation:
+- `_Docs/pipeline_description.md` — Architecture overview
+- `_Docs/package_conversion_guide.md` — Conversion decisions
+- `_Docs/workflow_visualization.md` — Function call chains

@@ -6,8 +6,8 @@
 \usage{
 read_effect_file(
   path,
-  sep = " ",
-  header = FALSE,
+  sep = "auto",
+  header = "auto",
   output_encode = NULL,
   char_dict = DEFAULT_ENCODING_DICT,
   extend = TRUE
@@ -17,11 +17,21 @@ read_effect_file(
 \item{path}{Path to the effect file. Should have at least three
 columns: marker ID, allele state, effect size.}
 
-\item{sep}{Column separator. Default \code{" "} (space). Use
-\code{"\t"} for tab-separated files.}
+\item{sep}{Column separator. \code{"auto"} (default) takes a tab
+when the first non-blank line holds one, else a comma when it holds one,
+else a space. The choice is made on that line only, never by guessing
+across candidate separators, so a marker ID containing \code{|} or
+\code{:} (DArT allele IDs) cannot split a space-separated file. Pass
+\code{" "}, \code{"\t"} or \code{","} to force one. (Default was
+\code{" "} up to 0.7.7.)}
 
-\item{header}{Logical; whether the file has a header row. Default
-\code{FALSE} (effect files typically have no header).}
+\item{header}{\code{TRUE}, \code{FALSE}, or \code{"auto"} (default).
+With \code{"auto"} the first line is a header when its third field is
+present, is not a missing-value token (\code{NA}, \code{NaN}, \code{.})
+and is not a number — e.g. \code{Marker Allele Effect}. A first data row
+whose effect is \code{NA} is therefore still data. (Default was
+\code{FALSE} up to 0.7.7, which read a header line as a data row with an
+\code{NA} effect.)}
 
 \item{output_encode}{Optional target encoding: \code{"nucleotide"} or
 \code{"selectiontools"}. When \code{NULL} (default) the original encoding
@@ -38,18 +48,29 @@ data.frame with columns \code{Marker}, \code{Allele},
 \code{Effect} \link{, \code{Effect2}, ...}.
 }
 \description{
-Reads a whitespace- or tab-separated effect file and returns a data frame
-with columns \code{Marker}, \code{Allele}, and \code{Effect}. Additional
-trait columns are preserved as \code{Effect2}, \code{Effect3}, etc.
+Reads a space-, tab- or comma-separated effect file, with or without a
+header row, and returns a data frame with columns \code{Marker},
+\code{Allele}, and \code{Effect}. Additional trait columns are preserved as
+\code{Effect2}, \code{Effect3}, etc.
 }
 \details{
 Allele encoding is auto-detected (SelectionTools numeric or nucleotide
 characters) and can optionally be converted to a target encoding.
+
+With the defaults, the tab-separated file with a header that
+\code{\link{export_marker_effects}} writes reads straight back (since
+0.7.8; before, it needed \code{sep = "\t", header = TRUE}). A
+space-separated file without a header — the long-standing effect-file
+layout — is read exactly as the old defaults read it.
 }
 \examples{
 \dontrun{
 eff <- read_effect_file("effects/trait1.GS.Eff")
 head(eff)
+
+# what export_marker_effects() writes reads straight back
+export_marker_effects(meta, traits = "Yield", output_dir = tempdir())
+eff <- read_effect_file(file.path(tempdir(), "marker_effects_Yield.txt"))
 }
 
 }

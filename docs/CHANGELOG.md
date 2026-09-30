@@ -129,6 +129,15 @@ semantic versioning.
 > The read path from file to `metadata` is written up in
 > [`docs/haploStack_io_reference_0.7.7.md`](haploStack_io_reference_0.7.7.md).
 
+> **Updated 2026-09-30.** Added `[0.7.8]` — **an exported effect file reads
+> back with the defaults**: `read_effect_file()` defaults become
+> `sep = "auto", header = "auto"`, so the tab-separated, headed file
+> `export_marker_effects()` writes round-trips as its roxygen always said
+> (closes INDEX discrepancy 31, intake 01). Same release: the workshop's
+> HapSelect route now blocks at the declared `LD_TOLERANCE` (discrepancy 32,
+> intake 03), and a false "ragged file" error on blank lines is recorded as
+> found, not fixed (discrepancy 33, intake 08).
+
 ## [Unreleased]
 
 _The remaining roadmap items (stacking-simulation rebuild #013, genomicSimulation
@@ -136,6 +145,29 @@ persistent session GSPS) are re-targeted to **v0.5.x** and tracked in
 [`docs/project_record/INDEX.md`](project_record/INDEX.md). An opening PRD for the
 remaining input formats (allelic DArT, VCF) is at
 `dev/PRD_input_formats_dart_vcf.md` — questions only, nothing scoped._
+
+### Distribution and documentation (2026-09-20, second pass) — no package code changed
+
+Version stays **0.7.7**; nothing in `R/`, `src/` or `NAMESPACE` moved.
+
+**Published.** The GitHub mirror `ready_to_use/haploStack` now carries one
+commit and one annotated tag per version — `0a6a2f5` / `haploStack-0.7.6` and
+`4dda05a` / `haploStack-0.7.7` — pushed to `CCS-voidBird/haploStack`, and both
+versions are published as GitHub releases from the `ready_to_use/release_v0.7.x/`
+bundles (source tarball, Windows binary, `SHA256SUMS.txt`, release notes);
+0.7.7 is marked *latest*. Tags 0.7.3–0.7.5, previously local only, went up with
+the same push.
+
+**Workshop.** `ready_to_use/workshop/_common.R` now stops at start-up when
+`packageVersion("haploStack") < "0.7.7"`, with the reason, so the PLINK route's
+requirement is enforced rather than merely stated. Header bumped to v0.7.7.
+
+**Record fixes.** `test-ped-text-read.R` assertion count corrected to 47 in
+INDEX discrepancy 30 (was 40); `release_v0.7.6/RELEASE_NOTES.md` known-issue
+section rewritten in the past tense now that 0.7.7 exists; the
+`block_annotation` bundle and `block_annotation_0.3.0.zip` carry the 0.7.7-pinned
+bridge pointer. Details in thread
+[#032](project_record/threads/032-genotype-text-read.md).
 
 ### Distribution and deliverables (2026-09-20) — no package code changed
 
@@ -659,6 +691,97 @@ published repo ships:
   form, and the missing `CITATION.cff`. `LICENSE` is untouched — its copyright
   holder is still "University of Queensland", which is a rights statement, not an
   authorship one, and it already matches the published copy byte for byte.
+
+## [0.7.8] - 2026-09-30 — An exported effect file reads back with the defaults
+
+`export_marker_effects()` writes one **tab-separated file with a header row**
+(`Marker\tAllele\tEffect`) per trait, and its roxygen has promised since 0.5.2
+that *"a written file round-trips through `read_effect_file()` unchanged"*. It
+never did with the reader's defaults (`sep = " ", header = FALSE`): the whole
+line landed in one column and the read stopped with *"transform_effects: need
+at least 3 columns"*. Found by the `haplostack-analysis` skill's contract smoke
+test (intake 01); closes INDEX discrepancy **31**. Released with the workshop
+blocking fix (intake 03, discrepancy **32**, see *Deliverables*).
+
+### Changed
+- **`read_effect_file(sep = "auto", header = "auto")`** — new defaults (were
+  `" "` and `FALSE`).
+  - `sep = "auto"` takes a tab if the first non-blank line holds one, else a
+    comma, else a space — decided on that line only (internal
+    `.effect_file_sep()`), **not** by `fread`'s own candidate scoring: a
+    space-separated file of DArT allele IDs (`100013|F|0-12:A>G A 0.5`) splits
+    into three fields on `|` as consistently as on a space. A space-separated
+    file therefore reaches `.read_table_chr()` with `sep = " "`, exactly as
+    before.
+  - `header = "auto"`: the first line is a header when its third field is
+    present, is not a missing-value token (`NA`, `NaN`, `.`) and does not parse
+    as a number (internal `.is_effect_header()`). The file is parsed once with
+    no header and the row dropped after the check, so the decision and the
+    table come from the same parse. A first data row whose effect is `NA`
+    stays data.
+  - Explicit arguments keep their meaning. `header` must be `TRUE`, `FALSE` or
+    `"auto"`; a file holding only a header line now errors by name.
+- **Effect on existing files — verified against 0.7.7 on 17 cases**, two of
+  them real files: every file that read under 0.7.7 reads **`identical()`**
+  now (space-separated, no header: LF and CRLF, 4 columns, aligned double
+  spaces, all-`"T"` alleles, zero-padded IDs, DArT-style IDs, a first row with
+  an `NA` effect; and every explicit-argument call). Newly read, each equal to
+  its explicit-argument read: tab- or comma-separated, with or without a header
+  — including `analysis/barley_hapselect/outputs/04_marker_effects_haploStack_NFNB.tsv`
+  (19 712 rows, the export format). **One intended change:** a space-separated
+  file with a header line used to read that line as a data row
+  (`Marker Allele NA`, silently); it is now recognised and dropped.
+- `export_marker_effects()` roxygen states the round trip holds with the
+  reader's defaults since 0.7.8.
+
+### Added
+- `tests/testthat/test-effect-file-read.R`, 27 assertions (E1–E7): the export
+  round trip with the defaults; parity with the old defaults for the
+  space / no-header layout; tab × comma × header variants give one table; an
+  `NA` first effect is data; DArT-style IDs; explicit arguments; the header-only
+  and bad-`header` errors.
+
+### Build
+- `.Rbuildignore` excludes `Rplots.pdf` anywhere (`(^|/)Rplots\.pdf$`): up to
+  0.7.7 the pattern was anchored to the root, so every tarball shipped
+  `tests/testthat/Rplots.pdf`. Tarball: 266 files, 522 KB.
+
+### Deliverables (`ready_to_use/` — not package code)
+- **Workshop 01c blocks at the rule it declares** (intake 03, INDEX
+  discrepancy 32). The HapSelect route called `def_blocks()` without
+  `tolerance`, so it blocked at HapSelect's default tolerance **1** whatever
+  `_paths.R`'s `LD_TOLERANCE` (3) said — on 1H × 300 lines, 610 blocks instead
+  of 511 from the same LD table. It now passes `tolerance = LD_TOLERANCE,
+  tol_reset = TRUE` (the setting of `analysis/dataset_ld_segmentation/`) and
+  prints both. Module 03 stamps that rule into the catalogue file names on the
+  PLINK LD route (`…_0.5_t3_…`; other routes keep `…_0.5_t0_…`).
+  `workshop_products_0.7.7/` is kept as built (tolerance 1, a dated note says
+  so); **`workshop_products_0.7.8/`** is the fixed route's run.
+- `release_v0.7.8/` staged: source tarball, Windows binary built from it,
+  `SHA256SUMS.txt`, `RELEASE_NOTES.md`. Not pushed to GitHub.
+
+### Tooling (agent skills — not package code)
+- `.agents/skills/haplostack-analysis/` rebuilt against 0.7.7 → 0.7.8 and
+  linked into the repo's `.claude/skills/`; new testing and issue-raising
+  sub-skills; a user-level `haplostack` skill for other projects. Findings go
+  to the new intake `.scratch/intake/` (`needs-triage`); items 01 and 03 are
+  closed by this release.
+
+### Verified
+- Suite against the **installed** Windows binary (built from the tarball):
+  2 624 expectations — **2 611 pass, 0 fail, 0 error**, 12 environmental skips
+  (2 584 from 0.7.7 + 27 new). Source tarball installed into a throwaway
+  library in a fresh R process: kernels live, the round trip holds.
+- Contract smoke test (`haplostack-analysis/templates/smoke_test.R`): 22 PASS,
+  3 KNOWN — check C5 (the round trip) moved from KNOWN to PASS.
+- No export change (130). No other function's defaults changed.
+
+### Found, not fixed
+- `.read_table_chr()`'s ragged-file guard counts blank lines out but `fread`
+  returns some of them as rows, so a file with **two or more trailing blank
+  lines, or any blank line between data lines**, is refused as *"ragged"* —
+  every text reader, `read_plink_ped()` included (one trailing blank line
+  reads, as T7 pins). Same on 0.7.7. Intake 08, INDEX discrepancy 33.
 
 ## [0.7.7] - 2026-09-20 — A genotype file is read as text
 
