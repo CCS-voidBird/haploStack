@@ -29,6 +29,18 @@ a new \code{GenoMeta} with both \code{block_info} and
 \code{block_marker_map_info} populated. The original object is not modified.
 Any previously stored block data is replaced.
 }
+\details{
+A block map you already have is the \strong{recommended} way to give
+haploStack its blocks, and it needs no LD parameter. Pass it here, or at read
+time: \code{\link{read_plink_ped}(block_file =)} or
+\code{\link{build_geno_meta}(blocks =)}, which also keeps the FAM. Markers
+absent from the map become singleton blocks. Only when no map exists do the
+local LD resolvers come in: \code{\link{hapS_ld_blocks}} (HapSelect, the
+default) or \code{\link{st_ld_blocks}} (SelectionTools, experimental).
+
+This function rebuilds the container: it drops \code{marker_effects} and
+\code{phenotype} and resets the FAM parents, so attach blocks before those.
+}
 \section{Source types}{
 
 \describe{
@@ -59,13 +71,15 @@ meta  <- attach_block_info(meta, bmap)
 binfo <- data.frame(Chrom = "1", Block = "B1", Start = 1e5, End = 5e5)
 meta  <- attach_block_info(meta, binfo, source_type = "block_info")
 
-# After LD-based block definition
-ld_out <- define_haplotype_blocks("geno.st", "map.txt", output_dir = "blocks/")
-meta   <- attach_block_info(meta, ld_out$block_marker_map)
+# No block map? Build LD blocks locally (a side route) — these attach the
+# blocks themselves and keep effects, phenotype and FAM:
+meta <- hapS_ld_blocks(meta, ld_threshold = 0.5, tolerance = 3)  # HapSelect
 }
 
 }
 \seealso{
-\code{\link{expand_block_info}}, \code{\link{define_haplotype_blocks}},
-\code{\link{filter_geno_meta}}, \code{\link{new_geno_meta}}
+\code{\link{expand_block_info}}, \code{\link{filter_geno_meta}},
+\code{\link{new_geno_meta}}; when no block map exists,
+\code{\link{hapS_ld_blocks}} (default) or \code{\link{st_ld_blocks}}
+(experimental)
 }

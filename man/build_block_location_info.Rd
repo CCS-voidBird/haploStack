@@ -61,6 +61,7 @@ head(loc$block_info)
 
 }
 \seealso{
-\code{\link{attach_block_info}}, \code{\link{define_haplotype_blocks}},
+\code{\link{attach_block_info}}, \code{\link{hapS_ld_blocks}} and
+\code{\link{st_ld_blocks}} (local LD blocking, a side route),
 \code{\link{expand_block_info}}
 }

@@ -1,8 +1,9 @@
 # =============================================================================
-# test-selectiontools-blocks.R  (0.7.9)
+# test-selectiontools-blocks.R  (0.7.9; names from 0.7.10)
 #
-# The GenoMeta -> SelectionTools LD-blocking route, define_haplotype_blocks_meta(),
-# and the fixes to the file route, define_haplotype_blocks():
+# The SelectionTools resolver: the GenoMeta route st_ld_blocks() (0.7.9's
+# define_haplotype_blocks_meta()) and the file route st_ld_blocks_files()
+# (define_haplotype_blocks() up to 0.7.9). Toy panels: helper-ld-toy.R.
 #   B1  planted LD groups come back as exactly those blocks
 #   B2  attach = TRUE keeps effects / phenotype / FAM, and chromosome NAMES
 #   B3  tolerance absorbs an LD-breaking marker inside a block
@@ -15,49 +16,17 @@
 #   B8  SelectionTools' global st.input.dir / st.output.dir: gone (after
 #       rm(list = ls())) -> supplied for the call and removed again; set to a
 #       directory -> refused with the remedy
+#   B9  the pre-0.7.10 names still work: they warn (deprecated) and return
+#       exactly what st_ld_blocks() / st_ld_blocks_files() return
 # =============================================================================
 
 library(testthat)
 library(haploStack)
 
-# Toy panel with a KNOWN block structure: groups of identical markers (r^2 = 1
-# within a group) separated by independent draws (r^2 ~ 1/n between groups), on
-# chromosomes named 1H..3H. Lines are inbred (A/A or T/T).
-st_toy <- function(sizes = c(4L, 1L, 3L, 1L, 5L, 2L, 1L, 4L, 3L, 1L, 2L),
-                   chrom = rep(c("1H", "2H", "3H"), c(5L, 3L, 3L)),
-                   n = 40L, seed = 11L, noise_in = NA_integer_) {
-  set.seed(seed)
-  cells <- NULL; mk <- NULL; ch <- NULL; pos <- NULL
-  p <- 0
-  for (g in seq_along(sizes)) {
-    base <- sample(c("A", "T"), n, replace = TRUE)
-    for (k in seq_len(sizes[g])) {
-      v <- base
-      if (!is.na(noise_in) && g == noise_in && k == ceiling(sizes[g] / 2))
-        v <- sample(c("A", "T"), n, replace = TRUE)          # breaks the LD run
-      cells <- cbind(cells, paste0(v, "/", v))
-      mk  <- c(mk, sprintf("g%02d_m%d", g, k))
-      ch  <- c(ch, chrom[g])
-      p   <- p + 1000
-      pos <- c(pos, p)
-    }
-    p <- p + 1e6
-  }
-  dimnames(cells) <- list(sprintf("L%02d", seq_len(n)), mk)
-  map <- data.frame(Chrom = ch, Marker = mk, Pos = pos, stringsAsFactors = FALSE)
-  suppressMessages(build_geno_meta(cells, map, split_char = "/",
-                                   encoding = "nucleotide"))
-}
-planted_group <- function(marker) sub("_m[0-9]+$", "", marker)
-partition <- function(bm) {
-  s <- split(as.character(bm$Marker), as.character(bm$Block))
-  sort(vapply(s, function(x) paste(sort(x), collapse = "+"), ""))
-}
-
 test_that("B1: planted LD groups come back as exactly those blocks", {
   skip_if_not_installed("SelectionTools")
   toy <- st_toy()
-  r <- define_haplotype_blocks_meta(toy, ld_threshold = 0.5, tolerance = 0,
+  r <- st_ld_blocks(toy, ld_threshold = 0.5, tolerance = 0,
                                     attach = FALSE, verbose = FALSE)
   expect_named(r, c("block_marker_map", "block_info"))
   bm <- r$block_marker_map
@@ -81,7 +50,7 @@ test_that("B2: attach = TRUE keeps effects, phenotype, FAM and chromosome names"
   toy$sample_info$Parent1[3:4] <- ids[1L]
   toy$sample_info$Parent2[3:4] <- ids[2L]
 
-  out <- suppressMessages(define_haplotype_blocks_meta(toy, 0.5, 0, verbose = FALSE))
+  out <- suppressMessages(st_ld_blocks(toy, 0.5, 0, verbose = FALSE))
   expect_true(is_geno_meta(out, verbose = FALSE))
   expect_identical(out$marker_effects, toy$marker_effects)
   expect_identical(out$phenotype, toy$phenotype)
@@ -97,7 +66,7 @@ test_that("B3: tolerance absorbs an LD-breaking marker inside a block", {
   noisy <- st_toy(noise_in = 5L)            # group 5: 5 markers, the 3rd is noise
   g5 <- sprintf("g05_m%d", 1:5)
   blocks_of <- function(tol) {
-    bm <- define_haplotype_blocks_meta(noisy, 0.5, tol, attach = FALSE,
+    bm <- st_ld_blocks(noisy, 0.5, tol, attach = FALSE,
                                        verbose = FALSE)$block_marker_map
     bm$Block[match(g5, bm$Marker)]
   }
@@ -114,11 +83,11 @@ test_that("B4: unplaced markers are left out of blocking and become singletons",
     geno_arrays = toy$geno_arrays, map_info = toy$map_info,
     metadata = toy$metadata, sample_info = toy$sample_info))
 
-  r <- define_haplotype_blocks_meta(toy, 0.5, 0, attach = FALSE, verbose = FALSE)
+  r <- st_ld_blocks(toy, 0.5, 0, attach = FALSE, verbose = FALSE)
   expect_false(any(c("g01_m2", "g05_m3") %in% r$block_marker_map$Marker))
   expect_identical(nrow(r$block_marker_map), length(dimnames(toy$geno_arrays)[[2L]]) - 2L)
 
-  out <- suppressMessages(define_haplotype_blocks_meta(toy, 0.5, 0, verbose = FALSE))
+  out <- suppressMessages(st_ld_blocks(toy, 0.5, 0, verbose = FALSE))
   bmi <- out$block_marker_map_info
   expect_identical(bmi$Block[bmi$Marker == "g01_m2"], "dummy_g01_m2")
   expect_identical(bmi$Block[bmi$Marker == "g05_m3"], "dummy_g05_m3")
@@ -127,14 +96,14 @@ test_that("B4: unplaced markers are left out of blocking and become singletons",
 test_that("B5: the blocking rule is validated before SelectionTools is touched", {
   toy <- st_toy()
   for (thr in list(0, -0.1, 1.2, NA_real_, c(0.3, 0.5), "0.5"))
-    expect_error(define_haplotype_blocks_meta(toy, ld_threshold = thr),
+    expect_error(st_ld_blocks(toy, ld_threshold = thr),
                  "ld_threshold", info = format(thr))
   for (tol in list(-1, 1.5, NA_real_, c(1, 2)))
-    expect_error(define_haplotype_blocks_meta(toy, 0.5, tolerance = tol),
+    expect_error(st_ld_blocks(toy, 0.5, tolerance = tol),
                  "tolerance", info = format(tol))
-  expect_error(define_haplotype_blocks_meta(list(a = 1)), "valid GenoMeta")
+  expect_error(st_ld_blocks(list(a = 1)), "valid GenoMeta")
   f <- tempfile()
-  expect_error(define_haplotype_blocks(f, f, ld_threshold = 0), "ld_threshold")
+  expect_error(st_ld_blocks_files(f, f, ld_threshold = 0), "ld_threshold")
 })
 
 test_that("B6: no file lands in the working directory; temp dir handling; output_dir", {
@@ -144,14 +113,14 @@ test_that("B6: no file lands in the working directory; temp dir handling; output
   old <- setwd(wd); on.exit(setwd(old), add = TRUE)
   before_tmp <- list.files(tempdir(), pattern = "^hs_st_")
 
-  invisible(define_haplotype_blocks_meta(toy, 0.5, 0, attach = FALSE, verbose = FALSE))
+  invisible(st_ld_blocks(toy, 0.5, 0, attach = FALSE, verbose = FALSE))
   expect_length(list.files(wd, all.files = TRUE, no.. = TRUE), 0L)
   expect_setequal(list.files(tempdir(), pattern = "^hs_st_"), before_tmp)
   expect_identical(normalizePath(getwd()), normalizePath(wd))  # working dir restored
 
   kept <- NULL
   withCallingHandlers(
-    invisible(define_haplotype_blocks_meta(toy, 0.5, 0, attach = FALSE,
+    invisible(st_ld_blocks(toy, 0.5, 0, attach = FALSE,
                                            keep_files = TRUE, verbose = FALSE)),
     message = function(m) {
       txt <- trimws(conditionMessage(m))
@@ -164,7 +133,7 @@ test_that("B6: no file lands in the working directory; temp dir handling; output
   unlink(kept, recursive = TRUE)
 
   od <- file.path(wd, "blocks")
-  out <- suppressMessages(define_haplotype_blocks_meta(toy, 0.5, 0, output_dir = od,
+  out <- suppressMessages(st_ld_blocks(toy, 0.5, 0, output_dir = od,
                                                        prefix = "toy", verbose = FALSE))
   expect_true(all(c("toy_block_info.csv", "toy_block_marker_map.csv") %in% list.files(od)))
 })
@@ -184,12 +153,12 @@ test_that("B7: the file route keeps chromosome names and positions, and agrees w
                paste(toy$map_info$Marker, toy$map_info$Chrom, toy$map_info$Pos,
                      sep = "\t")), mf)
 
-  fr <- suppressMessages(define_haplotype_blocks(gf, mf, 0.5, 0,
+  fr <- suppressMessages(st_ld_blocks_files(gf, mf, 0.5, 0,
                                                  output_dir = file.path(d, "out")))
   expect_setequal(unique(fr$block_marker_map$Chrom), c("1H", "2H", "3H"))
   expect_false(anyNA(fr$block_info$Start))
   expect_false(anyNA(fr$block_info$End))
-  mr <- define_haplotype_blocks_meta(toy, 0.5, 0, attach = FALSE, verbose = FALSE)
+  mr <- st_ld_blocks(toy, 0.5, 0, attach = FALSE, verbose = FALSE)
   expect_identical(unname(partition(fr$block_marker_map)),
                    unname(partition(mr$block_marker_map)))
 })
@@ -209,14 +178,42 @@ test_that("B8: SelectionTools' global dirs — supplied when gone, refused when 
   # gone, as after rm(list = ls()): SelectionTools alone would stop with
   # "object 'st.input.dir' not found"
   suppressWarnings(rm(list = vars, envir = ge))
-  r <- define_haplotype_blocks_meta(toy, 0.5, 0, attach = FALSE, verbose = FALSE)
+  r <- st_ld_blocks(toy, 0.5, 0, attach = FALSE, verbose = FALSE)
   expect_identical(length(unique(r$block_marker_map$Block)), 11L)
   expect_false(any(vapply(vars, exists, logical(1L), envir = ge, inherits = FALSE)))
 
   # set to a directory, as SelectionTools' manual shows: refused, remedy named
   assign("st.input.dir", "input", envir = ge)
   assign("st.output.dir", "", envir = ge)
-  expect_error(define_haplotype_blocks_meta(toy, 0.5, 0, attach = FALSE, verbose = FALSE),
+  expect_error(st_ld_blocks(toy, 0.5, 0, attach = FALSE, verbose = FALSE),
                "st.input.dir <- \"\"", fixed = TRUE)
   expect_identical(get("st.input.dir", envir = ge), "input")   # left as found
+})
+
+test_that("B9: the pre-0.7.10 names warn and return what the new names return", {
+  skip_if_not_installed("SelectionTools")
+  toy <- st_toy()
+  new_r <- st_ld_blocks(toy, 0.5, 0, attach = FALSE, verbose = FALSE)
+  expect_warning(old_r <- define_haplotype_blocks_meta(toy, 0.5, 0, attach = FALSE,
+                                                       verbose = FALSE),
+                 "st_ld_blocks()", class = "deprecatedWarning", fixed = TRUE)
+  expect_identical(old_r, new_r)
+
+  d <- tempfile("st_dep_"); dir.create(d)
+  arr <- toy$geno_arrays
+  cells <- matrix(paste0(arr[, , 1], "/", arr[, , 2]), nrow = dim(arr)[1L],
+                  dimnames = dimnames(arr)[1:2])
+  gf <- file.path(d, "geno.txt"); mf <- file.path(d, "map.txt")
+  writeLines(c(paste(c("m/i", rownames(cells)), collapse = "\t"),
+               paste(colnames(cells), apply(t(cells), 1L, paste, collapse = "\t"),
+                     sep = "\t")), gf)
+  writeLines(c("name\tchrom\tpos",
+               paste(toy$map_info$Marker, toy$map_info$Chrom, toy$map_info$Pos,
+                     sep = "\t")), mf)
+  new_f <- suppressMessages(st_ld_blocks_files(gf, mf, 0.5, 0,
+                                               output_dir = file.path(d, "new")))
+  expect_warning(old_f <- suppressMessages(define_haplotype_blocks(
+                   gf, mf, 0.5, 0, output_dir = file.path(d, "old"))),
+                 "st_ld_blocks_files()", class = "deprecatedWarning", fixed = TRUE)
+  expect_identical(old_f, new_f)
 })

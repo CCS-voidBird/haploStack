@@ -6,7 +6,7 @@
 \alias{haploStack-package}
 \title{haploStack: Haplotype Block Analysis and Stacking Simulation for Genomic Breeding}
 \description{
-A toolkit for haplotype block definition, catalogue construction, and breeding-cycle simulation (haplotype stacking) in diploid crop species. The workflow covers four main stages: (1) genotype format standardisation, (2) LD-based haplotype block definition via SelectionTools, (3) haplotype catalogue construction — per-sample local GEBVs, Manhattan plots, and alignment visualisations — and (4) crossing-design simulation using Genetic Algorithm (GA), Genomic Selection (GS), and Optimal Contribution Selection (OCS) strategies. Designed for the GRDC barley haplotype stacking project but applicable to any biparental or multiparental breeding programme.
+A toolkit for haplotype block definition, catalogue construction, and breeding-cycle simulation (haplotype stacking) in diploid crop species. The workflow covers four main stages: (1) genotype format standardisation, (2) haplotype blocks, from a block map the user supplies (optionally built locally from LD with HapSelect or SelectionTools), (3) haplotype catalogue construction — per-sample local GEBVs, Manhattan plots, and alignment visualisations — and (4) crossing-design simulation using Genetic Algorithm (GA), Genomic Selection (GS), and Optimal Contribution Selection (OCS) strategies. Designed for the GRDC barley haplotype stacking project but applicable to any biparental or multiparental breeding programme.
 }
 \seealso{
 Useful links:

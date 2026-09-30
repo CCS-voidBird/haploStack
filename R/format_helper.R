@@ -2750,6 +2750,17 @@ filter_geno_meta <- function(meta, keep_markers = NULL, keep_samples = NULL,
 #' \code{block_marker_map_info} populated. The original object is not modified.
 #' Any previously stored block data is replaced.
 #'
+#' A block map you already have is the \strong{recommended} way to give
+#' haploStack its blocks, and it needs no LD parameter. Pass it here, or at read
+#' time: \code{\link{read_plink_ped}(block_file =)} or
+#' \code{\link{build_geno_meta}(blocks =)}, which also keeps the FAM. Markers
+#' absent from the map become singleton blocks. Only when no map exists do the
+#' local LD resolvers come in: \code{\link{hapS_ld_blocks}} (HapSelect, the
+#' default) or \code{\link{st_ld_blocks}} (SelectionTools, experimental).
+#'
+#' This function rebuilds the container: it drops \code{marker_effects} and
+#' \code{phenotype} and resets the FAM parents, so attach blocks before those.
+#'
 #' @section Source types:
 #' \describe{
 #'   \item{\code{"block_marker_map"}}{A data.frame with columns
@@ -2787,13 +2798,15 @@ filter_geno_meta <- function(meta, keep_markers = NULL, keep_samples = NULL,
 #' binfo <- data.frame(Chrom = "1", Block = "B1", Start = 1e5, End = 5e5)
 #' meta  <- attach_block_info(meta, binfo, source_type = "block_info")
 #'
-#' # After LD-based block definition
-#' ld_out <- define_haplotype_blocks("geno.st", "map.txt", output_dir = "blocks/")
-#' meta   <- attach_block_info(meta, ld_out$block_marker_map)
+#' # No block map? Build LD blocks locally (a side route) — these attach the
+#' # blocks themselves and keep effects, phenotype and FAM:
+#' meta <- hapS_ld_blocks(meta, ld_threshold = 0.5, tolerance = 3)  # HapSelect
 #' }
 #'
-#' @seealso \code{\link{expand_block_info}}, \code{\link{define_haplotype_blocks}},
-#'   \code{\link{filter_geno_meta}}, \code{\link{new_geno_meta}}
+#' @seealso \code{\link{expand_block_info}}, \code{\link{filter_geno_meta}},
+#'   \code{\link{new_geno_meta}}; when no block map exists,
+#'   \code{\link{hapS_ld_blocks}} (default) or \code{\link{st_ld_blocks}}
+#'   (experimental)
 #'
 #' @export
 attach_block_info <- function(geno_meta,
@@ -2964,8 +2977,9 @@ geno_meta_to_matrix <- function(meta,
 #' codes) — but SelectionTools' own reader (\code{st.read.marker.data}) splits
 #' fields on a tab, a blank or \code{;}, so it reads this file as zero
 #' individuals, and no map file is written. To run SelectionTools' LD blocking
-#' on a \code{GenoMeta}, use \code{\link{define_haplotype_blocks_meta}}, which
-#' writes SelectionTools' own formats itself.
+#' on a \code{GenoMeta}, use \code{\link{st_ld_blocks}}, which writes
+#' SelectionTools' own formats itself (and consider first whether you need LD
+#' blocking: a block map you already have goes to \code{\link{attach_block_info}}).
 #'
 #' @param meta          A valid \code{GenoMeta} list.
 #' @param path          Output file path (without extension for PLINK output;

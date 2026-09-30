@@ -366,18 +366,33 @@ map_raw  <- read.table("my_map.txt", header = TRUE)
 # Step 2: read into a GenoMeta object
 meta <- read_st_genotype("my_genotype.txt", map_path = "my_map.txt")
 
-# Step 3: attach block assignments (from define_haplotype_blocks() or a file)
+# Step 3: attach block assignments from your block map (Chrom, Marker, Block)
 meta <- attach_block_info(meta, block_map_df)
 profile <- geno_meta_views(meta)
 ```
 
-### Using a pre-defined block map file
+### Using a pre-defined block map file (the recommended route)
 
 ```r
 block_map <- fread("my_block_map.txt", header = FALSE)
 colnames(block_map) <- c("Chrom","Marker","Block")
 meta <- build_geno_meta(geno_mat, map_df, blocks = block_map)
 ```
+
+A block map you already have is all haploStack needs; no LD parameter is
+involved, and markers absent from the map become single-marker blocks.
+
+### No block map: build LD blocks locally (a side route)
+
+```r
+meta <- hapS_ld_blocks(meta, ld_threshold = 0.5, tolerance = 3)  # HapSelect (default)
+meta <- st_ld_blocks(meta, ld_threshold = 0.5, tolerance = 0)    # SelectionTools (experimental)
+```
+
+Each resolver is named after its backend and needs that package installed.
+The two do not partition alike at the same settings, so compare block sets only
+within one backend. Both keep the effects, phenotype and pedigree already in the
+container.
 
 ### Multi-trait catalogue
 

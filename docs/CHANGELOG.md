@@ -150,6 +150,12 @@ semantic versioning.
 > `st.input.dir` / `st.output.dir` gone); now supplied for the call, and the
 > assets rebuilt again (see `[0.7.9]` *Added*).
 
+> **Updated 2026-09-30 (evening).** Added `[0.7.10]` — **a block map first; LD
+> blocking is a named side route** (thread #035): `hapS_ld_blocks()` (HapSelect,
+> promoted from the dev bridge, the default resolver), `st_ld_blocks()` /
+> `st_ld_blocks_files()` (SelectionTools, experimental); the 0.7.9 names
+> deprecated.
+
 ## [Unreleased]
 
 _The remaining roadmap items (stacking-simulation rebuild #013, genomicSimulation
@@ -703,6 +709,123 @@ published repo ships:
   form, and the missing `CITATION.cff`. `LICENSE` is untouched — its copyright
   holder is still "University of Queensland", which is a rights statement, not an
   authorship one, and it already matches the published copy byte for byte.
+
+## [0.7.10] - 2026-09-30 — A block map first; LD blocking is a side route, named after its backend
+
+Owner direction of the same day: haploStack's recommended use is **a block map
+the user already has**, given to `read_plink_ped(block_file =)`,
+`build_geno_meta(blocks =)` or `attach_block_info()`, with no LD parameter to
+configure. The LD engines are built-in resolvers for users who really want to
+build blocks locally. HapSelect is the default, SelectionTools the alternative
+("restored, but not stable"). Each gets a function name that cannot be mistaken
+for the main route or for the other engine: `hapS_` / `st_`. Thread
+[#035](project_record/threads/035-ld-block-resolvers.md). 131 → **134
+exports**.
+
+### Added
+- **`hapS_ld_blocks(geno_meta, ld_threshold = 0.5, tolerance = 3L, tol_reset =
+  TRUE, method = "flanking", start = "LD", attach = TRUE, output_dir = NULL,
+  prefix = "hapS_blocks", parallelize = FALSE, verbose = TRUE)`**
+  (`R/blocks_hapselect.R`) — the default local resolver.
+  - **Origin.** It is the LD half of the dev-tree HapSelect bridge (thread
+    #028), promoted into the package. It keeps one chromosome key, the
+    minor-allele dosage, and markers in genomic order (HapSelect reads row order
+    as genomic order), then runs `pairwise_ld()` + `def_blocks()` +
+    `block_obj_to_df()`.
+  - **Same answer as the bridge.** On the workshop subset (GRDC barley 1H + 2H,
+    300 lines, 2 677 markers) its block map, block IDs included, is
+    **identical** to `ready_to_use/workshop_products_0.7.8/`, which the bridge
+    made: 1 425 blocks in 7.8 min.
+  - **The rule is passed.** HapSelect's own defaults are threshold 0.7 /
+    tolerance 1; the resolver defaults to the repo standard, r² ≥ 0.5 /
+    tolerance 3 / `tol_reset`.
+  - **Unplaced markers** are left out, and become singletons on attach.
+  - **Constant-dosage markers.** The "standard deviation is zero" warnings are
+    muffled and the markers counted: 4 518 warnings from 4 markers on that
+    subset.
+  - **Fields kept.** Effects, phenotype and FAM survive the attach.
+  - **Side effects contained.** HapSelect replaces the user's `future` plan
+    when `parallelize = TRUE`, and leaves progressr's handlers option set; both
+    are restored.
+  - HapSelect goes into **Suggests** (`Remotes: wrshf7/HapSelect`); haploStack
+    installs and runs without it.
+- **`st_ld_blocks()`** — `define_haplotype_blocks_meta()` of 0.7.9, renamed
+  and unchanged (defaults 0.5 / tolerance 0), documented as **experimental**.
+- **`st_ld_blocks_files()`** — `define_haplotype_blocks()` of ≤ 0.7.9 (the
+  SelectionTools file route), renamed, moved to `R/blocks_selectiontools.R`,
+  and unchanged.
+- `R/blocks_ld_common.R`: what the resolvers share — rule check, placed
+  markers, the attach / table tail.
+- Tests:
+  - `tests/testthat/test-hapselect-blocks.R`, 45 assertions (H1–H8): planted LD
+    groups at tolerance 0 and 3; fields and chromosome names on attach;
+    tolerance; unplaced markers; rule validation; constant-dosage markers;
+    side effects; agreement with SelectionTools on planted structure;
+  - `test-selectiontools-blocks.R` moved to the new names, plus B9 (4
+    assertions: the old names warn and return identical results);
+  - the toy panels moved to `helper-ld-toy.R`.
+
+### Deprecated
+- `define_haplotype_blocks()` → `st_ld_blocks_files()`, and
+  `define_haplotype_blocks_meta()` → `st_ld_blocks()`. Both still work: each
+  raises a `deprecatedWarning` naming the replacement, then forwards its
+  arguments. The results are identical (B9).
+
+### Documentation
+- `attach_block_info()` says the block map is the recommended route and names
+  the resolvers. Its example no longer calls the SelectionTools file route.
+- README pipeline stage 2: "bring your own block map (recommended)", with the
+  resolvers as the side route (was "Block Definition (requires
+  SelectionTools)"). Also a blocks paragraph, the file map, and dependencies.
+- DESCRIPTION `Description`: blocks "from a block map the user supplies
+  (optionally built locally from LD with HapSelect or SelectionTools)" (was
+  "via SelectionTools").
+- `quick_start` vignette: the block-map route first, then a "no block map"
+  section. `ibd_ibs_signal` vignette updated too.
+- `run_haplotype_catalogue()` / `build_block_location_info()` see-also point at
+  the resolvers.
+
+### Deliverables (`ready_to_use/` — not package code)
+- **Workshop 01c.**
+  - `BLOCK_FILE` set → `BLOCK_METHOD` defaults to `"file"`, the recommended
+    route.
+  - Otherwise `"hapselect"` calls `hapS_ld_blocks()`, which replaces the
+    sourced dev bridge; the partition is the same.
+  - `"selectiontools"` calls `st_ld_blocks()`.
+  - An unknown method now stops.
+  - `HAPSELECT_BRIDGE` is gone from `_paths.R`.
+  - The workshop README gained a "Blocks" section.
+- The template scaffold of the user-level `haplostack` skill does the same.
+
+### Not changed
+- `run_haplotype_catalogue(ld_threshold = 0.5, tolerance = 0)` still stamps
+  those labels on its output file names whatever made the blocks — including an
+  external map. Raised with the owner (INDEX discrepancy 35); not changed here.
+
+### Verified
+- **Suite**, against the **installed** Windows binary built from the tarball:
+  2 752 expectations — **2 739 pass, 0 fail, 0 error**, 12 environmental
+  skips. That is 2 690 from 0.7.9 plus 45 + 4 new.
+- **Fresh install.** The source tarball was installed from source in a fresh
+  R process: 134 exports, kernels live. Both resolvers recover planted LD
+  groups, and `define_haplotype_blocks_meta()` raises `deprecatedWarning`.
+- **Contract smoke test:** 29 PASS / 3 KNOWN (new C13c, C14, C14b), in a
+  throwaway library and in the user's default library, where 0.7.10 is
+  installed.
+- **`hapS_ld_blocks()` against the dev bridge**, on the workshop subset: the
+  block map is identical to `workshop_products_0.7.8/`, IDs included — 1 425
+  blocks, 7.8 min. After attaching, effects, phenotype and FAM are identical to
+  the input.
+- **Workshop, PLINK route**, end to end with the new module 01c: 11.4 min.
+  The counts equal the shipped products: 1 425 blocks, 193 with a gene, 4 155
+  genes, 86 marker–gene co-localisations. `block_genes.tsv` is byte-identical
+  to the shipped file.
+- **Workshop and templates on SIM data:** both complete.
+- **The user-level scaffold.** The SIM demo passes. The `"hapselect"` branch on
+  barley 1H × 100 lines gave 495 blocks in 2.3 min, with 15 all-heterozygous
+  markers flagged and 15 221 warnings muffled.
+- **Assets:** tarball SHA-256 `8e002e99…3391d` (550 516 bytes, 276 files);
+  Windows zip `09bdfb9d…7c860`.
 
 ## [0.7.9] - 2026-09-30 — SelectionTools LD blocks straight from a GenoMeta; a blank line is not a record
 

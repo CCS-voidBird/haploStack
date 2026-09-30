@@ -189,6 +189,6 @@ plot_signal_precision_recall(sig$metrics)
 Markers toward the top-right of the precision-recall plot, coloured for high
 MAF, are the strongest candidate tags of block inheritance. The same flow scales
 to real pedigrees: read genotypes with `read_plink_ped()` (or another
-`read_*()`), define blocks with `define_haplotype_blocks()` /
-`attach_block_info()`, attach the pedigree with `attach_family_history()`, then
+`read_*()`), attach a block map with `attach_block_info()` (or build LD blocks
+locally with `hapS_ld_blocks()`), attach the pedigree with `attach_family_history()`, then
 run `score_marker_signal()`.

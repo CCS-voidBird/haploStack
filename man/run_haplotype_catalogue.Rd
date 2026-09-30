@@ -123,5 +123,5 @@ results <- run_haplotype_catalogue(
 \seealso{
 \code{\link{attach_block_info}},
 \code{\link{compute_profile_localgebv}},
-\code{\link{define_haplotype_blocks}}
+\code{\link{hapS_ld_blocks}} (local LD blocks, when no block map exists)
 }

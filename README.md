@@ -5,6 +5,18 @@
 Developed for the GRDC Barley Phase 2 project at the University of Queensland.
 Generalised for use with any biparental or multiparental diploid breeding programme.
 
+> ### 0.7.10 — a block map first; LD blocking is a side route, named after its backend
+>
+> Owner direction of the same day: haploStack's recommended use is **a block
+> map the user already has**, given to `read_plink_ped(block_file =)`,
+> `build_geno_meta(blocks =)` or `attach_block_info()`, with no LD parameter
+> to configure. The LD engines are built-in resolvers for users who really
+> want to build blocks locally. HapSelect is the default, SelectionTools the
+> alternative ("restored, but not stable"). Each gets a function name that
+> cannot be mistaken for the main route or for the other engine: `hapS_` /
+> `st_`. Thread [#035](project_record/threads/035-ld-block-resolvers.md). 131
+> → **134 exports**.
+>
 > ### 0.7.9 — SelectionTools LD blocks straight from a GenoMeta; a blank line is not a record
 >
 > Two owner requests of the same day. First: check every bridge between a
@@ -168,6 +180,18 @@ copy. Derive the wide allele / block tables on demand with
 [`docs/geno_meta_structure.md`](docs/geno_meta_structure.md) for the full
 element/provenance reference.
 
+**Blocks come from a block map you supply** — `build_geno_meta(blocks =)`,
+`read_plink_ped(block_file =)` or `attach_block_info()` — and need no LD
+parameter. That is the recommended route. Only when no map exists, build LD
+blocks locally with a resolver named after its backend:
+
+- `hapS_ld_blocks()` uses HapSelect and is the default;
+- `st_ld_blocks()` uses SelectionTools and is experimental.
+
+Both keep the container's effects, phenotype and pedigree. They do **not**
+partition alike at the same threshold and tolerance, so compare block sets only
+within one backend.
+
 Steps 3–5 above assume the marker effects are already known. To instead
 **estimate** marker effects and GEBVs from phenotypes, use
 `fit_genomic_prediction(meta, phenotype, model = "rrblup")` (also `"gblup"` /
@@ -185,8 +209,11 @@ into the GenoMeta and on into `compute_profile_localgebv()`.
 │    detect_genotype_encoding()  →  process_genotype()              │
 │    transform_genotype()        →  read_effect_file()              │
 ├────────────────────────────────────────────────────────────────────┤
-│  STAGE 2: Block Definition (requires SelectionTools)               │
-│    define_haplotype_blocks()   →  build_block_location_info()     │
+│  STAGE 2: Blocks — bring your own block map (recommended)          │
+│    read_plink_ped(block_file =) / build_geno_meta(blocks =)        │
+│    attach_block_info()         →  build_block_location_info()     │
+│    no map? local LD resolvers (side route):                        │
+│    hapS_ld_blocks() [HapSelect, default] · st_ld_blocks() [ST, exp.]│
 ├────────────────────────────────────────────────────────────────────┤
 │  STAGE 3: Haplotype Catalogue                                      │
 │    geno_meta_views()           →  filter_geno_meta()              │
@@ -217,7 +244,11 @@ Haplotype_workflow_R/
 │   ├── catalogue_profile.R      create/filter/save/load/recode profile
 │   ├── catalogue_gebv.R         compute_profile_localgebv()
 │   ├── genomic_prediction.R     fit_genomic_prediction() (rrBLUP / BGLR)
-│   ├── catalogue_blockmap.R     define_haplotype_blocks(), build_block_location_info()
+│   ├── catalogue_blockmap.R     build_block_location_info(), expand_block_info()
+│   ├── blocks_ld_common.R       what the local LD resolvers share (a side route)
+│   ├── blocks_hapselect.R       hapS_ld_blocks() — HapSelect, the default resolver
+│   ├── blocks_selectiontools.R  st_ld_blocks(), st_ld_blocks_files() — experimental
+│   ├── blocks_deprecated.R      the old define_haplotype_blocks*() names (warn, forward)
 │   ├── catalogue_viz.R          plot_haplotype_alignment(), Manhattan plots, count plots
 │   ├── catalogue_family.R       trace_haplotype_family()
 │   ├── catalogue_main.R         run_haplotype_catalogue() orchestrator
@@ -322,7 +353,10 @@ testthat::test_file("tests/testthat/test-catalogue.R")
 **Required:** `data.table`, `dplyr`, `ggplot2`, `tidyr`, `reshape2`, `stringr`
 
 **Optional:**
-- `SelectionTools` — LD-based block definition (`define_haplotype_blocks()`)
+- `HapSelect` — local LD blocking when no block map exists (`hapS_ld_blocks()`,
+  the default resolver); GitHub only: `remotes::install_github("wrshf7/HapSelect")`
+- `SelectionTools` — the experimental LD resolver (`st_ld_blocks()`,
+  `st_ld_blocks_files()`)
 - `genomicSimulation` — Linkage-aware crossing simulation (`run_stacking_simulation()`)
 - `rrBLUP` — RR-BLUP / G-BLUP marker-effect & GEBV estimation (`fit_genomic_prediction()`)
 - `BGLR` — Bayesian (BayesC) marker-effect & GEBV estimation (`fit_genomic_prediction()`)
