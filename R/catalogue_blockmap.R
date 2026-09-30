@@ -18,41 +18,63 @@
 #' Wraps SelectionTools LD-block definition functions to produce the block-map
 #' files consumed by \code{\link{run_haplotype_catalogue}}.
 #'
-#' Two output files are always written to \code{output_dir}:
+#' Four files are written to \code{output_dir}, named after the genotype file
+#' and the rule (\code{<tag>} = \code{<geno>_<ld_threshold>_t<tolerance>}):
 #' \describe{
-#'   \item{\code{*.block_info.csv}}{Block coordinate table:
-#'     \code{Chr, Block, Start, End}.}
-#'   \item{\code{*.block_marker_map.csv}}{Canonical marker-level table:
-#'     \code{Chr, Marker, Block}.}
+#'   \item{\code{<tag>_block_info.csv}}{Block coordinate table:
+#'     \code{Chrom, Block, Start, End}.}
+#'   \item{\code{<tag>_block_marker_map.csv}}{Canonical marker-level table:
+#'     \code{Chrom, Marker, Block}.}
+#'   \item{\code{<tag>.ld.txt}}{SelectionTools' block table, as
+#'     \code{st.def.hblocks()} returns it.}
+#'   \item{\code{<tag>.haplotype_map.txt}}{Per-marker haplotype-allele map
+#'     from \code{st.recode.hil()}.}
 #' }
 #'
-#' @param geno_data_file Path to the SelectionTools-format genotype file.
-#' @param geno_map_file  Path to the SelectionTools-format map file
-#'   (columns: name, chr, pos).
-#' @param ld_threshold   Minimum LD (\code{r^2}) to merge adjacent markers.
-#'   Default \code{0.5}.
-#' @param tolerance      Tolerance for \code{st.def.hblocks()}. Default \code{0}.
+#' @param geno_data_file Path to a genotype file in SelectionTools' own matrix
+#'   format (\code{st.read.marker.data(format = "m")}): markers in rows, the
+#'   first row the individual names, fields separated by a tab, a blank or
+#'   \code{;} — **not a comma**, so the CSV that
+#'   \code{write_geno_meta(output_format = "st")} writes is not one. Starting
+#'   from a \code{GenoMeta}, use \code{\link{define_haplotype_blocks_meta}}.
+#' @param geno_map_file  Path to the map, SelectionTools format \code{"mcp"}
+#'   with a header line: columns \code{name, chrom, pos}. SelectionTools keeps
+#'   only the leading integer of a chromosome name; the returned tables take
+#'   \code{Chrom} (e.g. \code{"1H"}) from this file.
+#' @param ld_threshold   Minimum LD (\code{r^2}) to merge adjacent markers; one
+#'   number in \eqn{(0, 1]}. Default \code{0.5}. \code{0} is refused:
+#'   SelectionTools aborts the R session on it.
+#' @param tolerance      Tolerance for \code{st.def.hblocks()}; a whole number
+#'   \eqn{\ge 0}. Default \code{0}.
 #' @param output_dir     Directory where block-map files are written.
 #'
 #' @return A named list with:
 #' \describe{
-#'   \item{\code{block_info}}{data.table: \code{Chr, Block, Start, End}.}
-#'   \item{\code{block_marker_map}}{data.table: \code{Chr, Marker, Block}.}
+#'   \item{\code{block_info}}{data.table: \code{Chrom, Block, Start, End}.}
+#'   \item{\code{block_marker_map}}{data.table: \code{Chrom, Marker, Block}.}
 #' }
 #'
 #' @details
 #' Requires the \pkg{SelectionTools} package. If not installed, an informative
 #' error is raised so the user can supply a pre-computed block map instead.
 #'
+#' SelectionTools runs in a private temporary directory (its side files —
+#' \code{ld}, \code{blocks.hmap}, \code{blocks.hall}, the \code{.srt} map — never
+#' touch the working directory or the input folder) and on the data set
+#' \code{"ld.blocks"}; its \code{"default"} data set is left alone (0.7.9).
+#' SelectionTools' \code{st.input.dir} / \code{st.output.dir} are handled as
+#' \code{\link{define_haplotype_blocks_meta}} describes.
+#'
 #' After calling this function, pass the \code{block_marker_map} element of
 #' the returned list to \code{\link{attach_block_info}} to register the block
 #' assignments in a \code{GenoMeta} object:
 #' \preformatted{
-#'   blocks <- define_haplotype_blocks("geno.csv", "map.csv")
+#'   blocks <- define_haplotype_blocks("geno.txt", "map.txt")
 #'   meta   <- attach_block_info(meta, blocks$block_marker_map)
 #' }
 #'
-#' @seealso \code{\link{attach_block_info}},
+#' @seealso \code{\link{define_haplotype_blocks_meta}} (start from a
+#'   \code{GenoMeta}), \code{\link{attach_block_info}},
 #'   \code{\link{run_haplotype_catalogue}},
 #'   \code{\link{build_block_location_info}}, \code{\link{expand_block_info}}
 #'
@@ -62,43 +84,59 @@ define_haplotype_blocks <- function(geno_data_file,
                                      ld_threshold = 0.5,
                                      tolerance    = 0,
                                      output_dir   = "haplotype") {
+  caller <- "define_haplotype_blocks"
+  .st_check_rule(ld_threshold, tolerance, caller)
+  .st_require(caller)
+  st_dirs <- .st_check_io_dirs(caller)
+  on.exit(.st_drop_io_dirs(st_dirs), add = TRUE)
 
-  if (!requireNamespace("SelectionTools", quietly = TRUE)) {
-    stop(
-      "define_haplotype_blocks requires the SelectionTools package. ",
-      "If you have a pre-computed block map, supply it directly via ",
-      "the 'block_map_file' argument of run_haplotype_catalogue()."
-    )
-  }
-
+  geno_data_file <- normalizePath(geno_data_file, winslash = "/", mustWork = TRUE)
+  geno_map_file  <- normalizePath(geno_map_file,  winslash = "/", mustWork = TRUE)
   if (!dir.exists(output_dir))
     dir.create(output_dir, recursive = TRUE)
+  output_dir <- normalizePath(output_dir, winslash = "/", mustWork = TRUE)
 
   geno_basename <- gsub("\\..*$", "", basename(geno_data_file))
   tag           <- paste0(geno_basename, "_", ld_threshold, "_t", tolerance)
 
-  # Load data into SelectionTools environment
-  SelectionTools::st.read.marker.data(geno_data_file, format = "m")
-  SelectionTools::st.copy.marker.data(source.data.set = "default",
-                                       target.data.set = "ld.blocks")
-  SelectionTools::st.read.map(geno_map_file,
+  # SelectionTools writes side files into the working directory ("ld",
+  # "blocks.hmap", "blocks.hall") and next to the map it reads ("<map>.srt").
+  # Run it in a private directory holding its own copy of the map, so neither
+  # the user's working directory nor the input folder is touched, and two runs
+  # cannot overwrite each other's files.
+  work_dir <- tempfile("hs_st_")
+  dir.create(work_dir, recursive = TRUE)
+  on.exit(unlink(work_dir, recursive = TRUE, force = TRUE), add = TRUE)
+  file.copy(geno_map_file, file.path(work_dir, "hs_map.txt"))
+  old_wd <- setwd(work_dir)
+  on.exit(setwd(old_wd), add = TRUE, after = FALSE)
+
+  # Load straight into the dedicated data set: reading into "default" (and
+  # copying) replaced whatever a SelectionTools session kept there.
+  ds <- "ld.blocks"
+  SelectionTools::st.read.marker.data(geno_data_file, format = "m",
+                                       data.set = ds)
+  SelectionTools::st.read.map("hs_map.txt",
                                m.stretch  = 1,
                                format     = "mcp",
                                skip       = 1,
-                               data.set   = "ld.blocks")
+                               data.set   = ds)
 
   message("Computing pairwise LD (r²)...")
+  # auxfiles = FALSE: st.def.hblocks() reads the LD from SelectionTools'
+  # memory; writing the whole pairwise table to disk only to read it back into
+  # R (and discard it) was the slowest step on a genome-wide panel.
   SelectionTools::st.calc.ld(ld.measure = "r2",
-                              data.set   = "ld.blocks",
-                              auxfiles   = TRUE)
+                              data.set   = ds,
+                              auxfiles   = FALSE)
 
   message("Defining haplotype blocks (LD threshold = ", ld_threshold,
           ", tolerance = ", tolerance, ")...")
   block_info_raw <- SelectionTools::st.def.hblocks(
     ld.threshold = ld_threshold,
     ld.criterion = "flanking",
-    tolerance    = tolerance,
-    data.set     = "ld.blocks"
+    tolerance    = as.integer(tolerance),
+    data.set     = ds
   )
   colnames(block_info_raw)[3L] <- "Block"
 
@@ -108,7 +146,8 @@ define_haplotype_blocks <- function(geno_data_file,
     sep = " ", row.names = FALSE, quote = FALSE)
 
   # Build full haplotype map
-  hrec <- SelectionTools::st.recode.hil(data.set = "ld.blocks")
+  hrec <- SelectionTools::st.recode.hil(data.set = ds)
+  setwd(old_wd)
   hrec$Block_id <- paste0(hrec$Block, "_", hrec$AlleleNr)
   block_info_full <- dplyr::left_join(hrec, block_info_raw, by = "Block")
 
@@ -123,16 +162,22 @@ define_haplotype_blocks <- function(geno_data_file,
   ), by = .(Chrom, Block_id)][, c("Chrom","Marker","MarkerName",
                                    "Block","Block_id","Pos")]
 
-  # Read map file for precise positions
-  map_info <- fread(geno_map_file, header = TRUE)
+  # Read map file for precise positions — and for the chromosome NAMES.
+  # SelectionTools keeps only the leading integer of a chromosome ("1H" -> 1),
+  # so joining its Chrom back to a named map matched nothing and every
+  # position came out NA (up to 0.7.8). Join on Marker alone and take Chrom
+  # from the map. Marker and Chrom are read as text (a numeric-looking marker
+  # ID must stay the string SelectionTools returned); Pos keeps fread's type,
+  # so the written files format positions exactly as before.
+  map_info <- fread(geno_map_file, header = TRUE,
+                    colClasses = list(character = 1:2))
+  map_info <- map_info[, 1:3]
   colnames(map_info) <- c("Marker", "Chrom", "Pos")
-  map_info$Chrom <- as.character(map_info$Chrom)
-  block_info_map$Chrom <- as.character(block_info_map$Chrom)
 
   block_info_map <- dplyr::left_join(
-    block_info_map[, c("Chrom","Marker","MarkerName","Block","Block_id")],
-    map_info, by = c("Marker","Chrom"), relationship = "many-to-many"
-  )
+    block_info_map[, c("Marker","MarkerName","Block","Block_id")],
+    map_info, by = "Marker", relationship = "many-to-many"
+  )[, c("Chrom","Marker","MarkerName","Block","Block_id","Pos")]
 
   fwrite(as.data.table(block_info_map),
          file = file.path(output_dir, paste0(tag, ".haplotype_map.txt")),

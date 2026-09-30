@@ -13,23 +13,32 @@ define_haplotype_blocks(
 )
 }
 \arguments{
-\item{geno_data_file}{Path to the SelectionTools-format genotype file.}
+\item{geno_data_file}{Path to a genotype file in SelectionTools' own matrix
+format (\code{st.read.marker.data(format = "m")}): markers in rows, the
+first row the individual names, fields separated by a tab, a blank or
+\code{;} — \strong{not a comma}, so the CSV that
+\code{write_geno_meta(output_format = "st")} writes is not one. Starting
+from a \code{GenoMeta}, use \code{\link{define_haplotype_blocks_meta}}.}
 
-\item{geno_map_file}{Path to the SelectionTools-format map file
-(columns: name, chr, pos).}
+\item{geno_map_file}{Path to the map, SelectionTools format \code{"mcp"}
+with a header line: columns \code{name, chrom, pos}. SelectionTools keeps
+only the leading integer of a chromosome name; the returned tables take
+\code{Chrom} (e.g. \code{"1H"}) from this file.}
 
-\item{ld_threshold}{Minimum LD (\code{r^2}) to merge adjacent markers.
-Default \code{0.5}.}
+\item{ld_threshold}{Minimum LD (\code{r^2}) to merge adjacent markers; one
+number in \eqn{(0, 1]}. Default \code{0.5}. \code{0} is refused:
+SelectionTools aborts the R session on it.}
 
-\item{tolerance}{Tolerance for \code{st.def.hblocks()}. Default \code{0}.}
+\item{tolerance}{Tolerance for \code{st.def.hblocks()}; a whole number
+\eqn{\ge 0}. Default \code{0}.}
 
 \item{output_dir}{Directory where block-map files are written.}
 }
 \value{
 A named list with:
 \describe{
-\item{\code{block_info}}{data.table: \code{Chr, Block, Start, End}.}
-\item{\code{block_marker_map}}{data.table: \code{Chr, Marker, Block}.}
+\item{\code{block_info}}{data.table: \code{Chrom, Block, Start, End}.}
+\item{\code{block_marker_map}}{data.table: \code{Chrom, Marker, Block}.}
 }
 }
 \description{
@@ -37,27 +46,40 @@ Wraps SelectionTools LD-block definition functions to produce the block-map
 files consumed by \code{\link{run_haplotype_catalogue}}.
 }
 \details{
-Two output files are always written to \code{output_dir}:
+Four files are written to \code{output_dir}, named after the genotype file
+and the rule (\code{<tag>} = \code{<geno>_<ld_threshold>_t<tolerance>}):
 \describe{
-\item{\code{*.block_info.csv}}{Block coordinate table:
-\code{Chr, Block, Start, End}.}
-\item{\code{*.block_marker_map.csv}}{Canonical marker-level table:
-\code{Chr, Marker, Block}.}
+\item{\code{<tag>_block_info.csv}}{Block coordinate table:
+\code{Chrom, Block, Start, End}.}
+\item{\code{<tag>_block_marker_map.csv}}{Canonical marker-level table:
+\code{Chrom, Marker, Block}.}
+\item{\code{<tag>.ld.txt}}{SelectionTools' block table, as
+\code{st.def.hblocks()} returns it.}
+\item{\code{<tag>.haplotype_map.txt}}{Per-marker haplotype-allele map
+from \code{st.recode.hil()}.}
 }
 
 Requires the \pkg{SelectionTools} package. If not installed, an informative
 error is raised so the user can supply a pre-computed block map instead.
 
+SelectionTools runs in a private temporary directory (its side files —
+\code{ld}, \code{blocks.hmap}, \code{blocks.hall}, the \code{.srt} map — never
+touch the working directory or the input folder) and on the data set
+\code{"ld.blocks"}; its \code{"default"} data set is left alone (0.7.9).
+SelectionTools' \code{st.input.dir} / \code{st.output.dir} are handled as
+\code{\link{define_haplotype_blocks_meta}} describes.
+
 After calling this function, pass the \code{block_marker_map} element of
 the returned list to \code{\link{attach_block_info}} to register the block
 assignments in a \code{GenoMeta} object:
 \preformatted{
-  blocks <- define_haplotype_blocks("geno.csv", "map.csv")
+  blocks <- define_haplotype_blocks("geno.txt", "map.txt")
   meta   <- attach_block_info(meta, blocks$block_marker_map)
 }
 }
 \seealso{
-\code{\link{attach_block_info}},
+\code{\link{define_haplotype_blocks_meta}} (start from a
+\code{GenoMeta}), \code{\link{attach_block_info}},
 \code{\link{run_haplotype_catalogue}},
 \code{\link{build_block_location_info}}, \code{\link{expand_block_info}}
 }

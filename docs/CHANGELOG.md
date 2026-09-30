@@ -138,6 +138,18 @@ semantic versioning.
 > intake 03), and a false "ragged file" error on blank lines is recorded as
 > found, not fixed (discrepancy 33, intake 08).
 
+> **Updated 2026-09-30 (second pass).** Added `[0.7.9]` — **SelectionTools LD
+> blocks straight from a GenoMeta** (`define_haplotype_blocks_meta()`, thread
+> #034, discrepancy 34, intake 04; `define_haplotype_blocks()`'s chromosome-name
+> join, rule check and working-directory side files fixed) and **a blank line
+> is not a record** (`.read_table_chr()`, discrepancy 33 closed, intake 08).
+> Third pass, same day: the first 0.7.9 build's blank-line fix refused a file
+> with `,,` lines — which 0.7.8 read — as ragged; reworked and the assets
+> rebuilt before release (see `[0.7.9]` *Fixed*). Fourth pass: the second build
+> failed on a script re-run after `rm(list = ls())` (SelectionTools' global
+> `st.input.dir` / `st.output.dir` gone); now supplied for the call, and the
+> assets rebuilt again (see `[0.7.9]` *Added*).
+
 ## [Unreleased]
 
 _The remaining roadmap items (stacking-simulation rebuild #013, genomicSimulation
@@ -691,6 +703,145 @@ published repo ships:
   form, and the missing `CITATION.cff`. `LICENSE` is untouched — its copyright
   holder is still "University of Queensland", which is a rights statement, not an
   authorship one, and it already matches the published copy byte for byte.
+
+## [0.7.9] - 2026-09-30 — SelectionTools LD blocks straight from a GenoMeta; a blank line is not a record
+
+Two owner requests of the same day. First: check every bridge between a
+`GenoMeta` and SelectionTools, and give LD blocking a GenoMeta-in route that
+takes the r² threshold and tolerance and handles SelectionTools' files itself
+(thread [#034](project_record/threads/034-selectiontools-bridge.md), INDEX
+discrepancy **34**, intake 04). Second: fix the blank-line defect of the shared
+text reader (INDEX discrepancy **33**, intake 08). 130 → **131 exports**.
+
+### Added
+- **`define_haplotype_blocks_meta(geno_meta, ld_threshold = 0.5, tolerance =
+  0, attach = TRUE, output_dir = NULL, prefix = "st_blocks", keep_files =
+  FALSE, verbose = TRUE)`** (`R/blocks_selectiontools.R`). Writes the container
+  into SelectionTools' own formats — matrix `m` (tab-separated, `m/i` header)
+  and map `mcp` (with header) — in a **private temporary directory**, under
+  aliases (`m1…`, `i1…`, integer chromosome keys; each marker's alleles recoded
+  `1, 2, …`, missing `-`), runs `st.calc.ld()` + `st.def.hblocks(ld.criterion =
+  "flanking")` **inside it** on the dedicated data set `"hs_ld_blocks"`, maps
+  the blocks back to the container's marker IDs and chromosome **names**,
+  deletes the directory (`keep_files = TRUE` keeps it), and by default attaches
+  the blocks with `marker_effects`, `phenotype` and `sample_info` carried across
+  (`attach_block_info()` alone drops them — discrepancy 20). Unplaced markers
+  (no finite position > 0, or chromosome `0`/`UN`/`unknown`) are not blocked
+  and become singleton blocks on attach; markers with > 5 allele states are
+  left out with a warning. `ld_threshold` must be in (0, 1]: **0 ends the R
+  session inside SelectionTools**, so it is refused. `attach = FALSE` returns
+  `block_marker_map` + `block_info`; `output_dir` writes the canonical files.
+  Whole GRDC barley panel (1 107 × 9 856): ~72 s — HapSelect's pure-R LD on the
+  same panel is ~14 min.
+  **SelectionTools' directory variables.** SelectionTools resolves file names
+  against `st.input.dir` / `st.output.dir`. It holds neither itself: its
+  `.onLoad` creates both, as `""`, in the **global environment**, and its
+  functions find them there.
+  - Set to a directory, they are refused, and the error names the remedy.
+  - Gone — after `rm(list = ls())` once SelectionTools has loaded, i.e. a
+    script re-run in the same session — every `st.*` reader stops with
+    *"object 'st.input.dir' not found"*. Both routes now supply `""` for the
+    call and remove it again on exit, even on error.
+
+  The second 0.7.9 build treated "gone" as fine and failed there. Caught before
+  release by probing the lookup; the assets were rebuilt.
+- `tests/testthat/test-selectiontools-blocks.R`, 46 assertions (B1–B8): planted
+  LD groups recovered exactly, chromosome names and carried fields on attach,
+  tolerance semantics, unplaced markers, rule validation, no files in the
+  working directory / temp handling / `output_dir`, the file route agreeing
+  with the GenoMeta route on a named-chromosome map, and SelectionTools'
+  directory variables (supplied when gone and removed again; refused when set).
+- `tests/testthat/test-ped-text-read.R` T8–T8d (33 assertions): blank lines;
+  a line of separators kept as in 0.7.8; a file parsed from its lines equal to
+  the same file without its blank line.
+
+### Fixed
+- **`.read_table_chr()`: a blank line is not a record** (discrepancy 33, intake
+  08). The ragged guard counted blank lines out while `fread` returned some of
+  them as rows, so two or more trailing blank lines, or any blank line between
+  records, made a well-formed file — PED, MAP, effect file, DArT report — fail
+  as *"ragged"*. A blank line is now one that is empty or holds only spaces
+  and tabs. `fread(blank.lines.skip = TRUE)` skips an empty line; a line of
+  spaces or tabs it can return as a row of empty fields (`"\t\t"` under
+  `sep = "\t"`), so a file holding one is parsed from its lines with the blank
+  ones taken out (`fread(text = )`), every other file from disk as before. A
+  line of separators such as `,,` (a spreadsheet's CSV export often ends in
+  them) is **not** blank and reads, as up to 0.7.8, as a row of missing values.
+  Data lines are counted by file line number, so the strict-mode error now
+  names the short record's real line. T7's guarantees (no row ever lost, a
+  truncated PED line refused) unchanged. Parity check over 1 157 layouts
+  (blank-line kinds × positions × separators × header × LF/CRLF, separator-only
+  lines, a byte order mark, ragged files, the effect / PED / MAP / DArT-style
+  readers): **every file 0.7.8 read is read identically**; 948 it refused now
+  read, and each equals 0.7.8's reading of the same file with its blank lines
+  removed.
+  *The first 0.7.9 build* (earlier the same day; installed only in throwaway
+  libraries, never published) dropped every all-empty row instead. Its guard
+  still counted a `,,` line as a record, so a file that 0.7.8 read was refused
+  as ragged (18 of the parity cases), as was a CSV holding a `" \t "` line.
+  Caught before release by that parity check; the assets were rebuilt.
+- **`define_haplotype_blocks()`** (the file route):
+  - SelectionTools keeps only the leading integer of a chromosome (`1H` → 1);
+    the function joined its output to the map on `(Marker, Chrom)`, so a named
+    map lost every position (`Start`/`End` `NA`, `Chrom` `"1"`). It now joins
+    on `Marker` and takes `Chrom` from the map. `Marker`/`Chrom` are read as
+    text.
+  - `ld_threshold` / `tolerance` are validated (0 used to abort R).
+  - SelectionTools runs in a private temporary directory holding its own copy
+    of the map: its side files (`ld`, `blocks.hmap`, `blocks.hall`,
+    `<map>.srt`) no longer appear in the working directory or next to the input
+    map. Data are read straight into data set `"ld.blocks"`; the user's
+    `"default"` data set is no longer replaced.
+  - `st.calc.ld(auxfiles = FALSE)`: the pairwise LD table was written to disk
+    and read back into R only to be discarded.
+  - **Outputs unchanged otherwise** — on an integer-chromosome map, 0.7.8 and
+    0.7.9 return identical tables at 4 threshold × tolerance settings and write
+    16 of 16 byte-identical files.
+
+### Documentation
+- `write_geno_meta()`: its `"ST"` output is a CSV carrying SelectionTools'
+  allele *encoding*; SelectionTools' reader cannot read it (tab / blank / `;`
+  separators only) — use `define_haplotype_blocks_meta()`.
+- `define_haplotype_blocks()`: the input formats it actually needs (matrix `m`,
+  not comma-separated; map `name chrom pos` with a header) and the chromosome
+  caveat. The page also had three errors:
+  - it listed two output files where the function writes four (`<tag>` =
+    `<geno>_<thr>_t<tol>`: `_block_info.csv`, `_block_marker_map.csv`, `.ld.txt`,
+    `.haplotype_map.txt`);
+  - it named the column `Chr`, which is `Chrom`;
+  - its example passed `geno.csv`.
+
+### Deliverables (`ready_to_use/` — not package code)
+- Workshop 01c `BLOCK_METHOD = "selectiontools"` calls
+  `define_haplotype_blocks_meta()` (it passed arguments `geno_meta_to_matrix()`
+  does not have — intake 04) and checks for ≥ 0.7.9. Run end to end on the
+  PLINK route (1H + 2H, 300 lines, 0.5 / 3) through module 07: **294 blocks** in
+  4.6 s. HapSelect gives 1 425 on the same subset — the two engines do not
+  partition alike (thread #034 has the comparison); compare block sets only
+  within one engine.
+
+### Verified
+- Suite against the **installed** Windows binary built from the tarball: 2 703
+  expectations — **2 690 pass, 0 fail, 0 error**, 12 environmental skips
+  (2 611 from 0.7.8 + 46 + 33 new). Source tarball installed from source in a
+  fresh R process: 131 exports, kernels live, the new function runs.
+- Contract smoke test: 26 PASS / 3 KNOWN (new C12 blank lines, C12b a CSV
+  ending in `,,` lines, C13 / C13b the SelectionTools route), in a throwaway
+  library and in the user's default library, where 0.7.9 is installed.
+- Both `ready_to_use` pipelines on SIM data (workshop, templates) complete on
+  0.7.9.
+- Assets: tarball SHA-256 `096f13c3…6e741ac` (537 468 bytes, 269 files),
+  Windows zip `fc8ba907…a44be6`. Two superseded builds of the same day were
+  never published: `106243c9…398ab` / `67d7cb2d…17e` (blank-line rework) and
+  `9d247ddc…92363` / `360d9ce2…8f8d9` (SelectionTools directory variables).
+
+### Found, not reproducible
+- `raw/Barley_filtered_genos_blocks.txt`, the external barley block set, was
+  made by SelectionTools (its `b000000` IDs) but **on a different marker set**
+  than `raw/Barley_filtered_genos.*`: 399 of its multi-marker members and 514 of
+  its singleton positions are not in that 9 856-marker map. It cannot validate
+  a blocking of this panel, and its stated settings (0.5 / tolerance 3) cannot
+  be checked from the files here. Thread #034.
 
 ## [0.7.8] - 2026-09-30 — An exported effect file reads back with the defaults
 

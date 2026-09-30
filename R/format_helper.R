@@ -1227,6 +1227,23 @@ is_geno_meta <- function(x, verbose = TRUE) {
 # `strict = FALSE` keeps the lenient read.table(fill = TRUE) behaviour the
 # effect-file and DArT readers always had.
 #
+# BLANK LINES (0.7.9). A blank line — empty, or nothing but spaces and tabs —
+# is not a record, so the guard counts it out, and fread must not return it
+# either. With fread's default blank.lines.skip = FALSE a blank line between
+# records, or a second trailing one, came back as a row, the counts disagreed,
+# and a well-formed file was refused as "ragged" (INDEX discrepancy 33).
+# blank.lines.skip = TRUE handles an EMPTY line. It does not handle a line of
+# spaces or tabs: with sep = "\t" a "\t\t" line is two empty fields to fread,
+# so it comes back as a row. A file holding such a line is therefore parsed
+# from its lines with the blank ones taken out (fread(text = )); every other
+# file is parsed from disk exactly as before.
+#
+# Deliberately NOT blank: a line of separators such as ",,". It holds
+# non-whitespace characters, and up to 0.7.8 it read as a row of missing
+# values; it still does. (Dropping all-empty rows instead would refuse such a
+# file as ragged, or shift the rows a caller indexes — the first 0.7.9 build did
+# the former.)
+#
 # @keywords internal
 .read_table_chr <- function(file, header = FALSE, sep = "auto",
                             strict = FALSE) {
@@ -1236,25 +1253,32 @@ is_geno_meta <- function(x, verbose = TRUE) {
   if (file.size(file) == 0L)
     stop(".read_table_chr: file is empty: ", file)
 
+  # Guard input: the records are counted from the file rather than trusted from
+  # the parser, because a parser that drops rows is exactly what we are
+  # defending against. One pass — a 43 MB PED is expensive to re-read.
+  lines      <- readLines(file, warn = FALSE)
+  blank      <- !nzchar(trimws(lines))
+  if (all(blank))
+    stop(".read_table_chr: no data read from ", file)
+  data_lines <- which(!blank)                          # file line numbers
+  if (isTRUE(header)) data_lines <- data_lines[-1L]
+  expected   <- length(data_lines)
+  # A line of spaces or tabs is parsed from the lines, without it (see BLANK
+  # LINES above); an empty line fread skips itself.
+  text <- if (any(blank & nzchar(lines))) lines[!blank] else NULL
+  rm(lines)
+
   # fill = TRUE always: see the note above. Dropping a row silently is the one
   # failure mode this function must never have.
-  out <- data.table::fread(file, header = header, sep = sep, fill = TRUE,
-                           colClasses = "character", data.table = FALSE,
-                           check.names = FALSE, showProgress = FALSE)
+  rd <- function(...) data.table::fread(..., header = header, sep = sep,
+                                        fill = TRUE, blank.lines.skip = TRUE,
+                                        colClasses = "character",
+                                        data.table = FALSE, check.names = FALSE,
+                                        showProgress = FALSE)
+  out <- if (is.null(text)) rd(file) else rd(text = text)
+  rm(text)
   if (nrow(out) == 0L || ncol(out) == 0L)
     stop(".read_table_chr: no data read from ", file)
-
-  # Guard: no line may go missing. Counted from the file rather than trusted
-  # from the parser, because a parser that drops rows is exactly what we are
-  # defending against. One pass — a 43 MB PED is expensive to re-read.
-  lines    <- readLines(file, warn = FALSE)
-  n_blank  <- sum(!nzchar(trimws(lines)))
-  expected <- length(lines) - n_blank - if (isTRUE(header)) 1L else 0L
-  rm(lines)
-  if (nrow(out) != expected)
-    stop(".read_table_chr: read ", nrow(out), " row(s) from ", file,
-         " but the file holds ", expected, " data line(s). The file is ",
-         "ragged — lines do not all carry the same number of fields.")
 
   # fread returns "" for an empty field; every caller treats an absent value as
   # NA, and no allele vocabulary contains the empty string.
@@ -1263,12 +1287,18 @@ is_geno_meta <- function(x, verbose = TRUE) {
     if (is.character(v)) out[[j]] <- ifelse(nzchar(v), v, NA_character_)
   }
 
+  # Guard: no line may go missing.
+  if (nrow(out) != expected)
+    stop(".read_table_chr: read ", nrow(out), " row(s) from ", file,
+         " but the file holds ", expected, " data line(s). The file is ",
+         "ragged — lines do not all carry the same number of fields.")
+
   if (isTRUE(strict) && ncol(out) > 0L) {
     short <- which(is.na(out[[ncol(out)]]))
     if (length(short) > 0L)
       stop(".read_table_chr: ", length(short), " line(s) in ", file,
            " are shorter than the widest line (first: line ",
-           short[1L] + if (isTRUE(header)) 1L else 0L,
+           data_lines[short[1L]],
            "). A fixed-width genotype file must be rectangular; padding a ",
            "truncated line into missing calls would hide the damage.")
   }
@@ -2928,6 +2958,14 @@ geno_meta_to_matrix <- function(meta,
 #' \code{meta$sample_info} and alleles are space-separated. Otherwise a single
 #' delimited file is written in the preset's orientation, with the row
 #' identifier (marker or sample IDs) in the first column.
+#'
+#' That single file is a **CSV**. For the \code{"ST"} preset it carries
+#' SelectionTools' allele \emph{encoding} (markers in rows, \code{1/4}-style
+#' codes) — but SelectionTools' own reader (\code{st.read.marker.data}) splits
+#' fields on a tab, a blank or \code{;}, so it reads this file as zero
+#' individuals, and no map file is written. To run SelectionTools' LD blocking
+#' on a \code{GenoMeta}, use \code{\link{define_haplotype_blocks_meta}}, which
+#' writes SelectionTools' own formats itself.
 #'
 #' @param meta          A valid \code{GenoMeta} list.
 #' @param path          Output file path (without extension for PLINK output;

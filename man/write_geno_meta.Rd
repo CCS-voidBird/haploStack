@@ -46,6 +46,15 @@ preset embeds FAM columns (\code{fam_cols > 0}, e.g. \code{"PL"}), a PLINK
 delimited file is written in the preset's orientation, with the row
 identifier (marker or sample IDs) in the first column.
 }
+\details{
+That single file is a \strong{CSV}. For the \code{"ST"} preset it carries
+SelectionTools' allele \emph{encoding} (markers in rows, \code{1/4}-style
+codes) — but SelectionTools' own reader (\code{st.read.marker.data}) splits
+fields on a tab, a blank or \code{;}, so it reads this file as zero
+individuals, and no map file is written. To run SelectionTools' LD blocking
+on a \code{GenoMeta}, use \code{\link{define_haplotype_blocks_meta}}, which
+writes SelectionTools' own formats itself.
+}
 \seealso{
 \code{\link{resolve_geno_format}}, \code{\link{geno_meta_to_matrix}}
 }

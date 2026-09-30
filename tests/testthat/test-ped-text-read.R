@@ -293,3 +293,98 @@ test_that("T7c: a well-formed PED with a blank trailing line still reads", {
   expect_equal(dim(meta$geno_arrays), c(2L, 2L, 2L))
   expect_equal(dimnames(meta$geno_arrays)[[1L]], c("S1", "S2"))
 })
+
+# -- T8: a blank line is not a record (0.7.9, INDEX discrepancy 33) ----------
+
+# Up to 0.7.8 the ragged guard counted blank lines out but fread returned some
+# of them as rows, so two trailing blank lines, or one between records, made a
+# well-formed file fail as "ragged". Written byte-exact (writeChar) so each
+# case is exactly the file described.
+
+write_exact <- function(text) {
+  f <- tempfile(fileext = ".txt")
+  con <- file(f, "wb"); writeChar(text, con, eos = NULL); close(con)
+  f
+}
+
+test_that("T8: blank lines anywhere are skipped, never counted as a ragged row", {
+  cases <- c(two_trailing = "M1 A 0.1\nM1 T -0.1\n\n\n",
+             interior     = "M1 A 0.1\n\nM1 T -0.1\n",
+             leading      = "\n\nM1 A 0.1\nM1 T -0.1\n",
+             spaces_only  = "M1 A 0.1\n   \nM1 T -0.1\n",
+             crlf         = "M1 A 0.1\r\nM1 T -0.1\r\n\r\n\r\n",
+             tabs_only    = "M1\tA\t0.1\n\t\t\nM1\tT\t-0.1\n")
+  for (n in names(cases)) {
+    out <- haploStack:::.read_table_chr(write_exact(cases[[n]]))
+    expect_equal(nrow(out), 2L, info = n)
+    expect_equal(out[[1L]], c("M1", "M1"), info = n)
+    expect_equal(out[[3L]], c("0.1", "-0.1"), info = n)
+  }
+  hdr <- haploStack:::.read_table_chr(
+    write_exact("Marker\tAllele\tEffect\n\nM1\tA\t0.1\n\nM1\tT\t-0.1\n\n\n"),
+    header = TRUE)
+  expect_equal(names(hdr), c("Marker", "Allele", "Effect"))
+  expect_equal(nrow(hdr), 2L)
+})
+
+test_that("T8b: the readers built on it accept blank lines; raggedness is still refused", {
+  eff <- read_effect_file(write_exact("M1 A 0.1\n\nM1 T -0.1\n\n\n"))
+  expect_equal(eff$Effect[eff$Allele == "A"], 0.1)
+
+  map <- write_exact("1 M1 0 1000000\n1 M2 0 2000000\n")
+  ped <- write_exact(paste0("F1 S1 0 0 0 -9 A T C G\n\n",
+                            "F2 S2 0 0 0 -9 A A C C\n\n\n"))
+  meta <- suppressMessages(suppressWarnings(read_plink_ped(ped, map)))
+  expect_equal(dim(meta$geno_arrays), c(2L, 2L, 2L))
+
+  # T7's guarantees hold with blank lines around the short record, and the
+  # error names the short record's real line in the file (line 3 here)
+  short <- write_exact("F1 S1 0 0 0 -9 A T C G\n\nF2 S2 0 0 0 -9 A T\n\n")
+  expect_error(haploStack:::.read_table_chr(short, strict = TRUE),
+               "first: line 3")
+  out <- haploStack:::.read_table_chr(short, strict = FALSE)
+  expect_equal(nrow(out), 2L)
+  expect_equal(out[[2L]], c("S1", "S2"))
+})
+
+test_that("T8c: a line of separators is not blank — it reads as a row of NA, as up to 0.7.8", {
+  # A spreadsheet's CSV export often ends in ",," lines. They hold
+  # non-whitespace characters, and up to 0.7.8 each read as a row of missing
+  # values; the first 0.7.9 build dropped them and then refused the file as
+  # ragged. Only spaces and tabs make a line blank.
+  csv <- write_exact("M1,A,0.1\n,,\nM1,T,-0.1\n,,\n,,\n")
+  out <- haploStack:::.read_table_chr(csv, sep = ",")
+  expect_equal(nrow(out), 5L)
+  expect_equal(out[[1L]], c("M1", NA, "M1", NA, NA))
+  expect_equal(which(rowSums(!is.na(out)) == 0L), c(2L, 4L, 5L))
+
+  semi <- write_exact("M1;A;0.1\nM1;T;-0.1\n;;\n")
+  expect_equal(nrow(haploStack:::.read_table_chr(semi)), 3L)
+
+  # blank lines around them are still skipped
+  mixed <- write_exact("M1,A,0.1\n  \n,,\n\t\n\nM1,T,-0.1\n")
+  out2 <- haploStack:::.read_table_chr(mixed, sep = ",")
+  expect_equal(out2[[1L]], c("M1", NA, "M1"))
+
+  eff <- read_effect_file(write_exact(
+    "Marker,Allele,Effect\nM1,A,0.1\nM1,T,-0.1\n,,\n,,\n"))
+  expect_equal(eff$Effect[which(eff$Allele == "A")], 0.1)
+})
+
+test_that("T8d: a file parsed from its lines reads exactly like the file without the blank line", {
+  # A line of spaces or tabs sends the file through fread(text = ); the result
+  # must equal fread on the same file without that line, byte order mark included.
+  bom <- rawToChar(as.raw(c(0xef, 0xbb, 0xbf)))
+  body <- c("Marker,Allele,Effect", "M1,A,0.1", "M1,T,-0.1")
+  with_ws <- write_exact(paste0(bom, body[1], "\n", body[2], "\n \t \n", body[3], "\n"))
+  without <- write_exact(paste0(bom, paste(body, collapse = "\n"), "\n"))
+  expect_identical(haploStack:::.read_table_chr(with_ws, header = TRUE),
+                   haploStack:::.read_table_chr(without, header = TRUE))
+
+  ped <- c("F1 S1 0 0 0 -9 A T C G", "F2 S2 0 0 0 -9 A A C C")
+  expect_identical(
+    haploStack:::.read_table_chr(write_exact(paste0(ped[1], "\n\t\t\n", ped[2], "\n  \n")),
+                                 strict = TRUE),
+    haploStack:::.read_table_chr(write_exact(paste0(paste(ped, collapse = "\n"), "\n")),
+                                 strict = TRUE))
+})

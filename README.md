@@ -5,6 +5,16 @@
 Developed for the GRDC Barley Phase 2 project at the University of Queensland.
 Generalised for use with any biparental or multiparental diploid breeding programme.
 
+> ### 0.7.9 — SelectionTools LD blocks straight from a GenoMeta; a blank line is not a record
+>
+> Two owner requests of the same day. First: check every bridge between a
+> `GenoMeta` and SelectionTools, and give LD blocking a GenoMeta-in route that
+> takes the r² threshold and tolerance and handles SelectionTools' files
+> itself (thread [#034](project_record/threads/034-selectiontools-bridge.md),
+> INDEX discrepancy **34**, intake 04). Second: fix the blank-line defect of
+> the shared text reader (INDEX discrepancy **33**, intake 08). 130 → **131
+> exports**.
+>
 > ### 0.7.8 — an exported effect file reads back with the defaults
 >
 > `export_marker_effects()` writes one **tab-separated file with a header
