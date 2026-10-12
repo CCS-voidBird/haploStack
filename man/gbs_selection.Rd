@@ -15,6 +15,7 @@ gbs_selection(
   penalty_mode = c("dynamic", "fixed"),
   gbs_penalty = -10,
   penalty_scale = 10,
+  penalty_rank_scale = 1,
   gbs_effect_weight = 0,
   select_priority = c("high", "low"),
   ga_control = list(),
@@ -56,6 +57,13 @@ section.}
 
 \item{penalty_scale}{Scale \code{>= 1}: the fixed scale, or the cap of the
 dynamic scale. Preset default \code{10}.}
+
+\item{penalty_rank_scale}{Numeric vector (every element finite and
+\code{>= 0}) of per-rank multipliers of the absent-state penalty
+\code{beta_t} — see the rank-scaled absence penalty section. Default
+\code{1}: identical to the behaviour before 0.7.11. If the first element
+is not \code{1}, a message notes that the blackout penalty itself is
+being rescaled.}
 
 \item{gbs_effect_weight}{Weight in \code{[0, 1]} scaling each state's
 contribution by \code{w_t = 1 + |Effect| * gbs_effect_weight}. Preset
@@ -118,6 +126,28 @@ ploidy))} is whether the pool can supply the target at all. The scale rises
 from the origin's constant for common states to near Kemper's for states
 with a handful of copies, then declines for the near-hopeless, and the same
 pool frequency is penalised more with few parents than with many.
+}
+
+\section{The rank-scaled absence penalty (\code{penalty_rank_scale})}{
+
+Within every block the target states are ranked by \code{TargetFreq}
+descending (effect-free; ties broken by \code{CFreq} descending, then
+\code{Effect} ascending — deterministic, never run-order-dependent), and a
+state of rank \code{r} takes
+\code{beta_t * penalty_rank_scale[min(r, length(penalty_rank_scale))]}
+where it is absent (ranks beyond the vector recycle the last element). The
+multiplier touches the absence penalty \emph{only}: deviations — including
+the push-back on a present minor state drifting past its target — keep full
+strength. The vector is a strategy dial: \code{c(1, 1, 1)} (and the default
+\code{1}) is the current full-penalty regime, an implicit
+diversity-hoarding policy; \code{c(1, 0, 0)} is argmax-flavoured — minor
+absence becomes noise, so minor subtypes may go extinct from the pool,
+which is irreversible across cycles. Intermediate vectors such as
+\code{c(1, 0.01, 0.001)} keep a rank-1 blackout an emergency while demoting
+rank-2 absence to the scale of ordinary frequency work and rank-3 to the
+noise floor. Do not tune this vector with \code{\link{tune_gbs_penalty}}:
+its unweighted D2Ideal score charges full price for every absent minor
+state, so \code{c(1, 1, 1)} wins that grid by definition.
 }
 
 \section{Presets}{

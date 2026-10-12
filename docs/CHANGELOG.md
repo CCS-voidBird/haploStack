@@ -710,6 +710,99 @@ published repo ships:
   holder is still "University of Queensland", which is a rights statement, not an
   authorship one, and it already matches the published copy byte for byte.
 
+## [0.7.11] - 2026-10-12 — A blackout is an emergency; a missing understudy is not
+
+Stage 1 of the GBS multi-subtype core upgrade (thread
+[#036](project_record/threads/036-gbs-multi-subtype.md);
+`dev/UPGRADE_PLAN_gbs_multi_subtype.md`, PRD decision D5, Q26 a–c accepted
+2026-10-09). GBS's metric treated every target state as an independent
+coordinate, so a block whose rank-1 subtype was fixed still fired a full
+absence penalty for its rank-2 twin — picks were spent re-acquiring a +0.03
+understudy while true blackouts waited ("phantom emergencies"). The absence
+penalty now carries a within-block **rank multiplier**. Default off:
+`penalty_rank_scale = 1` is **bit-identical to 0.7.10** (T1 gate across
+method × objective × engine × penalty mode × preset, fixed seeds, plus a
+fixed-seed driver-run equality). No export change — **134 exports**.
+
+### Added
+- **`penalty_rank_scale = 1`** on `gbs_selection()`, `gbs_pair_selection()` and
+  `run_stacking_simulation()` (threaded through the driver's `opts` like
+  `penalty_mode`; **not** preset-backed — `"kemper"` and `"haploStack"` keep
+  their published meaning). A numeric vector of per-rank multipliers of the
+  absent-state penalty `beta_t`:
+  - **Rank** (`R/stacking_gbs.R` `.gbs_rank_scale()`): within every block,
+    states rank by `TargetFreq` descending — effect-free, so a bare sheet
+    works, and it coincides with effect order whenever
+    `construct_ideal_genotype()` made the sheet. Ties: `CFreq` descending,
+    then state key (`Effect`) ascending (Q26.a — deterministic, never
+    run-order-dependent). Ranks beyond the vector recycle the last element
+    (Q26.b): `scale[min(r, length(scale))]`.
+  - **β only.** Applied in `.gbs_need_score()`, `.gbs_set_objective()`,
+    `.gbs_marginal_scores()` and `.pair_scorer_gbs()` (where β enters the
+    loss-weighted `L_t·β_t`, the hard penalty and the candidate-objective D
+    alike). Deviations are untouched: a held minor state at its target has
+    deviation ≈ 0 anyway, and the **unscaled** deviation is what polices
+    overshoot — a rank-2 subtype drifting high is eating rank-1's slots and
+    is pushed back at full strength (PRD D5).
+  - **Dial reading** (documented on `gbs_selection()`): `c(1, 1, 1)` ≡ the
+    current full-penalty regime — an implicit diversity-hoarding policy;
+    `c(1, 0, 0)` ≈ argmax-flavoured; `c(1, 0.01, 0.001)` keeps a rank-1
+    blackout at −10…−100 while a rank-2 absence (−0.1…−1) competes with
+    ordinary frequency work and rank-3 sinks to the noise floor. Composed
+    with `penalty_mode = "dynamic"`, the D4 pathology is neutralised by
+    construction: even full risk×hope escalation ×0.01 is small, and the
+    lost-cause damping (hope = 0 → s_t = 1) survives underneath.
+  - `penalty_rank_scale[1] != 1` is allowed but **messaged** — the rank-1
+    (blackout) penalty itself is being rescaled (Q26.c; `.gbs_check_rank_scale()`).
+  - `tune_gbs_penalty()` documents the **tuning trap**: its unweighted D2Ideal
+    score charges full price for every absent minor state, so the all-ones
+    vector wins that grid by definition — the rank vector is benched on
+    fitness (plan §5), never tuned there (Q26.g).
+- `.gbs_hapn_matrix()` now carries the ideal table's `CFreq` through to
+  `mm$targets` when present — solely the Q26.a tie-break input; pool
+  frequencies are still computed from the supplied pool, never read from
+  `CFreq`.
+- Tests: `tests/testthat/test-gbs-rank-scale.R` (70 assertions, plan gates
+  T1–T7) — T1 default parity across the full option grid and a fixed-seed
+  driver-run equality (the formula oracles of `test-stacking-gbs-modes.R`
+  remain the 0.7.10 behaviour pin); T2 single-target blocks invariant under
+  any vector; T3 `c(1,1,1)` ≡ `c(1)` exactly, selections and scores; T4 rank
+  assignment with ties and recycling, with and without `CFreq`; T5 dynamic-
+  mode composition — a pool-extinct rank-2 state takes `−|gbs_penalty|·1·
+  scale[2]`; T6 pairs parity at both `gbs_pair_level`s; T7 the phantom-
+  emergency fix asserted on need scores directly (rank-1-held/rank-2-absent
+  block at −1 vs blackout at −100 under `c(1, 0.01)`, equal under the old
+  regime); plus Q26.c message and argument validation, including the
+  driver's up-front check.
+
+### Verified
+- Suite **2 809 pass / 0 fail / 12 skips** — the 0.7.10 baseline's 2 739
+  plus exactly the 70 new assertions; the 12 skips unchanged; the 29 warnings
+  are the long-standing ggplot `inherit.aes` set from the catalogue-viz /
+  cluster / plot-order / format files, none from the stacking code.
+- `devtools::run_examples()` exit 0.
+- `ready_to_use/haploStack_0.7.11.tar.gz` (277 files, 545 KB, sources only,
+  SHA-256 `f6b6a8da…`) installed from source into a throwaway library in a
+  fresh R process: version 0.7.11, **134 exports**, Rcpp kernels live;
+  `gbs_selection()` default vs `penalty_rank_scale = 1` identical from the
+  installed build, the `c(1, 0.01)` vector and a `gbs_pair_selection()` run
+  with `c(1, 0.5)` both live.
+- Against the installed build (the analysis skill's loop): suite
+  **2 809 / 0 / 12** again (T1); contract smoke **29 PASS / 3 KNOWN / 0
+  FAIL**, the same set as 0.7.10 (T2); both `ready_to_use` pipelines run end
+  to end on SIM data (T3). The user's default R library was updated to
+  0.7.11 (the 2026-09-30 keep-at-latest standing request).
+
+### Notes
+- Next: the BarleyBench rank-vector sweep (`[1,1,1]` control, `[1,0.1,0.01]`,
+  `[1,0.01,0.001]`, `[1,0,0]`; G2 subset, 3 000 cycles,
+  `ref_arm = OHS_pairs_block10`) decides the extinction-guard question Q26.h
+  from data. Stages 2–4 (effect-free target sheet v2 + `state_id` switch,
+  slots, dominance/genotype pair level) target 0.9.0–0.9.2; 0.8.0 stays
+  reserved for BAN (#033).
+- GitHub mirror not synced, nothing pushed (as for 0.7.10 — the outward step
+  waits for the owner).
+
 ## [0.7.10] - 2026-09-30 — A block map first; LD blocking is a side route, named after its backend
 
 Owner direction of the same day: haploStack's recommended use is **a block map

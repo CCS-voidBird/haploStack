@@ -17,6 +17,7 @@ gbs_pair_selection(
   penalty_mode = c("dynamic", "fixed"),
   gbs_penalty = -10,
   penalty_scale = 10,
+  penalty_rank_scale = 1,
   gbs_effect_weight = 0,
   gbs_pair_level = c("population", "family"),
   pair_freq = NULL,
@@ -67,6 +68,13 @@ section.}
 
 \item{penalty_scale}{Scale \code{>= 1}: the fixed scale, or the cap of the
 dynamic scale. Preset default \code{10}.}
+
+\item{penalty_rank_scale}{Numeric vector (every element finite and
+\code{>= 0}) of per-rank multipliers of the absent-state penalty
+\code{beta_t} — see the rank-scaled absence penalty section. Default
+\code{1}: identical to the behaviour before 0.7.11. If the first element
+is not \code{1}, a message notes that the blackout penalty itself is
+being rescaled.}
 
 \item{gbs_effect_weight}{Weight in \code{[0, 1]} scaling each state's
 contribution by \code{w_t = 1 + |Effect| * gbs_effect_weight}. Preset
@@ -143,7 +151,11 @@ heterozygous family keeps a residual pull toward a second carrier.
 \code{"hard"} applies \code{beta_t} only while the state is absent from the
 pool. The penalty scale itself (\code{penalty_mode = "dynamic"}) is sized with
 \code{top_founders} parents, so it equals the one of the parents-first run
-the pair run is matched to.
+the pair run is matched to. \code{penalty_rank_scale} multiplies
+\code{beta_t} here exactly as in \code{\link{gbs_selection}} (the rank-scaled
+absence penalty section there): wherever \code{beta_t} enters a family's
+term — the loss-weighted \code{L_t * beta_t} as much as the hard penalty —
+it carries the state's within-block rank multiplier.
 }
 
 \section{Candidate space}{

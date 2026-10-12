@@ -15,6 +15,11 @@
 # of the pool frequency (`penalty_mode = "dynamic"`, the default), effect
 # weights, a set objective and a GA engine.
 #
+# 0.7.11 (dev/UPGRADE_PLAN_gbs_multi_subtype.md stage 1, thread #036):
+# `penalty_rank_scale` — a rank-indexed multiplier of the absent-state penalty
+# beta_t only (within-block rank by TargetFreq descending). Default `1` is
+# bit-identical to 0.7.10; deviations are never scaled.
+#
 # Functions:
 #   gbs_selection()            — exported: parent selection toward an ideal genotype
 #   construct_ideal_genotype() — exported: ideal_genotypes(Block, Effect, CFreq, TargetFreq)
@@ -29,6 +34,8 @@
 #   .gbs_ga_set()              — internal: GA over subsets on F(S)
 #   .gbs_penalty_scale()       — internal: s_t (fixed constant or risk × hope curve)
 #   .resolve_gbs_penalty()     — internal: β_t = gbs_penalty · s_t (a vector)
+#   .gbs_rank_scale()          — internal: penalty_rank_scale[r(t)] per target (#036)
+#   .gbs_check_rank_scale()    — internal: validate penalty_rank_scale (Q26.c message)
 #   .gbs_apply_preset()        — internal: preset → argument defaults
 #   .gbs_hapn_matrix()         — internal: HapN[candidates × targets], pop_f, N
 #   .construct_ideal_genotype()— internal: ideal table (custom / argmax / ratio)
@@ -156,8 +163,11 @@
   ploidy    <- max(materials$Haplotype, na.rm = TRUE)
   pop.ref   <- materials[, .(HapN = .N), by = .(Sample, Block, Effect)]
 
-  targets <- as.data.table(ideal_genotypes)[TargetFreq > 0,
-                                            .(Block, Effect, TargetFreq)]
+  # CFreq, when the table carries it, is kept solely as the rank tie-break of
+  # .gbs_rank_scale() (Q26.a) — it is never a frequency input (see pop_f above).
+  ig    <- as.data.table(ideal_genotypes)
+  tcols <- intersect(c("Block", "Effect", "CFreq", "TargetFreq"), names(ig))
+  targets <- ig[TargetFreq > 0, tcols, with = FALSE]
   if (nrow(targets) == 0L)
     stop(".gbs_hapn_matrix: 'ideal_genotypes' has no positive TargetFreq rows.")
   targets[, tkey := .I]
@@ -261,6 +271,55 @@
 
 
 # ---------------------------------------------------------------------------
+# Internal — the rank-indexed penalty scale (#036 stage 1, PRD D5)
+# ---------------------------------------------------------------------------
+
+# Per-target multiplier of the absence penalty beta_t. Within every block the
+# sheet's states are ranked by TargetFreq descending — effect-free, so it works
+# for a bare sheet, and coincides with effect order whenever the builder made
+# the sheet — ties broken by CFreq descending, then state key (Effect)
+# ascending (Q26.a: deterministic, never run-order-dependent). Ranks beyond the
+# vector recycle its last element (Q26.b): scale[min(r, length(scale))]. The
+# scale touches beta ONLY — deviations are never scaled, because a held minor
+# state at its target has deviation ~ 0 anyway and the unscaled deviation is
+# what polices overshoot (a rank-2 state drifting high is eating rank-1's
+# slots and must be pushed back at full strength).
+.gbs_rank_scale <- function(targets, penalty_rank_scale = 1) {
+  penalty_rank_scale <- as.numeric(penalty_rank_scale)
+  # Length 1 (any value): every rank takes the same multiplier — no ranking
+  # needed, and the default `1` path adds no work to a 0.7.10-identical call.
+  if (length(penalty_rank_scale) == 1L)
+    return(rep(penalty_rank_scale, nrow(targets)))
+  rk <- data.table(row  = seq_len(nrow(targets)),
+                   blk  = targets$Block,
+                   tf   = targets$TargetFreq,
+                   cf   = if ("CFreq" %in% names(targets)) targets$CFreq
+                          else rep(0, nrow(targets)),
+                   skey = targets$Effect)
+  data.table::setorder(rk, blk, -tf, -cf, skey, na.last = TRUE)
+  rk[, r := seq_len(.N), by = blk]
+  rank <- integer(nrow(targets))
+  rank[rk$row] <- rk$r
+  penalty_rank_scale[pmin(rank, length(penalty_rank_scale))]
+}
+
+# penalty_rank_scale validation, shared by gbs_selection(), gbs_pair_selection()
+# and the driver. Q26.c: a first element != 1 is allowed — the rank-1
+# ("blackout") penalty itself is then rescaled — but messaged, never silent.
+.gbs_check_rank_scale <- function(penalty_rank_scale) {
+  if (!is.numeric(penalty_rank_scale) || length(penalty_rank_scale) < 1L ||
+      !all(is.finite(penalty_rank_scale)) || any(penalty_rank_scale < 0))
+    stop("'penalty_rank_scale' must be a numeric vector with every element ",
+         "finite and >= 0 (per-rank multipliers of the absent-state penalty).")
+  if (penalty_rank_scale[1L] != 1)
+    message("penalty_rank_scale[1] = ", format(penalty_rank_scale[1L]),
+            " (not 1): the rank-1 (blackout) absence penalty itself is being ",
+            "rescaled.")
+  invisible(TRUE)
+}
+
+
+# ---------------------------------------------------------------------------
 # Internal — presets
 # ---------------------------------------------------------------------------
 
@@ -303,6 +362,9 @@
        tf      = tf,
        w       = 1 + abs(mm$targets$Effect) * spec$gbs_effect_weight,
        beta    = beta,
+       # Rank multiplier of beta (#036 stage 1); a spec without the knob (e.g.
+       # a bare preset) falls back to the bit-identical default of 1.
+       rscale  = .gbs_rank_scale(mm$targets, spec$penalty_rank_scale %||% 1),
        denom   = n_parents * mm$ploidy,     # SelFreq projected to the final set size
        method  = gbs_method)
 }
@@ -313,13 +375,14 @@
 .gbs_need_score <- function(ctx, selfreq) {
   D <- ifelse(selfreq > 0,
               .gbs_deviation(pmax(selfreq, 0), ctx$tf, ctx$method),
-              ctx$beta)
+              ctx$beta * ctx$rscale)
   as.vector(ctx$HapN %*% (D * ctx$w))
 }
 
 # Set objective F(S) for the selected-set frequency vector `p` (maximise).
 .gbs_set_objective <- function(ctx, p) {
-  term <- ifelse(p > 0, .gbs_set_term(pmax(p, 0), ctx$tf, ctx$method), ctx$beta)
+  term <- ifelse(p > 0, .gbs_set_term(pmax(p, 0), ctx$tf, ctx$method),
+                 ctx$beta * ctx$rscale)
   sum(ctx$w * term)
 }
 
@@ -331,7 +394,7 @@
   Tn <- ncol(ctx$HapN)
   P    <- ctx$HapN / ctx$denom + matrix(selfreq,  N, Tn, byrow = TRUE)
   TF   <- matrix(ctx$tf,   N, Tn, byrow = TRUE)
-  BETA <- matrix(ctx$beta, N, Tn, byrow = TRUE)
+  BETA <- matrix(ctx$beta * ctx$rscale, N, Tn, byrow = TRUE)
   term <- ifelse(P > 0, .gbs_set_term(pmax(P, 0), TF, ctx$method), BETA)
   F_new <- as.vector(term %*% ctx$w)
   -(F_new - F_S)
@@ -463,6 +526,26 @@
 #' with a handful of copies, then declines for the near-hopeless, and the same
 #' pool frequency is penalised more with few parents than with many.
 #'
+#' @section The rank-scaled absence penalty (\code{penalty_rank_scale}):
+#' Within every block the target states are ranked by \code{TargetFreq}
+#' descending (effect-free; ties broken by \code{CFreq} descending, then
+#' \code{Effect} ascending — deterministic, never run-order-dependent), and a
+#' state of rank \code{r} takes
+#' \code{beta_t * penalty_rank_scale[min(r, length(penalty_rank_scale))]}
+#' where it is absent (ranks beyond the vector recycle the last element). The
+#' multiplier touches the absence penalty \emph{only}: deviations — including
+#' the push-back on a present minor state drifting past its target — keep full
+#' strength. The vector is a strategy dial: \code{c(1, 1, 1)} (and the default
+#' \code{1}) is the current full-penalty regime, an implicit
+#' diversity-hoarding policy; \code{c(1, 0, 0)} is argmax-flavoured — minor
+#' absence becomes noise, so minor subtypes may go extinct from the pool,
+#' which is irreversible across cycles. Intermediate vectors such as
+#' \code{c(1, 0.01, 0.001)} keep a rank-1 blackout an emergency while demoting
+#' rank-2 absence to the scale of ordinary frequency work and rank-3 to the
+#' noise floor. Do not tune this vector with \code{\link{tune_gbs_penalty}}:
+#' its unweighted D2Ideal score charges full price for every absent minor
+#' state, so \code{c(1, 1, 1)} wins that grid by definition.
+#'
 #' @section Presets:
 #' \code{gbs_preset = "kemper"} runs the published method: \code{"candidate"}
 #' objective, \code{"greedy"} engine, \code{penalty_mode = "fixed"},
@@ -496,6 +579,12 @@
 #' @param gbs_penalty Base penalty \code{<= 0}. Preset default \code{-10}.
 #' @param penalty_scale Scale \code{>= 1}: the fixed scale, or the cap of the
 #'   dynamic scale. Preset default \code{10}.
+#' @param penalty_rank_scale Numeric vector (every element finite and
+#'   \code{>= 0}) of per-rank multipliers of the absent-state penalty
+#'   \code{beta_t} — see the rank-scaled absence penalty section. Default
+#'   \code{1}: identical to the behaviour before 0.7.11. If the first element
+#'   is not \code{1}, a message notes that the blackout penalty itself is
+#'   being rescaled.
 #' @param gbs_effect_weight Weight in \code{[0, 1]} scaling each state's
 #'   contribution by \code{w_t = 1 + |Effect| * gbs_effect_weight}. Preset
 #'   default \code{0} (ignore effect magnitude).
@@ -527,6 +616,7 @@ gbs_selection <- function(localgebv,
                           penalty_mode      = c("dynamic", "fixed"),
                           gbs_penalty       = -10,
                           penalty_scale     = 10,
+                          penalty_rank_scale = 1,
                           gbs_effect_weight = 0,
                           select_priority   = c("high", "low"),
                           ga_control        = list(),
@@ -544,6 +634,10 @@ gbs_selection <- function(localgebv,
     penalty_scale     = if (missing(penalty_scale))     NULL else penalty_scale,
     gbs_effect_weight = if (missing(gbs_effect_weight)) NULL else gbs_effect_weight))
   .gbs_check_penalty_args(spec$gbs_penalty, spec$penalty_mode, spec$penalty_scale)
+  # Not preset-backed (presets keep their published meaning; the knob defaults
+  # off in both) — set on the spec directly after validation.
+  .gbs_check_rank_scale(penalty_rank_scale)
+  spec$penalty_rank_scale <- penalty_rank_scale
   if (spec$gbs_engine == "GA" && spec$gbs_objective != "set")
     stop("gbs_selection: gbs_engine = \"GA\" optimises a set objective — pass ",
          "gbs_objective = \"set\".")
@@ -653,6 +747,12 @@ construct_ideal_genotype <- function(localgebv,
 #' (\code{\link{.distance_to_ideal}}, lower is better). Scores are averaged over
 #' \code{n_rep} candidate-pool subsamples to avoid overfitting a single
 #' realisation.
+#'
+#' Do \emph{not} grid \code{penalty_rank_scale} here (it would pass through
+#' \code{...}): the unweighted D2Ideal score charges full price for every
+#' absent minor state, so the all-ones vector wins that comparison by
+#' definition. The rank vector is assessed on a fitness benchmark, not tuned
+#' against D2Ideal.
 #'
 #' @param localgebv Haplotype-level local GEBV (see \code{\link{gbs_selection}}).
 #' @param ideal_genotypes Target table (see \code{\link{gbs_selection}}); built

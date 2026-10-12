@@ -5,6 +5,20 @@
 Developed for the GRDC Barley Phase 2 project at the University of Queensland.
 Generalised for use with any biparental or multiparental diploid breeding programme.
 
+> ### 0.7.11 — a blackout is an emergency; a missing understudy is not
+>
+> Stage 1 of the GBS multi-subtype core upgrade (thread
+> [#036](project_record/threads/036-gbs-multi-subtype.md);
+> `dev/UPGRADE_PLAN_gbs_multi_subtype.md`, PRD decision D5, Q26 a–c accepted
+> 2026-10-09). GBS's metric treated every target state as an independent
+> coordinate, so a block whose rank-1 subtype was fixed still fired a full
+> absence penalty for its rank-2 twin — picks were spent re-acquiring a +0.03
+> understudy while true blackouts waited ("phantom emergencies"). The absence
+> penalty now carries a within-block **rank multiplier**. Default off:
+> `penalty_rank_scale = 1` is **bit-identical to 0.7.10** (T1 gate across
+> method × objective × engine × penalty mode × preset, fixed seeds, plus a
+> fixed-seed driver-run equality). No export change — **134 exports**.
+>
 > ### 0.7.10 — a block map first; LD blocking is a side route, named after its backend
 >
 > Owner direction of the same day: haploStack's recommended use is **a block

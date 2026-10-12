@@ -62,6 +62,13 @@ resulting parent set by its distance to the ideal genotype
 \code{n_rep} candidate-pool subsamples to avoid overfitting a single
 realisation.
 }
+\details{
+Do \emph{not} grid \code{penalty_rank_scale} here (it would pass through
+\code{...}): the unweighted D2Ideal score charges full price for every
+absent minor state, so the all-ones vector wins that comparison by
+definition. The rank vector is assessed on a fitness benchmark, not tuned
+against D2Ideal.
+}
 \seealso{
 \code{\link{gbs_selection}}
 }

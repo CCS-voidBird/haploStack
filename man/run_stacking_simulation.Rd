@@ -38,6 +38,7 @@ run_stacking_simulation(
   penalty_mode = NULL,
   gbs_penalty = NULL,
   penalty_scale = NULL,
+  penalty_rank_scale = 1,
   gbs_effect_weight = NULL,
   ideal_scope = c("founder", "cycle"),
   select_priority = c("high", "low"),
@@ -171,6 +172,11 @@ the preset value \code{-10}.}
 
 \item{penalty_scale}{GBS penalty scale or cap (\code{>= 1}); \code{NULL}
 (default) takes the preset value \code{10}.}
+
+\item{penalty_rank_scale}{GBS per-rank multipliers of the absent-state
+penalty (not preset-backed; default \code{1} = the behaviour before
+0.7.11). See the rank-scaled absence penalty section of
+\code{\link{gbs_selection}}.}
 
 \item{gbs_effect_weight}{GBS effect-magnitude weight; \code{NULL} (default)
 takes the preset value \code{0}.}

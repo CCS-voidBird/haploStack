@@ -361,7 +361,10 @@ print.pair_selection <- function(x, n = 10L, ...) {
   N       <- nrow(HapN)
   Tn      <- ncol(HapN)
   samples <- ctx$samples
-  w  <- ctx$w; tf <- ctx$tf; beta <- ctx$beta; method <- ctx$method
+  # beta enters this scorer only as the absence penalty (term_of()'s B,
+  # F_of_state(), the candidate-objective D), so the rank multiplier (#036
+  # stage 1) is applied once here; rscale = 1 is the bit-identical default.
+  w  <- ctx$w; tf <- ctx$tf; beta <- ctx$beta * ctx$rscale; method <- ctx$method
   sgn     <- if (select_priority == "high") 1 else -1
   F_final <- if (identical(budget$pair_budget, "families")) budget$n_families
              else budget$n_families_max
@@ -636,7 +639,11 @@ ohs_pair_selection <- function(localgebv,
 #' \code{"hard"} applies \code{beta_t} only while the state is absent from the
 #' pool. The penalty scale itself (\code{penalty_mode = "dynamic"}) is sized with
 #' \code{top_founders} parents, so it equals the one of the parents-first run
-#' the pair run is matched to.
+#' the pair run is matched to. \code{penalty_rank_scale} multiplies
+#' \code{beta_t} here exactly as in \code{\link{gbs_selection}} (the rank-scaled
+#' absence penalty section there): wherever \code{beta_t} enters a family's
+#' term — the loss-weighted \code{L_t * beta_t} as much as the hard penalty —
+#' it carries the state's within-block rank multiplier.
 #'
 #' @section Candidate space:
 #' \code{pair_pool = "shortlist"} (default) scores, at every step, the
@@ -682,6 +689,7 @@ gbs_pair_selection <- function(localgebv,
                                penalty_mode      = c("dynamic", "fixed"),
                                gbs_penalty       = -10,
                                penalty_scale     = 10,
+                               penalty_rank_scale = 1,
                                gbs_effect_weight = 0,
                                gbs_pair_level    = c("population", "family"),
                                pair_freq         = NULL,
@@ -705,6 +713,9 @@ gbs_pair_selection <- function(localgebv,
     penalty_scale     = if (missing(penalty_scale))     NULL else penalty_scale,
     gbs_effect_weight = if (missing(gbs_effect_weight)) NULL else gbs_effect_weight))
   .gbs_check_penalty_args(spec$gbs_penalty, spec$penalty_mode, spec$penalty_scale)
+  # Not preset-backed (#036 stage 1); validated then set on the spec directly.
+  .gbs_check_rank_scale(penalty_rank_scale)
+  spec$penalty_rank_scale <- penalty_rank_scale
 
   budget <- pair_selection_budget(top_founders, pair_budget, allow_selfing)
   if (is.null(ideal_genotypes))

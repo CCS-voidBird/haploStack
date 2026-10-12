@@ -138,6 +138,7 @@
                         penalty_mode = opts$penalty_mode,
                         gbs_penalty = opts$gbs_penalty,
                         penalty_scale = opts$penalty_scale,
+                        penalty_rank_scale = opts$penalty_rank_scale %||% 1,
                         gbs_effect_weight = opts$gbs_effect_weight,
                         select_priority = opts$select_priority,
                         seed = opts$seed),
@@ -239,6 +240,7 @@
                              penalty_mode = opts$penalty_mode,
                              gbs_penalty = opts$gbs_penalty,
                              penalty_scale = opts$penalty_scale,
+                             penalty_rank_scale = opts$penalty_rank_scale %||% 1,
                              gbs_effect_weight = opts$gbs_effect_weight,
                              gbs_pair_level = opts$gbs_pair_level,
                              pair_freq = opts$pair_freq,
@@ -755,6 +757,10 @@
 #'   the preset value \code{-10}.
 #' @param penalty_scale GBS penalty scale or cap (\code{>= 1}); \code{NULL}
 #'   (default) takes the preset value \code{10}.
+#' @param penalty_rank_scale GBS per-rank multipliers of the absent-state
+#'   penalty (not preset-backed; default \code{1} = the behaviour before
+#'   0.7.11). See the rank-scaled absence penalty section of
+#'   \code{\link{gbs_selection}}.
 #' @param gbs_effect_weight GBS effect-magnitude weight; \code{NULL} (default)
 #'   takes the preset value \code{0}.
 #' @param ideal_scope \code{"founder"} (default) builds the ideal genotype once
@@ -874,6 +880,7 @@ run_stacking_simulation <- function(
   penalty_mode        = NULL,
   gbs_penalty         = NULL,
   penalty_scale       = NULL,
+  penalty_rank_scale  = 1,
   gbs_effect_weight   = NULL,
   ideal_scope         = c("founder", "cycle"),
   select_priority     = c("high", "low"),
@@ -973,6 +980,9 @@ run_stacking_simulation <- function(
     gbs_effect_weight = gbs_effect_weight))
   .gbs_check_penalty_args(gbs_spec$gbs_penalty, gbs_spec$penalty_mode,
                           gbs_spec$penalty_scale)
+  # Not preset-backed (#036 stage 1): validated up front so a bad vector fails
+  # before anything runs, then carried in opts for the per-cycle GBS calls.
+  .gbs_check_rank_scale(penalty_rank_scale)
   if (gbs_spec$gbs_engine == "GA" && gbs_spec$gbs_objective != "set")
     stop("run_stacking_simulation: gbs_engine = \"GA\" requires ",
          "gbs_objective = \"set\".")
@@ -1036,6 +1046,7 @@ run_stacking_simulation <- function(
     penalty_mode      = gbs_spec$penalty_mode,
     gbs_penalty       = gbs_spec$gbs_penalty,
     penalty_scale     = gbs_spec$penalty_scale,
+    penalty_rank_scale = penalty_rank_scale,
     gbs_effect_weight = gbs_spec$gbs_effect_weight,
     ideal_scope       = ideal_scope,
     founder_ideal     = NULL,          # filled below once the founder ideal exists
