@@ -710,6 +710,101 @@ published repo ships:
   holder is still "University of Queensland", which is a rights statement, not an
   authorship one, and it already matches the published copy byte for byte.
 
+## [0.8.0] - 2026-10-19 — Which genes sit in each block, without leaving R
+
+BAN stages 1–3 + 5 (thread
+[#033](project_record/threads/033-block-annotation-native.md);
+`dev/PRD_block_annotation_r_native.md`, Q25 a–p accepted 2026-10-19). The
+offline annotation route — a local GFF3, optionally an Ensembl xref dump,
+optionally a QTL table, against the container's own block spans — no longer
+crosses the Python boundary: it is three `data.table::foverlaps()` passes on
+tables the `GenoMeta` already holds. The Ensembl REST route and the Python
+figures stay in `block_annotation` (the R plotting phase is 0.8.1, Q25.n/o/p).
+
+### Added
+
+- **Five exports (134 → 139)**, all table producers — no plotting in the
+  annotation module (owner clarification 2026-10-19):
+  - `read_gff3_genes(path, feature_type, chr_map)` — gene rows of a (gzipped)
+    GFF3; `##FASTA` tail ended, `gene_biotype=`/`gene_id=`/`gene_name=` NCBI
+    synonyms accepted, IDs kept as the file spells them (`gene:` prefix
+    included), no attribute required but the coordinates (`R/annotation_read.R`).
+  - `read_gene_xrefs(path)` — an Ensembl Plants xref dump collapsed to one row
+    per gene, replicating `load_gene_xrefs()` exactly: GO and
+    INTERPRO/INTERPROSCAN as in-order de-duplicated `ID:description` joins,
+    `"LOC" + xref_id` symbol from NCBI GENE, description priority Swiss-Prot >
+    TrEMBL > NCBI GENE > RFAM > tRNAscan-SE, no-InterPro warning (Q25.g).
+  - `compute_block_annotation(meta, genes, xrefs, qtl, chr_map, flank_bp,
+    strip_prefix, browser_base)` — object in, object out: per-block gene (and
+    QTL) overlap, the (block, gene) record table, and the (marker, gene) pair
+    table with the **marker-in-its-own-block gate** (`R/annotation_compute.R`).
+    1-based inclusive overlap on both sides, identical to the Python route.
+    `chr_map` is the only chromosome mapping — explicit, no species table — and
+    a panel-wide zero-overlap prints both vocabularies side by side (Q25.e).
+    Gene ids stored as spelled; the `gene:` prefix is stripped **only at the
+    xref join** (Q25.f/g). `browser_base` builds the Ensembl browser URLs the
+    Python species config built (explicit, same format).
+  - `attach_block_annotation(meta, annotation)` — stores the three tables as
+    the optional container element `meta$annotation` (plain data.frames) +
+    `metadata$annotation` provenance (inputs, counts, `chr_map`, `flank_bp`,
+    date, version); refuses an annotation whose blocks or markers are not the
+    container's (Q25.a).
+  - `export_block_annotation(x, output_dir, prefix)` — the Python step files
+    (`step1_block_coordinates`, `step1_block_marker_map`,
+    `step3_local_annotation`, `step3_local_annotation_records`,
+    `step4_deep_annotation`), **line-identical to block_annotation 0.3.0 at
+    `flank_bp = 0`** (Q25.c).
+- **`flank_bp` matching threshold, default 10 000 bp** (Q25.d-iv, owner
+  insertion 2026-10-19): pads every block for the gene overlap and the marker
+  gate; the reported spans are never padded. The default **deliberately
+  diverges from the Python route** (no padding there): parity is defined at
+  `flank_bp = 0`, which the golden test pins, and exporting a non-zero flank
+  messages the difference. The 10 kb constant (`.HS_ANNOT_DEFAULT_BP`) is
+  shared with the 0.8.1 overlay's `match_bp`.
+- **Carry-forward** (Q25.i): `filter_geno_meta()` prunes the stored annotation
+  to the surviving blocks and markers; `attach_block_info()` **drops it with a
+  message** (new blocks invalidate every overlap);
+  `attach_phenotype()` / `attach_signal_markers()` / `recode_geno_meta()` and
+  the simulation's offspring builders (`.cross_block()`,
+  `.stk_rename_generation()`) keep it. `is_geno_meta()` validates a stored
+  annotation's keys against the container when one is present.
+- **Tests** (+77 assertions, suite 2 809 → 2 886 / 0 fail / 12 skips):
+  `test-block-annotation.R` (readers incl. gz + `##FASTA` + NCBI synonyms,
+  xref collapse rules, flank monotonicity, the marker–block gate on a
+  straddling gene, vocabulary warning + `chr_map`, QTL counts, xref join on
+  the stripped id, pos-unit refusal, attach/validate, export schema +
+  flank message, all carry-forward rows, `.rds` round-trip `identical()`);
+  `test-block-annotation-parity.R` — the **golden parity gate**: at
+  `flank_bp = 0` the five exported files are `identical()` line-for-line to
+  the Python reference run (`ready_to_use/workshop_products_0.7.7/
+  07_annotation/`: 1 774 blocks / 228 with ≥ 1 gene / 3 111 records / 86
+  pairs / 70 unique genes), browser URLs included. The reference inputs live
+  outside the package, so the test skip-gates on their presence (a deviation
+  from the PRD's carved-fixture plan, recorded in thread #033).
+
+### Verified
+
+- Full suite 2 886 pass / 0 fail / 12 skips against the dev tree; parity
+  counts + byte-level step3/step4 re-verified from the installed
+  `ready_to_use/haploStack_0.8.0.tar.gz` in a throwaway library.
+- Test drive on the simulated panel `data/SIM/.../SIM_barley_MorexV3_500x10K`
+  (400 DH × 10 000 markers, 3 856 HapSelect blocks, real MorexV3 coordinates)
+  against the real MorexV3 gene models + the simulation's 352 ground-truth QTL
+  points: flank 0 → 1 373 blocks with ≥ 1 gene (35.6 %), 14 678 records,
+  423 pairs, 321 QTL-hit blocks; flank 10 kb → 1 915 (49.7 %), 15 763,
+  440, 328 — counts monotone, 21 s end-to-end including the 35 826-gene GFF3
+  read. Products in `data/SIM/.../haplostack_annotation/`.
+
+### Deferred (still #033)
+
+- Stage 4's workshop `ANNOTATION_ENGINE` toggle and bridge-doc §0; an
+  `haploStack_io_reference_0.8.0.md`. The `geno_meta_structure.md` element +
+  carry-forward rows shipped in this pass.
+- Stage 6 (0.8.1): the catalogue-side viz — `standardize_marker_annotations()`
+  / `meta$annotation$custom`, `annotations =` overlays, `plot_meta_circos()`
+  + track constructors, `theme_hs_journal()` + `save_journal_figure()` per
+  `dev/figure_standards_nature.md`.
+
 ## [0.7.11] - 2026-10-12 — A blackout is an emergency; a missing understudy is not
 
 Stage 1 of the GBS multi-subtype core upgrade (thread

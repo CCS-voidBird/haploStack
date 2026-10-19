@@ -152,7 +152,7 @@ attach_phenotype <- function(geno_meta, phenotype, traits = NULL) {
 
   # .standardise_phenotype() (via new_geno_meta) performs the drop/NA-fill/reorder
   # and warns; rebuild so the entire object is revalidated.
-  new_geno_meta(
+  out <- new_geno_meta(
     geno_arrays           = geno_meta$geno_arrays,
     map_info              = geno_meta$map_info,
     block_info            = geno_meta$block_info,
@@ -162,6 +162,9 @@ attach_phenotype <- function(geno_meta, phenotype, traits = NULL) {
     marker_effects        = geno_meta$marker_effects,
     phenotype             = phenotype
   )
+  # Blocks are unchanged, so a stored block annotation stays valid (#033).
+  out$annotation <- geno_meta$annotation
+  out
 }
 
 

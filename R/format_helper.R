@@ -1155,6 +1155,36 @@ is_geno_meta <- function(x, verbose = TRUE) {
                          if (length(bad_p) > 5L) " ..." else "", ".")))
   }
 
+  # annotation: optional (#033); when present, every annotated Block must exist
+  # in the container's block vocabulary and every Marker in map_info — a stale
+  # annotation pointing at departed blocks is exactly the defect Q25.i's
+  # carry-forward rules exist to prevent.
+  if ("annotation" %in% names(x) && !is.null(x$annotation)) {
+    ann <- x$annotation
+    if (!is.list(ann) ||
+        !all(c("blocks", "features", "marker_gene") %in% names(ann)))
+      return(fail(paste0("'annotation' must be a list with tables 'blocks', ",
+                         "'features' and 'marker_gene' ",
+                         "(see attach_block_annotation()).")))
+    known_blocks <- unique(as.character(
+      if (!is.null(x$block_marker_map_info)) x$block_marker_map_info$Block
+      else if (!is.null(x$block_info)) x$block_info$Block
+      else character(0L)))
+    bad_b <- setdiff(unique(as.character(ann$blocks$Block)), known_blocks)
+    if (length(bad_b) > 0L)
+      return(fail(paste0(length(bad_b), " annotated block(s) absent from the ",
+                         "container's blocks: ",
+                         paste(utils::head(bad_b, 5L), collapse = ", "),
+                         if (length(bad_b) > 5L) " ..." else "", ".")))
+    bad_m <- setdiff(unique(as.character(ann$marker_gene$Marker)),
+                     x$map_info$Marker)
+    if (length(bad_m) > 0L)
+      return(fail(paste0(length(bad_m), " annotated marker(s) absent from ",
+                         "map_info: ",
+                         paste(utils::head(bad_m, 5L), collapse = ", "),
+                         if (length(bad_m) > 5L) " ..." else "", ".")))
+  }
+
   # The container is structurally valid. One content invariant is checked here
   # because this is the one function every entry point already calls: a missing
   # allele is NA and nothing else (FR4). A container that predates 0.6.0 can
@@ -2637,7 +2667,7 @@ filter_geno_meta <- function(meta, keep_markers = NULL, keep_samples = NULL,
   new_meta$n_markers    <- length(valid_markers)
   new_meta$n_samples    <- length(valid_samples)
 
-  new_geno_meta(
+  out <- new_geno_meta(
     geno_arrays           = new_arr,
     map_info              = new_map,
     block_info            = new_bi,
@@ -2647,6 +2677,16 @@ filter_geno_meta <- function(meta, keep_markers = NULL, keep_samples = NULL,
     marker_effects        = new_me,
     phenotype             = new_pheno
   )
+
+  # Carry-forward (thread #033): a stored block annotation survives a filter,
+  # pruned to the surviving blocks and markers (provenance travels in metadata).
+  if (!is.null(meta$annotation)) {
+    keep_blocks <- if (!is.null(new_bmm)) unique(as.character(new_bmm$Block))
+                   else character(0L)
+    out$annotation <- .hs_prune_annotation(meta$annotation,
+                                           keep_blocks, valid_markers)
+  }
+  out
 }
 
 
@@ -2882,6 +2922,17 @@ attach_block_info <- function(geno_meta,
             "score_marker_signal()/select_signal_markers() against the new ",
             "blocks.")
 
+  # A stored block annotation is defined against the old blocks, so replacing
+  # them invalidates every overlap — drop it, loudly (thread #033, Q25.i).
+  md <- geno_meta$metadata
+  if (!is.null(geno_meta$annotation) || !is.null(md$annotation)) {
+    message("attach_block_info: block definitions replaced — the stored ",
+            "block annotation was dropped. Re-run ",
+            "compute_block_annotation()/attach_block_annotation() against ",
+            "the new blocks.")
+    md$annotation <- NULL
+  }
+
   new_geno_meta(
     geno_arrays           = geno_meta$geno_arrays,
     map_info              = geno_meta$map_info,
@@ -2889,7 +2940,7 @@ attach_block_info <- function(geno_meta,
                                           stringsAsFactors = FALSE),
     block_marker_map_info = as.data.frame(block_marker_map,
                                           stringsAsFactors = FALSE),
-    metadata              = geno_meta$metadata
+    metadata              = md
   )
 }
 

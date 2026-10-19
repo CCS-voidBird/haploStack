@@ -354,6 +354,10 @@ recode_geno_meta <- function(geno_meta, to_type = "nucleotide",
     out$geno_arrays <- arr2
     out$metadata$missing_tokens <- NULL
   }
+  # Recoding changes the allele vocabulary, not the blocks — a stored block
+  # annotation stays valid (#033). (The phenotype, by contrast, is a known
+  # casualty of this rebuild; see geno_meta_structure.md.)
+  out$annotation <- geno_meta$annotation
   out
 }
 

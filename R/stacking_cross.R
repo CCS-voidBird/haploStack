@@ -158,6 +158,9 @@
     block_marker_map_info = geno_meta$block_marker_map_info,
     metadata              = meta_md,
     marker_effects        = geno_meta$marker_effects)
+  # Blocks do not change across cycles — a stored block annotation carries to
+  # the offspring container (#033).
+  off_meta$annotation <- geno_meta$annotation
 
   eff    <- .coerce_single_effect_df(effect_df %||% geno_meta$marker_effects)
   f1mean <- .block_f1mean(off_meta, eff, off_names)

@@ -348,6 +348,9 @@
     sample_info           = fam,
     metadata              = md,
     marker_effects        = src$marker_effects)
+  # Blocks do not change across cycles — a stored block annotation carries to
+  # the renamed offspring container (#033).
+  off$annotation <- src$annotation
 
   cross_plans <- bp[, .(F1count = .N, F1mean = mean(F1mean, na.rm = TRUE)),
                     by = .(FamID, Parent1, Parent2)]

@@ -826,7 +826,7 @@ attach_signal_markers <- function(geno_meta, signal, overwrite = TRUE) {
     n_blocks = nrow(packed),
     date     = format(Sys.Date()))
 
-  new_geno_meta(
+  out <- new_geno_meta(
     geno_arrays           = geno_meta$geno_arrays,
     map_info              = geno_meta$map_info,
     block_info            = bi,
@@ -836,6 +836,10 @@ attach_signal_markers <- function(geno_meta, signal, overwrite = TRUE) {
     marker_effects        = geno_meta$marker_effects,
     phenotype             = geno_meta$phenotype
   )
+  # The block definitions are unchanged (only Signal_* columns were added), so
+  # a stored block annotation stays valid (#033).
+  out$annotation <- geno_meta$annotation
+  out
 }
 
 

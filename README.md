@@ -5,6 +5,17 @@
 Developed for the GRDC Barley Phase 2 project at the University of Queensland.
 Generalised for use with any biparental or multiparental diploid breeding programme.
 
+> ### 0.8.0 — which genes sit in each block, without leaving R
+>
+> BAN stages 1–3 + 5 (thread [#033](project_record/threads/033-block-
+> annotation-native.md); `dev/PRD_block_annotation_r_native.md`, Q25 a–p
+> accepted 2026-10-19). The offline annotation route — a local GFF3,
+> optionally an Ensembl xref dump, optionally a QTL table, against the
+> container's own block spans — no longer crosses the Python boundary: it is
+> three `data.table::foverlaps()` passes on tables the `GenoMeta` already
+> holds. The Ensembl REST route and the Python figures stay in
+> `block_annotation` (the R plotting phase is 0.8.1, Q25.n/o/p).
+>
 > ### 0.7.11 — a blackout is an emergency; a missing understudy is not
 >
 > Stage 1 of the GBS multi-subtype core upgrade (thread

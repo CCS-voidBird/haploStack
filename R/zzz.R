@@ -115,9 +115,19 @@ utils::globalVariables(c(
   # block-subtype selection value columns (catalogue_analysis.R: the raw effect
   # S and the selection base Vbase; reused by .resolve_top_subtypes())
   "S", "Vbase",
+  # block annotation (annotation_read.R / annotation_compute.R, thread #033)
+  "gidx", "bidx", "midx", "ridx", "qidx", "MChrom", "qs", "qe", "ms", "me",
+  "chr_key", "chrom", "start", "end", "name", "strand", "val",
+  "gene_id", "gene_name", "biotype", "gene_count", "gene_ids", "gene_names",
+  "qtl_count", "qtl_names", "feature_type", "feature_id", "feature_name",
+  "feature_biotype", "feature_start", "feature_end", "feature_strand",
+  "gene_symbol", "gene_description", "go_terms", "interpro_domains",
+  "gene_start", "gene_end", "gene_strand", "ensembl_browser_url",
+  "gene_stable_id", "description", "xref_id",
   # data.table update-join RHS symbols (`x[i, on=, col := i.col]`). These are
   # supplied by the join, never lexically bound, so every use is a check NOTE.
-  # Only the four used across R/ are listed; add here when a new one appears.
+  # Only the ones used across R/ are listed; add here when a new one appears.
   "i.Block", "i.Chrom", "i.Effect", "i.Pos",
-  "i.FID", "i.GID", "i.Label"
+  "i.FID", "i.GID", "i.Label",
+  "i.gene_count", "i.gene_ids", "i.gene_names", "i.qtl_count", "i.qtl_names"
 ))
