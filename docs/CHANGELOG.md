@@ -710,6 +710,97 @@ published repo ships:
   holder is still "University of Queensland", which is a rights statement, not an
   authorship one, and it already matches the published copy byte for byte.
 
+## [0.8.1] - 2026-10-19 — The catalogue draws the annotation: the circos meta plot and the journal standard
+
+BAN stage 6, the viz phase (thread
+[#033](project_record/threads/033-block-annotation-native.md); Q25 n/o
+accepted 2026-10-19; figure quality per `dev/figure_standards_nature.md`).
+All of it lives in the **catalogue layer** and consumes the standard
+annotation / catalogue table formats from any source — never the annotation
+module (the 0.8.0 layer boundary).
+
+### Added
+
+- **The circos meta plot** (`R/catalogue_circos_meta.R`; 139 → 150 exports
+  across the release) —
+  the polar analogue of `plot_meta_alignment()` (Q25.n):
+  - `plot_meta_circos(tracks, ...)` — the chr–pos bar outline (one sector per
+    chromosome in natural order, Okabe–Ito colours, labelled Mb ticks with
+    unlabelled minors, the chromosome name inside the bar) around a
+    \strong{ranked track list}: `tracks[[1]]` is the outermost data ring, the
+    last the innermost; `rel_heights` scales per ring. A centre legend names
+    each ring, with a mini colourbar for rect rings. Returns an
+    `hs_meta_circos` whose `$render(width_mm)` re-draws the figure at any
+    declared width.
+  - `circos_track()` + five constructors: `track_annotation()` (gene / QTL
+    counts from the annotation blocks table, container, or bare df),
+    `track_block_effect()` (one trait ring from `analyze_block_catalogue()`,
+    diverging anchored at 0), `track_block_variance()` (line or rect;
+    `Start_Pos`/`End_Pos` spellings accepted), `track_marker_stat()` (points;
+    df or GenoMeta + trait = |effect|), `track_marker_labels()` (the Q25.o df
+    through the standardizer; leader lines + greedy angular deconfliction,
+    the Python circos' rule).
+  - **Journal sizing is structural**: ring heights are physical mm and text
+    is specified in pt *at the declared width* — the engine computes `cex`
+    per device, so the 5 pt floor holds at 89 mm and 183 mm alike. The
+    radial budget is checked: too many rings at single column ⇒ a message
+    recommending double column, and the centre legend is skipped (with a
+    message) when the hole cannot hold it. Axis numerals and chromosome
+    names render screen-upright (`facing = "downward"`) because tangential
+    text at the 3 / 9 o'clock flip boundary can render a "600" as "009" and
+    a chromosome "6" as "9" — found by eyeballing the SIM renders.
+- **The journal figure standard as code**:
+  - `theme_hs_journal(base_size = 7)` — the `figure_standards_nature.md`
+    contract post hoc: 5–7 pt sans, black axis text, 0.5 pt lines, outward
+    ticks, no grid, 2 pt margins, borderless bottom legend, titles nulled.
+  - `save_journal_figure(plot, file, width = "single"|"onehalf"|"double"|mm)`
+    — cairo_pdf (fonts embedded) or ragg PNG at dpi; warns when a ggplot
+    still carries a title; **re-renders** an `hs_meta_circos` at the saved
+    width; **refuses** a plain `recordedplot` (rescaling breaks the pt
+    contract).
+- **The Q25.o overlay normaliser** (`R/catalogue_annotation_overlay.R`):
+  - `standardize_marker_annotations(x, meta, match_bp = 10 kb)` — the single
+    owner of the marker-level annotation / QTL df contract: `Marker` route or
+    `Chrom`+`Pos` route (nearest marker within `match_bp`), optional
+    `Type`/`Trait`, unplaced rows kept with one warning; returns `Marker,
+    Chrom, Pos, Block, Name, Type, Trait, matched_dist_bp`.
+  - `attach_marker_annotations(meta, x)` — stores the resolved table as
+    `meta$annotation$custom` + its own provenance; independent of the gene
+    tables (attachable to a never-annotated container, in either order);
+    `filter_geno_meta()` prunes rows whose marker left (position-only rows
+    stay), `attach_block_info()` drops the whole annotation as before,
+    `is_geno_meta()` validates `custom` markers and now accepts a
+    custom-only annotation.
+- **Tests** (`test-circos-meta.R`, +66 assertions; suite 2 886 → 2 952 / 0
+  fail / 12 skips): track-spec validation, all five constructors from their standard
+  sources, render + re-render-by-width to files, the deconfliction rule,
+  theme contract, saver page size (pdftools-gated) / title warning /
+  recorded-plot refusal / circos re-render, both standardizer routes +
+  unplaced warning, custom storage / coexistence / carry-forward /
+  validation.
+
+### Verified
+
+- SIM test drive (`data/SIM/.../haplostack_annotation/circos/`): six rings —
+  genes/block, GY block variance (the dataset's HapSelect sheet), GY and
+  NFNB block effects (`analyze_block_catalogue` on the true effects),
+  |true GY effect| points, 12 ground-truth major-QTL labels — on the real
+  MorexV3 pseudomolecule extents; saved single + double column PDF + 600 dpi
+  PNG through `save_journal_figure()`. Rendered output eyeballed at both
+  widths across four iterations (tick collisions, legend collisions, the
+  6/9 digit flips) before acceptance; the classic
+  `plot_block_effect_circos()` output on the same analysis saved alongside.
+
+### Deferred (still #033)
+
+- `annotations =` overlay arguments on `plot_block_effect_manhattan()` /
+  `plot_block_effect_genome()` / `plot_marker_signal()`.
+- Rebuilding `plot_block_effect_circos()` on the meta engine: its acceptance
+  ("visually unchanged") conflicts with the engine's upgraded frame (ticks,
+  upright digits, legend); an owner call on which wins — until then the
+  classic implementation stands untouched.
+- Stage-4 remainder as before (workshop toggle, bridge §0, io reference).
+
 ## [0.8.0] - 2026-10-19 — Which genes sit in each block, without leaving R
 
 BAN stages 1–3 + 5 (thread

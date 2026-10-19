@@ -359,7 +359,7 @@ update_geno_meta_from_matrix <- function(template, gene_matrix,
   meta_md$n_samples <- dim(arr)[1L]
   meta_md$n_markers <- dim(arr)[2L]
 
-  new_geno_meta(
+  out <- new_geno_meta(
     geno_arrays           = arr,
     map_info              = map_info,
     block_info            = template$block_info,
@@ -367,6 +367,10 @@ update_geno_meta_from_matrix <- function(template, gene_matrix,
     sample_info           = sample_info,
     metadata              = meta_md,
     marker_effects        = template$marker_effects)
+  # Blocks carry over from the template, so a stored block annotation does too
+  # (#033) — same rule as the block-backend offspring builder.
+  out$annotation <- template$annotation
+  out
 }
 
 

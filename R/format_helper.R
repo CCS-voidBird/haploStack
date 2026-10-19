@@ -1158,31 +1158,51 @@ is_geno_meta <- function(x, verbose = TRUE) {
   # annotation: optional (#033); when present, every annotated Block must exist
   # in the container's block vocabulary and every Marker in map_info — a stale
   # annotation pointing at departed blocks is exactly the defect Q25.i's
-  # carry-forward rules exist to prevent.
+  # carry-forward rules exist to prevent. Two legitimate shapes: the gene
+  # tables (blocks/features/marker_gene, attach_block_annotation()) and/or the
+  # custom marker-level table (attach_marker_annotations()); the gene tables
+  # come and go as a trio.
   if ("annotation" %in% names(x) && !is.null(x$annotation)) {
-    ann <- x$annotation
-    if (!is.list(ann) ||
-        !all(c("blocks", "features", "marker_gene") %in% names(ann)))
-      return(fail(paste0("'annotation' must be a list with tables 'blocks', ",
-                         "'features' and 'marker_gene' ",
-                         "(see attach_block_annotation()).")))
+    ann   <- x$annotation
+    gene3 <- c("blocks", "features", "marker_gene")
+    if (!is.list(ann) || length(ann) == 0L ||
+        !all(names(ann) %in% c(gene3, "custom")))
+      return(fail(paste0("'annotation' must be a list of the tables 'blocks'/",
+                         "'features'/'marker_gene' and/or 'custom' (see ",
+                         "attach_block_annotation() / ",
+                         "attach_marker_annotations()).")))
+    if (any(gene3 %in% names(ann)) && !all(gene3 %in% names(ann)))
+      return(fail(paste0("'annotation' carries only part of the gene-table ",
+                         "trio (blocks/features/marker_gene).")))
     known_blocks <- unique(as.character(
       if (!is.null(x$block_marker_map_info)) x$block_marker_map_info$Block
       else if (!is.null(x$block_info)) x$block_info$Block
       else character(0L)))
-    bad_b <- setdiff(unique(as.character(ann$blocks$Block)), known_blocks)
-    if (length(bad_b) > 0L)
-      return(fail(paste0(length(bad_b), " annotated block(s) absent from the ",
-                         "container's blocks: ",
-                         paste(utils::head(bad_b, 5L), collapse = ", "),
-                         if (length(bad_b) > 5L) " ..." else "", ".")))
-    bad_m <- setdiff(unique(as.character(ann$marker_gene$Marker)),
-                     x$map_info$Marker)
-    if (length(bad_m) > 0L)
-      return(fail(paste0(length(bad_m), " annotated marker(s) absent from ",
-                         "map_info: ",
-                         paste(utils::head(bad_m, 5L), collapse = ", "),
-                         if (length(bad_m) > 5L) " ..." else "", ".")))
+    if ("blocks" %in% names(ann)) {
+      bad_b <- setdiff(unique(as.character(ann$blocks$Block)), known_blocks)
+      if (length(bad_b) > 0L)
+        return(fail(paste0(length(bad_b), " annotated block(s) absent from ",
+                           "the container's blocks: ",
+                           paste(utils::head(bad_b, 5L), collapse = ", "),
+                           if (length(bad_b) > 5L) " ..." else "", ".")))
+      bad_m <- setdiff(unique(as.character(ann$marker_gene$Marker)),
+                       x$map_info$Marker)
+      if (length(bad_m) > 0L)
+        return(fail(paste0(length(bad_m), " annotated marker(s) absent from ",
+                           "map_info: ",
+                           paste(utils::head(bad_m, 5L), collapse = ", "),
+                           if (length(bad_m) > 5L) " ..." else "", ".")))
+    }
+    if ("custom" %in% names(ann)) {
+      cm <- ann$custom$Marker
+      bad_c <- setdiff(unique(as.character(cm[!is.na(cm)])),
+                       x$map_info$Marker)
+      if (length(bad_c) > 0L)
+        return(fail(paste0(length(bad_c), " custom-annotation marker(s) ",
+                           "absent from map_info: ",
+                           paste(utils::head(bad_c, 5L), collapse = ", "),
+                           if (length(bad_c) > 5L) " ..." else "", ".")))
+    }
   }
 
   # The container is structurally valid. One content invariant is checked here

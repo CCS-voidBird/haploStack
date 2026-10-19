@@ -5,6 +5,14 @@
 Developed for the GRDC Barley Phase 2 project at the University of Queensland.
 Generalised for use with any biparental or multiparental diploid breeding programme.
 
+> ### 0.8.1 — the catalogue draws the annotation: the circos meta plot and the journal standard
+>
+> BAN stage 6, the viz phase (thread [#033](project_record/threads/033-block-
+> annotation-native.md); Q25 n/o accepted 2026-10-19; figure quality per
+> `dev/figure_standards_nature.md`). All of it lives in the **catalogue
+> layer** and consumes the standard annotation / catalogue table formats from
+> any source — never the annotation module (the 0.8.0 layer boundary).
+>
 > ### 0.8.0 — which genes sit in each block, without leaving R
 >
 > BAN stages 1–3 + 5 (thread [#033](project_record/threads/033-block-

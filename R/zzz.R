@@ -124,6 +124,9 @@ utils::globalVariables(c(
   "gene_symbol", "gene_description", "go_terms", "interpro_domains",
   "gene_start", "gene_end", "gene_strand", "ensembl_browser_url",
   "gene_stable_id", "description", "xref_id",
+  # circos meta plot / overlay (catalogue_circos_meta.R,
+  # catalogue_annotation_overlay.R, thread #033 stage 6)
+  ".val", ".plotval", "Block_Var", "Start_Pos", "End_Pos", "hi", "Name",
   # data.table update-join RHS symbols (`x[i, on=, col := i.col]`). These are
   # supplied by the join, never lexically bound, so every use is a check NOTE.
   # Only the ones used across R/ are listed; add here when a new one appears.

@@ -420,25 +420,43 @@ attach_block_annotation <- function(meta, annotation) {
   # Stored as plain data.frames — the container's own convention (map_info,
   # block_info are data.frames), and a data.table's .internal.selfref pointer
   # would break the save/load identical() contract (stage-3 acceptance).
+  # A stored custom table (attach_marker_annotations()) is independent of the
+  # gene tables and survives this attach.
+  custom <- meta$annotation$custom
+  custom_prov <- meta$metadata$annotation$custom
   meta$annotation <- lapply(annotation[c("blocks", "features", "marker_gene")],
                             function(x) as.data.frame(x,
                                                       stringsAsFactors = FALSE))
   meta$metadata$annotation <- annotation$provenance
+  if (!is.null(custom)) {
+    meta$annotation$custom <- custom
+    meta$metadata$annotation$custom <- custom_prov
+  }
   meta
 }
 
 
 # Internal: prune a stored annotation to surviving blocks / markers
-# (filter_geno_meta()). Returns NULL for NULL in.
+# (filter_geno_meta()). Returns NULL for NULL in. The gene tables prune on
+# Block / Marker; the custom table (attach_marker_annotations()) prunes rows
+# whose resolved marker left the panel, while position-only rows (Marker NA)
+# are location facts and stay.
 .hs_prune_annotation <- function(ann, keep_blocks, keep_markers) {
   if (is.null(ann)) return(NULL)
-  ann$blocks   <- ann$blocks[as.character(ann$blocks$Block) %in% keep_blocks, ,
+  if (!is.null(ann$blocks))
+    ann$blocks <- ann$blocks[as.character(ann$blocks$Block) %in% keep_blocks, ,
                              drop = FALSE]
-  ann$features <- ann$features[as.character(ann$features$Block) %in%
-                                 keep_blocks, , drop = FALSE]
-  ann$marker_gene <- ann$marker_gene[
-    as.character(ann$marker_gene$Marker) %in% keep_markers &
-      as.character(ann$marker_gene$Block) %in% keep_blocks, , drop = FALSE]
+  if (!is.null(ann$features))
+    ann$features <- ann$features[as.character(ann$features$Block) %in%
+                                   keep_blocks, , drop = FALSE]
+  if (!is.null(ann$marker_gene))
+    ann$marker_gene <- ann$marker_gene[
+      as.character(ann$marker_gene$Marker) %in% keep_markers &
+        as.character(ann$marker_gene$Block) %in% keep_blocks, , drop = FALSE]
+  if (!is.null(ann$custom)) {
+    mk <- as.character(ann$custom$Marker)
+    ann$custom <- ann$custom[is.na(mk) | mk %in% keep_markers, , drop = FALSE]
+  }
   ann
 }
 
