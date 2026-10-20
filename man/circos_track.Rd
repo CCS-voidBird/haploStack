@@ -27,15 +27,22 @@ circos_track(
 
 \item{value_col}{Column mapped to the mark's value: fill for \code{"rect"},
 y for \code{"points"}/\code{"line"}, the ranking for \code{"labels"}
-(optional there).}
+(optional there). For \code{"rect"}, a character or factor column makes
+the ring \strong{categorical}: one colour per category (see
+\code{palette}), drawn in level order so later levels sit on top, and
+one legend chip per category in place of a colourbar — e.g. every block
+in grey with a selected subset highlighted.}
 
 \item{name}{Ring name for the legend.}
 
 \item{palette}{For \code{"rect"}: length-2 (sequential low/high) or
 length-3 (diverging low/mid/high, anchored at 0) colour vector; defaults
-to diverging when the values cross 0, sequential otherwise. For point /
-line / label marks: a single colour (defaults drawn from the Okabe–Ito
-order).}
+to diverging when the values cross 0, sequential otherwise. For a
+categorical \code{"rect"} ring: a colour vector named by category (it
+must name every category; its order sets the level order unless the
+column is a factor), or an unnamed vector recycled in level order
+(default Okabe–Ito). For point / line / label marks: a single colour
+(defaults drawn from the Okabe–Ito order).}
 
 \item{height_mm}{Ring height in mm at the declared figure width (defaults
 per type: rect 3.5, line 4.5, points 5.5, labels 8).}

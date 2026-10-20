@@ -710,6 +710,50 @@ published repo ships:
   holder is still "University of Queensland", which is a rights statement, not an
   authorship one, and it already matches the published copy byte for byte.
 
+## [0.8.3] - 2026-10-20 — A ring can name categories
+
+Needed for the owner's real-data circos request of 2026-10-20 (VP1
+manuscript, MorexV3): "a ring that recorded both all blocks and the selected
+51 blocks (use different color to specify)". Before this, `circos_track()`
+coerced every value to numeric, so a two-set ring could only be a 0–1
+colourbar. Thread [#033](project_record/threads/033-block-annotation-native.md).
+150 exports (unchanged).
+
+### Added
+
+- **Categorical rect rings.** In `circos_track(type = "rect", value_col =)`,
+  a character or factor column makes the ring categorical:
+  - one colour per category, from a palette named by category (it must name
+    every category, else the call stops naming the missing ones), or from an
+    unnamed palette (default Okabe–Ito) recycled in level order;
+  - level order follows the factor's levels, else the named palette's order;
+  - rows are drawn in level order, so later levels sit on top (a highlighted
+    subset stays visible over thousands of grey blocks);
+  - the legend shows one square chip per category instead of a colourbar.
+  The track carries `$categories`. Numeric and logical columns stay
+  continuous, as before, and non-rect tracks are unaffected.
+
+### Tests
+
+- `test-circos-meta.R` 145 → 160 assertions:
+  - level order and colours from a named palette, a factor and an unnamed
+    palette;
+  - the error for a missing colour;
+  - the default palette;
+  - logical and point columns stay continuous;
+  - a categorical ring renders warning-free with the centre and bottom
+    legends;
+  - the square chip draws.
+- Suite **3 046 pass / 0 fail / 12 skips** against the dev tree (= 0.8.2's
+  3 031 + 15).
+
+### Verified
+
+- Used by the VP1 MorexV3 circos run
+  (`GRDC_project/.../Archive_VP1_manuscript/haploStack_MorexV3_circos/`): all
+  4 223 blocks in grey, the 51 selected blocks in orange, on the installed
+  0.8.3 build.
+
 ## [0.8.2] - 2026-10-20 — The legend can leave the circle
 
 Owner request 2026-10-20, a stage-6 follow-up on thread

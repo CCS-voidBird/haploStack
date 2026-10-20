@@ -1,7 +1,7 @@
 Package: haploStack
 Title: Haplotype Block Analysis and Stacking Simulation for Genomic
         Breeding
-Version: 0.8.2
+Version: 0.8.3
 Authors@R: 
     person("Chensong", "Chen",
            email = "chensong.chen@uq.edu.au", role = c("aut", "cre"))
@@ -34,6 +34,6 @@ BugReports: https://github.com/CCS-voidBird/haploStack/issues
 Config/roxygen2/version: 8.0.0
 RoxygenNote: 7.3.3
 NeedsCompilation: yes
-Packaged: 2026-10-20 06:48:05 UTC; 70651
+Packaged: 2026-10-20 13:58:35 UTC; 70651
 Author: Chensong Chen [aut, cre]
 Maintainer: Chensong Chen <chensong.chen@uq.edu.au>

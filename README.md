@@ -5,6 +5,15 @@
 Developed for the GRDC Barley Phase 2 project at the University of Queensland.
 Generalised for use with any biparental or multiparental diploid breeding programme.
 
+> ### 0.8.3 — a ring can name categories
+>
+> Needed for the owner's real-data circos request of 2026-10-20 (VP1
+> manuscript, MorexV3): "a ring that recorded both all blocks and the selected
+> 51 blocks (use different color to specify)". Before this, `circos_track()`
+> coerced every value to numeric, so a two-set ring could only be a 0–1
+> colourbar. Thread [#033](project_record/threads/033-block-annotation-
+> native.md). 150 exports (unchanged).
+>
 > ### 0.8.2 — the legend can leave the circle
 >
 > Owner request 2026-10-20, a stage-6 follow-up on thread

@@ -123,6 +123,66 @@ test_that("plot_meta_circos renders, orders tracks, and re-renders by width", {
   expect_true(file.size(f2) > 0)
 })
 
+test_that("a character / factor rect ring is categorical", {
+  d <- data.frame(Chrom = "1", Start = c(10, 30, 50), End = c(20, 40, 60),
+                  set = c("other", "picked", "other"))
+  # named palette: its order sets the levels; every level needs a colour
+  tr <- circos_track(d, type = "rect", value_col = "set",
+                     palette = c(picked = "#D55E00", other = "grey85"))
+  expect_identical(tr$categories, c("picked", "other"))
+  expect_identical(tr$palette, c(picked = "#D55E00", other = "grey85"))
+  expect_true(all(is.na(tr$data$.val)))
+  expect_identical(tr$data$.cat, d$set)
+  expect_error(circos_track(d, type = "rect", value_col = "set",
+                            palette = c(other = "grey85")), "'picked'")
+  # a factor's levels win; an unnamed palette recycles in level order
+  d$set <- factor(d$set, levels = c("other", "picked"))
+  tr2 <- circos_track(d, type = "rect", value_col = "set",
+                      palette = c("grey85", "#D55E00"))
+  expect_identical(tr2$categories, c("other", "picked"))
+  expect_identical(tr2$palette, c(other = "grey85", picked = "#D55E00"))
+  # default colours: Okabe–Ito; numeric / logical columns stay continuous
+  expect_identical(unname(circos_track(transform(d, set = as.character(set)),
+                                       type = "rect",
+                                       value_col = "set")$palette),
+                   .hs_okabe_ito()[1:2])
+  expect_null(circos_track(transform(d, v = c(TRUE, FALSE, TRUE)),
+                           type = "rect", value_col = "v")$categories)
+  # a points track never goes categorical (its value is a y position)
+  expect_null(circos_track(data.frame(Chrom = "1", Pos = 5, v = 1),
+                           type = "points", value_col = "v")$categories)
+
+  skip_if_not_installed("circlize")
+  fx <- .circos_fixture()
+  bi <- data.table::as.data.table(fx$bi)
+  bi[, set := ifelse(seq_len(.N) %% 2L == 0L, "selected", "other blocks")]
+  ring <- circos_track(bi, type = "rect", value_col = "set", name = "blocks",
+                       palette = c(`other blocks` = "grey85",
+                                   selected = "#D55E00"))
+  for (pos in c("center", "bottom")) {
+    obj <- plot_meta_circos(list(ring, track_block_effect(fx$analysis, "T1")),
+                            meta = fx$meta, draw = FALSE,
+                            legend_position = pos)
+    f <- tempfile(fileext = ".png")
+    grDevices::png(f, width = 89 / 25.4, height = obj$height_mm(89) / 25.4,
+                   units = "in", res = 100, type = "cairo")
+    graphics::par(mar = c(0, 0, 0, 0))
+    expect_no_warning(suppressMessages(obj$render(89)))
+    grDevices::dev.off()
+    expect_true(file.size(f) > 0)
+  }
+  # the square chip draws
+  items <- list(list(kind = "chip", name = "selected", mark = "square",
+                     col = "#D55E00", wt = .hs_text_mm("selected")))
+  f <- tempfile(fileext = ".png")
+  grDevices::png(f, width = 2, height = 1, units = "in", res = 100)
+  graphics::par(mar = c(0, 0, 0, 0))
+  graphics::plot.new()
+  expect_no_error(.hs_draw_legend(items, .hs_legend_layout(items), 0.1, 0.9,
+                                  0.02))
+  grDevices::dev.off()
+})
+
 test_that("legend text is measured from Helvetica's metrics, in mm", {
   expect_equal(.hs_text_mm("0", pt = 5), 0.556 * 5 * 25.4 / 72)
   expect_equal(.hs_text_mm(c("ab", NA)), c(2 * 0.556 * 5 * 25.4 / 72, 0))

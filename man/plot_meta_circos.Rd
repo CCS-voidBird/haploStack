@@ -70,8 +70,9 @@ function owns the shared frame. The outermost ring is always the
 \strong{chr–pos bar} — one sector per chromosome in natural order,
 Okabe–Ito colours, Mb ticks — and \code{tracks[[1]]} is the outermost data
 ring, the last element the innermost. A legend names each ring (with a
-mini colourbar for \code{"rect"} rings) — in the centre by default, or
-outside the circle via \code{legend_position}.
+mini colourbar for \code{"rect"} rings, one chip per category for a
+categorical one) — in the centre by default, or outside the circle via
+\code{legend_position}.
 }
 \details{
 Sizing follows \code{dev/figure_standards_nature.md}: the figure is

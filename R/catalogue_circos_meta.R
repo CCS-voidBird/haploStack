@@ -80,13 +80,20 @@
 #'   \code{"line"}, or \code{"labels"} (leader line + text).
 #' @param value_col Column mapped to the mark's value: fill for \code{"rect"},
 #'   y for \code{"points"}/\code{"line"}, the ranking for \code{"labels"}
-#'   (optional there).
+#'   (optional there). For \code{"rect"}, a character or factor column makes
+#'   the ring \strong{categorical}: one colour per category (see
+#'   \code{palette}), drawn in level order so later levels sit on top, and
+#'   one legend chip per category in place of a colourbar — e.g. every block
+#'   in grey with a selected subset highlighted.
 #' @param name   Ring name for the legend.
 #' @param palette For \code{"rect"}: length-2 (sequential low/high) or
 #'   length-3 (diverging low/mid/high, anchored at 0) colour vector; defaults
-#'   to diverging when the values cross 0, sequential otherwise. For point /
-#'   line / label marks: a single colour (defaults drawn from the Okabe–Ito
-#'   order).
+#'   to diverging when the values cross 0, sequential otherwise. For a
+#'   categorical \code{"rect"} ring: a colour vector named by category (it
+#'   must name every category; its order sets the level order unless the
+#'   column is a factor), or an unnamed vector recycled in level order
+#'   (default Okabe–Ito). For point / line / label marks: a single colour
+#'   (defaults drawn from the Okabe–Ito order).
 #' @param height_mm Ring height in mm at the declared figure width (defaults
 #'   per type: rect 3.5, line 4.5, points 5.5, labels 8).
 #' @param label_top_n \code{"labels"} only: at most this many labels, highest
@@ -125,10 +132,19 @@ circos_track <- function(data, type = c("rect", "points", "line", "labels"),
   }
   if (type == "labels" && !"Name" %in% names(dt))
     stop("circos_track: a 'labels' track needs a Name column.")
+  categories <- NULL
   if (!is.null(value_col)) {
     if (!value_col %in% names(dt))
       stop("circos_track: value_col '", value_col, "' not in 'data'.")
-    dt[, .val := as.numeric(get(value_col))]
+    v <- dt[[value_col]]
+    if (type == "rect" && (is.character(v) || is.factor(v))) {
+      ct <- .hs_categories(v, palette)
+      categories <- ct$levels
+      palette <- ct$palette
+      dt[, `:=`(.cat = as.character(v), .val = NA_real_)]
+    } else {
+      dt[, .val := as.numeric(get(value_col))]
+    }
   } else if (type %in% c("points", "line")) {
     stop("circos_track: '", type, "' tracks need a value_col.")
   } else {
@@ -140,10 +156,35 @@ circos_track <- function(data, type = c("rect", "points", "line", "labels"),
 
   structure(list(data = dt[], type = type, value_col = value_col,
                  name = name %||% value_col %||% type, palette = palette,
+                 categories = categories,
                  height_mm = as.numeric(height_mm),
                  label_top_n = as.integer(label_top_n),
                  min_gap_rad = as.numeric(min_gap_rad)),
             class = "hs_circos_track")
+}
+
+# A categorical rect ring's levels and colours. Levels: factor order, else the
+# named palette's order (categories it does not name follow, sorted), else
+# sorted. Colours: the named palette (it must name every level), else an
+# unnamed palette — or Okabe–Ito — in level order.
+.hs_categories <- function(v, palette) {
+  present <- unique(as.character(v[!is.na(v)]))
+  lev <- if (is.factor(v)) intersect(levels(v), present)
+         else if (!is.null(names(palette)))
+           c(intersect(names(palette), present),
+             sort(setdiff(present, names(palette))))
+         else sort(present)
+  if (!is.null(names(palette))) {
+    miss <- setdiff(lev, names(palette))
+    if (length(miss) > 0L)
+      stop("circos_track: the named 'palette' has no colour for ",
+           paste0("'", miss, "'", collapse = ", "), ".")
+    pal <- palette[lev]
+  } else {
+    pal <- stats::setNames(rep_len(palette %||% .hs_okabe_ito(), length(lev)),
+                           lev)
+  }
+  list(levels = lev, palette = pal)
 }
 
 
@@ -389,8 +430,9 @@ track_marker_labels <- function(x, meta = NULL, value_col = NULL,
 
 # Legend geometry, mm at print size (text is 5 pt). A colourbar entry: title
 # centred 0.9 mm under its top, a 10 x 1.6 mm bar from 2.3 mm, min / max
-# beside the bar — 3.9 mm tall. A chip entry (point, line or leader): chip
-# and name centred 1.3 mm under its top — 2.6 mm tall. `reach` is how far
+# beside the bar — 3.9 mm tall. A chip entry (point, line, leader, or a
+# categorical ring's square): chip and name centred 1.3 mm under its top —
+# 2.6 mm tall. `reach` is how far
 # the tick labels stand outside the chr bar, `air` the clearance kept from
 # them, `margin` the gap to the page edge.
 .hs_lg <- list(bar_w = 10, bar_h = 1.6, bar_top = 2.3, title_y = 0.9,
@@ -519,6 +561,9 @@ track_marker_labels <- function(x, meta = NULL, value_col = NULL,
       yc <- y0 - g$chip_y * k
       if (it$mark == "points")
         graphics::points(gx, yc, pch = 16, cex = .pt_cex(4), col = it$col)
+      else if (it$mark == "square")              # a categorical ring's level
+        graphics::rect(gx - k, yc - 0.8 * k, gx + k, yc + 0.8 * k,
+                       col = it$col, border = NA)
       else
         graphics::segments(gx - k, yc, gx + k, yc, col = it$col,
                            lwd = .lwd_pt(0.75))
@@ -536,8 +581,9 @@ track_marker_labels <- function(x, meta = NULL, value_col = NULL,
 #' \strong{chr–pos bar} — one sector per chromosome in natural order,
 #' Okabe–Ito colours, Mb ticks — and \code{tracks[[1]]} is the outermost data
 #' ring, the last element the innermost. A legend names each ring (with a
-#' mini colourbar for \code{"rect"} rings) — in the centre by default, or
-#' outside the circle via \code{legend_position}.
+#' mini colourbar for \code{"rect"} rings, one chip per category for a
+#' categorical one) — in the centre by default, or outside the circle via
+#' \code{legend_position}.
 #'
 #' Sizing follows \code{dev/figure_standards_nature.md}: the figure is
 #' authored at \code{width_mm} (89 mm single column by default) — ring heights
@@ -643,7 +689,8 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
   ring_fill <- function(tr) {
     v <- tr$data$.val
     pal <- tr$palette
-    if (tr$type != "rect") return(list(fun = NULL, col = pal[1L]))
+    if (tr$type != "rect" || !is.null(tr$categories))
+      return(list(fun = NULL, col = pal[1L]))
     rng <- range(v, na.rm = TRUE)
     if (is.null(pal)) pal <- if (rng[1L] < 0 && rng[2L] > 0) .hs_diverging()
                              else .hs_sequential()
@@ -660,8 +707,12 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
 
   # --- the legend: one entry per ring, measured in mm (width-independent) ---
   use_legend <- isTRUE(legend) && legend_position != "none"
-  legend_items <- lapply(tracks, function(tr) {
-    if (tr$type == "rect") {
+  legend_items <- unlist(lapply(tracks, function(tr) {
+    if (!is.null(tr$categories))                  # one chip per category
+      return(lapply(tr$categories, function(l)
+        list(kind = "chip", name = l, mark = "square",
+             col = unname(tr$palette[[l]]), wt = .hs_text_mm(l))))
+    list(if (tr$type == "rect") {
       rf  <- ring_fill(tr)
       lab <- c(rf$lab[1L], rf$lab[length(rf$lab)])
       lo  <- as.character(signif(lab[1L], 2))
@@ -674,8 +725,8 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
            mark = if (tr$type == "points") "points" else "line",
            col = (tr$palette %||% "#0072B2")[1L],
            wt = .hs_text_mm(tr$name))
-    }
-  })
+    })
+  }), recursive = FALSE)
   layout_at <- function(w_mm)
     .hs_legend_layout(legend_items,
                       if (legend_position == "bottom") "flow" else "stack",
@@ -799,8 +850,16 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
             mid <- (s + e) / 2
             s[narrow] <- pmax(xl[1L], mid[narrow] - min_bp / 2)
             e[narrow] <- pmin(xl[2L], mid[narrow] + min_bp / 2)
-            circlize::circos.rect(s, rep(0, nrow(sd)), e, rep(1, nrow(sd)),
-                                  col = rf$fun(sd$.val), border = NA)
+            if (is.null(tr$categories)) {
+              fill <- rf$fun(sd$.val)
+              o <- seq_len(nrow(sd))
+            } else {                     # later levels draw on top
+              fill <- unname(tr$palette[sd$.cat])
+              o <- order(match(sd$.cat, tr$categories))
+            }
+            circlize::circos.rect(s[o], rep(0, nrow(sd)), e[o],
+                                  rep(1, nrow(sd)), col = fill[o],
+                                  border = NA)
           })
       } else if (tr$type %in% c("points", "line")) {
         rng <- range(d$.val, na.rm = TRUE)
