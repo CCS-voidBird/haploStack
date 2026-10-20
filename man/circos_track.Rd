@@ -29,7 +29,7 @@ circos_track(
 y for \code{"points"}/\code{"line"}, the ranking for \code{"labels"}
 (optional there).}
 
-\item{name}{Ring name for the centre legend.}
+\item{name}{Ring name for the legend.}
 
 \item{palette}{For \code{"rect"}: length-2 (sequential low/high) or
 length-3 (diverging low/mid/high, anchored at 0) colour vector; defaults

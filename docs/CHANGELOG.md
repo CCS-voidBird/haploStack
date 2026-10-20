@@ -710,6 +710,79 @@ published repo ships:
   holder is still "University of Queensland", which is a rights statement, not an
   authorship one, and it already matches the published copy byte for byte.
 
+## [0.8.2] - 2026-10-20 — The legend can leave the circle
+
+Owner request 2026-10-20, a stage-6 follow-up on thread
+[#033](project_record/threads/033-block-annotation-native.md): the 0.8.1 SIM
+circos (`data/SIM/.../haplostack_annotation/circos/sim_meta_circos_183mm.png`)
+has its legend in the centre — "add the option that can place it to bottom
+(right/left) or somewhere else to make clean main plot". 150 exports
+(unchanged).
+
+### Added
+
+- **`plot_meta_circos(legend_position = )`** — `"center"` (the default and
+  0.8.1's placement; `"centre"` accepted), `"bottomright"`, `"bottomleft"`,
+  `"topright"`, `"topleft"` (one column tucked into that corner, outside the
+  circle), `"bottom"` (the entries in rows under the circle, wrapped at the
+  page width, each row centred, a chip on its row's colourbar centre line), or
+  `"none"`. It is the last argument, so positional calls are unaffected;
+  `legend = FALSE` still turns the legend off.
+- **An outside legend keeps the circle at its declared size.** The canvas
+  grows down (bottom positions) or up (top positions), never sideways, so
+  the declared journal width holds. It grows only as far as the legend box
+  needs to clear the chr bar's tick labels (5 mm reach + 1.5 mm air); a
+  corner box uses the free corner first. On the SIM six-ring figure the corners add
+  nothing at 183 mm and make the 89 mm figure 112.3 mm tall; `"bottom"`
+  gives 183.8 mm and 99.8 mm (two rows).
+- **`hs_meta_circos$height_mm(width_mm)`** — the figure height at a width.
+  `save_journal_figure(height = NULL)` takes the page height from it; an
+  object saved by ≤ 0.8.1 has no such field and stays square.
+- The legend is measured in mm before any device exists, from Helvetica's
+  advance widths (R's own `grDevices/afm/Helvetica.afm.gz`; Arial, the cairo /
+  ragg sans, is metric-compatible) — internal `.hs_text_mm()`,
+  `.hs_legend_layout()`, `.hs_circos_frame()`, `.hs_legend_anchor()`,
+  `.hs_draw_legend()`.
+
+### Fixed
+
+- **Colourbar titles overprinted their bars** in the centre legend (the
+  0.8.1 SIM 183 mm PNG: "genes / block", "GY effect", "NFNB effect"). Two
+  causes. The title sat 0.7 mm under its row top with the bar top only
+  1.4 mm down, so descenders reached the bar. And the legend's mm went
+  through `.mm_frac()`, whose mm come out ~8 % short on the page (circlize
+  plots with R's 4 % axis padding per side), so the geometry shrank while the
+  pt text did not. The legend is now laid out in true mm read off the live
+  device (`par("usr")` / `par("pin")`): title centre 0.9 mm and bar top
+  2.3 mm under the entry top. Ring heights still go through `.mm_frac()` and
+  are unchanged — INDEX discrepancy **36**.
+- **The centre-legend fit check measures the box.** The box's half-diagonal
+  plus 1.5 mm must fit inside the hole, less whatever an innermost label
+  ring's text reaches into it. The old rule was hole radius ≥ 18 mm. The SIM
+  figure comes out the same: the legend fits at 183 mm and is skipped at
+  89 mm. The skip message now names `legend_position`.
+
+### Tests
+
+- `test-circos-meta.R` 66 → 145 assertions:
+  - the AFM table matches R's file;
+  - the stack and flow layout arithmetic;
+  - for every outside position at 89 and 183 mm, the anchored box clears the
+    circle by the tick-label reach plus air, stays on the page, and the page
+    aspect equals `height_mm`;
+  - every position renders without skipping;
+  - the centre-skip message names `legend_position`;
+  - the saver's page height (pdftools-gated).
+- Suite **3 031 pass / 0 fail / 12 skips** against the dev tree (= 0.8.1's 2 952 + 79).
+
+### Verified
+
+- The SIM six-ring figure was re-rendered at every position × 89 / 183 mm and
+  checked by eye: the corner legend sits clear of the chr 3 / chr 4 tick labels,
+  the bottom strip is one row at 183 mm and two at 89 mm, and the titles clear
+  their bars. Renders are in
+  `data/SIM/.../haplostack_annotation/circos/legend_position_0.8.2/`.
+
 ## [0.8.1] - 2026-10-19 — The catalogue draws the annotation: the circos meta plot and the journal standard
 
 BAN stage 6, the viz phase (thread

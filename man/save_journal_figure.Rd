@@ -22,8 +22,9 @@ method drawn at author size.}
 
 \item{width}{\code{"single"}, \code{"onehalf"}, \code{"double"}, or mm.}
 
-\item{height}{Height in mm; \code{NULL} = the width (square — the circos
-default) for \code{hs_meta_circos}, else 0.75 × width.}
+\item{height}{Height in mm; \code{NULL} = the object's own height at that
+width for \code{hs_meta_circos} (\code{$height_mm()}: square unless an
+outside legend adds room), else 0.75 × width.}
 
 \item{dpi}{Raster resolution for \code{.png} (default 600).}
 }

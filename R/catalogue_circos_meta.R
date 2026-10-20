@@ -81,7 +81,7 @@
 #' @param value_col Column mapped to the mark's value: fill for \code{"rect"},
 #'   y for \code{"points"}/\code{"line"}, the ranking for \code{"labels"}
 #'   (optional there).
-#' @param name   Ring name for the centre legend.
+#' @param name   Ring name for the legend.
 #' @param palette For \code{"rect"}: length-2 (sequential low/high) or
 #'   length-3 (diverging low/mid/high, anchored at 0) colour vector; defaults
 #'   to diverging when the values cross 0, sequential otherwise. For point /
@@ -358,6 +358,176 @@ track_marker_labels <- function(x, meta = NULL, value_col = NULL,
   5000e6
 }
 
+
+# --- the legend: measured in mm, in the hole or outside the circle -------------
+
+# Helvetica advance widths (1/1000 em) for ASCII 32–126, from R's own
+# grDevices/afm/Helvetica.afm.gz; Arial (the cairo / ragg "sans") is
+# metric-compatible. They size the legend box in mm before any device exists.
+.hs_helv_afm <- c(
+  278L, 278L, 355L, 556L, 556L, 889L, 667L, 222L, 333L, 333L, 389L, 584L,
+  278L, 333L, 278L, 278L, 556L, 556L, 556L, 556L, 556L, 556L, 556L, 556L,
+  556L, 556L, 278L, 278L, 584L, 584L, 584L, 556L, 1015L, 667L, 667L, 722L,
+  722L, 667L, 611L, 778L, 722L, 278L, 500L, 667L, 556L, 833L, 722L, 778L,
+  667L, 778L, 722L, 667L, 611L, 722L, 667L, 944L, 667L, 667L, 611L, 278L,
+  278L, 278L, 469L, 556L, 222L, 556L, 556L, 500L, 556L, 556L, 278L, 556L,
+  556L, 222L, 222L, 500L, 222L, 833L, 556L, 556L, 556L, 556L, 333L, 500L,
+  278L, 556L, 500L, 722L, 500L, 500L, 500L, 334L, 260L, 334L, 584L)
+
+# Printed width (mm) of each string at `pt` points; a character outside
+# ASCII counts as a digit (556).
+.hs_text_mm <- function(x, pt = 5) {
+  vapply(as.character(x), function(s) {
+    if (is.na(s)) return(0)
+    cp <- utf8ToInt(s)
+    w <- rep(556L, length(cp))
+    ok <- cp >= 32L & cp <= 126L
+    w[ok] <- .hs_helv_afm[cp[ok] - 31L]
+    sum(w) / 1000 * pt * 25.4 / 72
+  }, numeric(1L), USE.NAMES = FALSE)
+}
+
+# Legend geometry, mm at print size (text is 5 pt). A colourbar entry: title
+# centred 0.9 mm under its top, a 10 x 1.6 mm bar from 2.3 mm, min / max
+# beside the bar — 3.9 mm tall. A chip entry (point, line or leader): chip
+# and name centred 1.3 mm under its top — 2.6 mm tall. `reach` is how far
+# the tick labels stand outside the chr bar, `air` the clearance kept from
+# them, `margin` the gap to the page edge.
+.hs_lg <- list(bar_w = 10, bar_h = 1.6, bar_top = 2.3, title_y = 0.9,
+               bar_item_h = 3.9, chip_y = 1.3, chip_item_h = 2.6,
+               lab_gap = 0.8, chip_name = 2, row_gap = 1.4, col_gap = 3.5,
+               margin = 1.5, reach = 5, air = 1.5)
+
+# Lay the entries out (mm). "stack" = one column (centre and corners), every
+# bar and chip on one shared gutter; "flow" = rows across the page (bottom),
+# wrapping at avail_mm, each row centred, a chip in a row with a colourbar
+# sitting on the bar's centre line. Returns the box size and each entry's
+# top-left offset and gutter, in mm from the box's top-left.
+.hs_legend_layout <- function(items, mode = c("stack", "flow"),
+                              avail_mm = Inf) {
+  mode <- match.arg(mode)
+  g <- .hs_lg
+  n <- length(items)
+  is_bar <- vapply(items, function(it) it$kind == "bar", logical(1L))
+  own <- vapply(items, function(it)
+    if (it$kind == "bar") it$wl + g$lab_gap else 1, numeric(1L))
+  gutter <- if (mode == "stack") rep(max(own), n) else own
+  width <- vapply(seq_len(n), function(i) {
+    it <- items[[i]]
+    if (it$kind == "bar") gutter[i] + max(g$bar_w + g$lab_gap + it$wr, it$wt)
+    else gutter[i] + g$chip_name + it$wt
+  }, numeric(1L))
+  height <- ifelse(is_bar, g$bar_item_h, g$chip_item_h)
+
+  if (mode == "stack")
+    return(list(w = max(width), h = sum(height) + g$row_gap * (n - 1L),
+                x = rep(0, n), y = cumsum(c(0, height[-n] + g$row_gap)),
+                gutter = gutter))
+
+  row <- integer(n); r <- 1L; run <- 0
+  for (i in seq_len(n)) {
+    if (run > 0 && run + g$col_gap + width[i] > avail_mm) {
+      r <- r + 1L; run <- 0
+    }
+    run <- run + (if (run > 0) g$col_gap else 0) + width[i]
+    row[i] <- r
+  }
+  has_bar <- vapply(seq_len(r), function(k) any(is_bar[row == k]),
+                    logical(1L))
+  off <- ifelse(!is_bar & has_bar[row],
+                g$bar_top + g$bar_h / 2 - g$chip_y, 0)
+  row_w <- vapply(seq_len(r), function(k)
+    sum(width[row == k]) + g$col_gap * (sum(row == k) - 1L), numeric(1L))
+  row_h <- vapply(seq_len(r), function(k) max((off + height)[row == k]),
+                  numeric(1L))
+  box_w <- max(row_w)
+  x <- numeric(n)
+  for (k in seq_len(r)) {
+    idx <- which(row == k)
+    x[idx] <- (box_w - row_w[k]) / 2 +
+      cumsum(c(0, width[idx] + g$col_gap))[seq_along(idx)]
+  }
+  list(w = box_w, h = sum(row_h) + g$row_gap * (r - 1L), x = x,
+       y = cumsum(c(0, row_h[-r] + g$row_gap))[row] + off, gutter = gutter)
+}
+
+# The canvas for a legend position at a declared width. circlize plots with
+# asp = 1 and R's 4 % axis padding per side, so the page shows a half-width of
+# 1.06 * 1.08 canvas units across width_mm. An outside legend extends the
+# canvas down (bottom*) or up (top*) — never sideways, so the declared width
+# and the circle's size hold — only as far as the box needs to clear the
+# circle (chr bar + tick labels + air); a corner box uses the free corner
+# first. Returns the canvas ylim and the page height (mm) that keeps 1:1.
+.hs_circos_frame <- function(position, box_w, box_h, width_mm) {
+  g <- .hs_lg
+  V  <- 1.06 * 1.08
+  k  <- 2 * V / width_mm                         # canvas units per mm
+  rc <- 1 + (g$reach + g$air) * k
+  w  <- box_w * k; h <- box_h * k; m <- g$margin * k
+  # |y| the box's inner edge must reach, given its inner |x|
+  clear_y <- function(x_in)
+    if (x_in >= rc) -Inf else if (x_in <= 0) rc else sqrt(rc^2 - x_in^2)
+  lo <- -V; hi <- V
+  if (position == "bottom") lo <- min(lo, -rc - h - m)
+  if (position %in% c("bottomright", "bottomleft"))
+    lo <- min(lo, -clear_y(V - m - w) - h - m)
+  if (position %in% c("topright", "topleft"))
+    hi <- max(hi, clear_y(V - m - w) + h + m)
+  span <- (hi - lo) / 1.08
+  list(ylim = c(lo + 0.04 * span, hi - 0.04 * span),
+       height_mm = width_mm * (hi - lo) / (2 * V))
+}
+
+# Top-left corner (canvas units) of the legend box on the drawn plot: `k`
+# canvas units per mm on the live device, `usr` its visible extent.
+.hs_legend_anchor <- function(position, box_w, box_h, k, usr) {
+  g <- .hs_lg
+  w <- box_w * k; h <- box_h * k; m <- g$margin * k
+  switch(position,
+         center      = c(-w / 2, h / 2),
+         bottom      = c(-w / 2, -(1 + (g$reach + g$air) * k)),
+         bottomright = c(usr[2L] - m - w, usr[3L] + m + h),
+         bottomleft  = c(usr[1L] + m, usr[3L] + m + h),
+         topright    = c(usr[2L] - m - w, usr[4L] - m),
+         topleft     = c(usr[1L] + m, usr[4L] - m))
+}
+
+# Draw the laid-out entries with the box's top-left at (left, top).
+.hs_draw_legend <- function(items, lay, left, top, k) {
+  g <- .hs_lg
+  cex <- .pt_cex(5)
+  for (i in seq_along(items)) {
+    it <- items[[i]]
+    y0 <- top - lay$y[i] * k
+    gx <- left + (lay$x[i] + lay$gutter[i]) * k
+    if (it$kind == "bar") {
+      br <- gx + g$bar_w * k
+      yb <- y0 - (g$bar_top + g$bar_h / 2) * k
+      hb <- g$bar_h / 2 * k
+      graphics::text(gx, y0 - g$title_y * k, it$name, adj = c(0, 0.5),
+                     cex = cex, col = "black")
+      xs <- seq(gx, br, length.out = 25L)
+      graphics::rect(xs[-25L], yb - hb, xs[-1L], yb + hb,
+                     col = it$fun(seq(it$lab[1L], it$lab[2L],
+                                      length.out = 24L)),
+                     border = NA)
+      graphics::text(gx - g$lab_gap * k, yb, it$lo, adj = c(1, 0.5),
+                     cex = cex, col = "black")
+      graphics::text(br + g$lab_gap * k, yb, it$hi, adj = c(0, 0.5),
+                     cex = cex, col = "black")
+    } else {
+      yc <- y0 - g$chip_y * k
+      if (it$mark == "points")
+        graphics::points(gx, yc, pch = 16, cex = .pt_cex(4), col = it$col)
+      else
+        graphics::segments(gx - k, yc, gx + k, yc, col = it$col,
+                           lwd = .lwd_pt(0.75))
+      graphics::text(gx + g$chip_name * k, yc, it$name, adj = c(0, 0.5),
+                     cex = cex, col = "black")
+    }
+  }
+}
+
 #' Circos meta plot — a ranked track list inside a chr–pos bar outline
 #'
 #' The polar analogue of \code{\link{plot_meta_alignment}} (Q25.n): the caller
@@ -365,8 +535,9 @@ track_marker_labels <- function(x, meta = NULL, value_col = NULL,
 #' function owns the shared frame. The outermost ring is always the
 #' \strong{chr–pos bar} — one sector per chromosome in natural order,
 #' Okabe–Ito colours, Mb ticks — and \code{tracks[[1]]} is the outermost data
-#' ring, the last element the innermost. A centre legend names each ring
-#' (with a mini colourbar for \code{"rect"} rings).
+#' ring, the last element the innermost. A legend names each ring (with a
+#' mini colourbar for \code{"rect"} rings) — in the centre by default, or
+#' outside the circle via \code{legend_position}.
 #'
 #' Sizing follows \code{dev/figure_standards_nature.md}: the figure is
 #' authored at \code{width_mm} (89 mm single column by default) — ring heights
@@ -391,12 +562,25 @@ track_marker_labels <- function(x, meta = NULL, value_col = NULL,
 #'   parameters.
 #' @param chr_colors Optional named colours per chromosome (default
 #'   Okabe–Ito in natural order).
-#' @param legend Draw the centre legend (default \code{TRUE}).
+#' @param legend Draw the legend (default \code{TRUE}); \code{FALSE} is
+#'   \code{legend_position = "none"}.
 #' @param draw  Render now on the current device (default \code{TRUE}).
+#' @param legend_position Where the legend goes: \code{"center"} (default;
+#'   \code{"centre"} also accepted) inside the hole, skipped with a message
+#'   when the hole is too small for it; \code{"bottomright"},
+#'   \code{"bottomleft"}, \code{"topright"} or \code{"topleft"} — one column
+#'   tucked into that corner, outside the circle; \code{"bottom"} — the
+#'   entries in rows under the circle; or \code{"none"}. An outside legend
+#'   keeps the circle at its declared size and makes the figure taller by
+#'   only what the legend needs — often nothing for a corner at double
+#'   column — never wider; \code{\link{save_journal_figure}} takes the page
+#'   height from \code{$height_mm()}.
 #'
 #' @return Invisibly, an \code{hs_meta_circos} object: \code{$render(width_mm)}
 #'   re-draws the figure at any declared width (what
-#'   \code{\link{save_journal_figure}} calls), plus the frame parameters.
+#'   \code{\link{save_journal_figure}} calls), \code{$height_mm(width_mm)}
+#'   gives the figure height at that width (the width itself unless an
+#'   outside legend needs room), plus the frame parameters.
 #'
 #' @seealso \code{\link{circos_track}}, \code{\link{track_annotation}},
 #'   \code{\link{track_block_effect}}, \code{\link{track_block_variance}},
@@ -406,7 +590,13 @@ track_marker_labels <- function(x, meta = NULL, value_col = NULL,
 plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
                              rel_heights = NULL, width_mm = 89,
                              gap_degree = 2, start_degree = 90,
-                             chr_colors = NULL, legend = TRUE, draw = TRUE) {
+                             chr_colors = NULL, legend = TRUE, draw = TRUE,
+                             legend_position = c("center", "bottomright",
+                                                 "bottomleft", "topright",
+                                                 "topleft", "bottom",
+                                                 "none")) {
+  if (identical(legend_position, "centre")) legend_position <- "center"
+  legend_position <- match.arg(legend_position)
   if (!requireNamespace("circlize", quietly = TRUE))
     stop("plot_meta_circos: the 'circlize' package is required. ",
          "Install it with install.packages('circlize').")
@@ -468,6 +658,35 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
     }
   }
 
+  # --- the legend: one entry per ring, measured in mm (width-independent) ---
+  use_legend <- isTRUE(legend) && legend_position != "none"
+  legend_items <- lapply(tracks, function(tr) {
+    if (tr$type == "rect") {
+      rf  <- ring_fill(tr)
+      lab <- c(rf$lab[1L], rf$lab[length(rf$lab)])
+      lo  <- as.character(signif(lab[1L], 2))
+      hi  <- as.character(signif(lab[2L], 2))
+      list(kind = "bar", name = tr$name, fun = rf$fun, lab = lab,
+           lo = lo, hi = hi, wt = .hs_text_mm(tr$name),
+           wl = .hs_text_mm(lo), wr = .hs_text_mm(hi))
+    } else {
+      list(kind = "chip", name = tr$name,
+           mark = if (tr$type == "points") "points" else "line",
+           col = (tr$palette %||% "#0072B2")[1L],
+           wt = .hs_text_mm(tr$name))
+    }
+  })
+  layout_at <- function(w_mm)
+    .hs_legend_layout(legend_items,
+                      if (legend_position == "bottom") "flow" else "stack",
+                      avail_mm = w_mm - 2 * .hs_lg$margin)
+  outside <- use_legend && legend_position != "center"
+  frame_at <- function(w_mm) {
+    if (!outside) return(list(ylim = c(-1.06, 1.06), height_mm = w_mm))
+    lay <- layout_at(w_mm)
+    .hs_circos_frame(legend_position, lay$w, lay$h, w_mm)
+  }
+
   render <- function(width_mm_now = width_mm) {
     small <- heights_mm[heights_mm < 2.5]
     if (length(small) > 0L)
@@ -476,8 +695,9 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
               "rings for journal legibility.")
 
     # Radial budget: ring heights are physical mm, so the centre hole shrinks
-    # as rings stack. A cramped hole makes the innermost ring (and the centre
-    # legend) collide — say so, and drop the legend rather than overprint it.
+    # as rings stack. A cramped hole makes the innermost ring (and a centre
+    # legend) collide — say so, and drop a centre legend rather than overprint
+    # it, pointing at the outside positions.
     radius_mm <- width_mm_now / (2 * 1.06)
     used_mm   <- 2.2 + 2.5 + sum(heights_mm) + 0.8 * (length(tracks) + 1L)
     hole_mm   <- radius_mm - used_mm
@@ -486,11 +706,27 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
               round(sum(heights_mm), 1), " mm) leave a ",
               max(0, round(hole_mm)), " mm centre at ", width_mm_now,
               " mm width — use double column (183 mm) or fewer rings.")
-    do_legend <- isTRUE(legend) && hole_mm >= 18
-    if (isTRUE(legend) && !do_legend)
-      message("plot_meta_circos: the centre is too small for the legend at ",
-              width_mm_now, " mm — legend skipped (it fits at double ",
-              "column).")
+    lay <- if (use_legend) layout_at(width_mm_now)
+    do_legend <- use_legend
+    if (use_legend && !outside) {
+      # The box's half-diagonal (+ air) must fit inside the hole, less what
+      # an innermost label ring's text reaches into it.
+      k0 <- 2 * 1.06 * 1.08 / width_mm_now
+      hole_u <- 1 - .mm_frac(used_mm, width_mm_now)
+      last <- tracks[[length(tracks)]]
+      if (last$type == "labels")
+        hole_u <- min(hole_u, hole_u +
+                        0.76 * .mm_frac(heights_mm[length(tracks)],
+                                        width_mm_now) -
+                        max(.hs_text_mm(last$data$Name), 0) * k0)
+      do_legend <- (sqrt(lay$w^2 + lay$h^2) / 2 + .hs_lg$air) * k0 <= hole_u
+      if (!do_legend)
+        message("plot_meta_circos: the centre is too small for the legend ",
+                "at ", width_mm_now, " mm — legend skipped; ",
+                "legend_position = \"bottomright\" (or another outside ",
+                "position) draws it outside the circle.")
+    }
+    fr <- frame_at(width_mm_now)
 
     circlize::circos.clear()
     on.exit(circlize::circos.clear(), add = TRUE)
@@ -500,7 +736,7 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
                          track.margin = c(.mm_frac(0.4, width_mm_now),
                                           .mm_frac(0.4, width_mm_now)),
                          canvas.xlim = c(-1.06, 1.06),
-                         canvas.ylim = c(-1.06, 1.06),
+                         canvas.ylim = fr$ylim,
                          points.overflow.warning = FALSE)
     circlize::circos.initialize(sectors = factor(chr_levels,
                                                  levels = chr_levels),
@@ -616,55 +852,25 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
       }
     }
 
-    # Centre legend: one row per ring, in ink (5 pt), spaced so nothing
-    # collides — a mini colourbar with min/max beneath for rect rings, a
-    # chip + name for the rest.
+    # Legend: one entry per ring, in ink (5 pt) — a mini colourbar with
+    # min / max beside it for rect rings, a chip + name for the rest. Drawn
+    # in true mm off the live device (R's axis padding makes .mm_frac's mm
+    # ~8 % short of the page, which put the old centre legend's titles onto
+    # their bars), anchored by legend_position.
     if (do_legend) {
-      row_h <- vapply(tracks, function(tr)
-        if (tr$type == "rect") 6 else 3.4, numeric(1L))
-      row_h <- .mm_frac(row_h, width_mm_now)
-      bar_w <- .mm_frac(10, width_mm_now)
-      bar_h <- .mm_frac(1.6, width_mm_now)
-      tops <- cumsum(c(0, row_h[-length(row_h)]))
-      total_h <- sum(row_h)
-      for (k in seq_along(tracks)) {
-        tr <- tracks[[k]]
-        y_top <- total_h / 2 - tops[k]
-        if (tr$type == "rect") {
-          rf <- ring_fill(tr)
-          y_bar <- y_top - .mm_frac(2.2, width_mm_now)
-          graphics::text(-bar_w / 2, y_top - .mm_frac(0.7, width_mm_now),
-                         tr$name, adj = c(0, 0.5), cex = .pt_cex(5),
-                         col = "black")
-          brks <- seq(rf$lab[1L], rf$lab[length(rf$lab)], length.out = 24L)
-          xs <- seq(-bar_w / 2, bar_w / 2, length.out = 25L)
-          graphics::rect(xs[-25L], y_bar - bar_h / 2, xs[-1L],
-                         y_bar + bar_h / 2, col = rf$fun(brks), border = NA)
-          graphics::text(-bar_w / 2 - .mm_frac(0.8, width_mm_now), y_bar,
-                         signif(rf$lab[1L], 2), adj = c(1, 0.5),
-                         cex = .pt_cex(5), col = "black")
-          graphics::text(bar_w / 2 + .mm_frac(0.8, width_mm_now), y_bar,
-                         signif(rf$lab[length(rf$lab)], 2), adj = c(0, 0.5),
-                         cex = .pt_cex(5), col = "black")
-        } else {
-          col1 <- (tr$palette %||% "#0072B2")[1L]
-          y <- y_top - .mm_frac(1.2, width_mm_now)
-          if (tr$type == "points")
-            graphics::points(-bar_w / 2, y, pch = 16, cex = .pt_cex(4),
-                             col = col1)
-          else
-            graphics::segments(-bar_w / 2 - .mm_frac(1, width_mm_now), y,
-                               -bar_w / 2 + .mm_frac(1, width_mm_now), y,
-                               col = col1, lwd = .lwd_pt(0.75))
-          graphics::text(-bar_w / 2 + .mm_frac(2, width_mm_now), y, tr$name,
-                         adj = c(0, 0.5), cex = .pt_cex(5), col = "black")
-        }
-      }
+      usr <- graphics::par("usr")
+      k <- diff(usr[1:2]) / (graphics::par("pin")[1L] * 25.4)
+      a <- .hs_legend_anchor(legend_position, lay$w, lay$h, k, usr)
+      .hs_draw_legend(legend_items, lay, a[1L], a[2L], k)
     }
     invisible(NULL)
   }
 
   out <- structure(list(render = render, width_mm = width_mm,
+                        height_mm = function(width_mm)
+                          frame_at(width_mm)$height_mm,
+                        legend_position = if (use_legend) legend_position
+                                          else "none",
                         tracks = track_names, chr_levels = chr_levels),
                    class = "hs_meta_circos")
   if (isTRUE(draw)) render(width_mm)
@@ -745,8 +951,9 @@ theme_hs_journal <- function(base_size = 7, base_family = "sans") {
 #' @param file Output path; the extension picks the device (\code{.pdf} or
 #'   \code{.png}).
 #' @param width \code{"single"}, \code{"onehalf"}, \code{"double"}, or mm.
-#' @param height Height in mm; \code{NULL} = the width (square — the circos
-#'   default) for \code{hs_meta_circos}, else 0.75 × width.
+#' @param height Height in mm; \code{NULL} = the object's own height at that
+#'   width for \code{hs_meta_circos} (\code{$height_mm()}: square unless an
+#'   outside legend adds room), else 0.75 × width.
 #' @param dpi Raster resolution for \code{.png} (default 600).
 #'
 #' @return Invisibly, \code{file}.
@@ -762,7 +969,9 @@ save_journal_figure <- function(plot, file,
   w_mm <- if (is.numeric(width)) width
           else c(single = 89, onehalf = 120, double = 183)[[match.arg(width)]]
   is_circos <- inherits(plot, "hs_meta_circos")
-  h_mm <- height %||% if (is_circos) w_mm else w_mm * 0.75
+  h_mm <- height %||% if (!is_circos) w_mm * 0.75
+                      else if (is.function(plot$height_mm)) plot$height_mm(w_mm)
+                      else w_mm                     # an object from <= 0.8.1
 
   if (inherits(plot, "ggplot")) {
     tt <- plot$labels[c("title", "subtitle")]

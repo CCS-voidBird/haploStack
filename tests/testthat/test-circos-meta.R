@@ -123,6 +123,125 @@ test_that("plot_meta_circos renders, orders tracks, and re-renders by width", {
   expect_true(file.size(f2) > 0)
 })
 
+test_that("legend text is measured from Helvetica's metrics, in mm", {
+  expect_equal(.hs_text_mm("0", pt = 5), 0.556 * 5 * 25.4 / 72)
+  expect_equal(.hs_text_mm(c("ab", NA)), c(2 * 0.556 * 5 * 25.4 / 72, 0))
+  afm <- file.path(R.home("library"), "grDevices", "afm", "Helvetica.afm.gz")
+  skip_if_not(file.exists(afm))
+  l <- grep("^C [0-9]+ ;", readLines(gzfile(afm)), value = TRUE)
+  code <- as.integer(sub("^C ([0-9]+) ;.*", "\\1", l))
+  wx <- as.integer(sub(".*WX ([0-9]+) ;.*", "\\1", l))
+  expect_identical(.hs_helv_afm, wx[match(32:126, code)])
+})
+
+test_that("the legend lays out as one column or as wrapped, centred rows", {
+  items <- list(list(kind = "bar", wt = 10, wl = 4, wr = 3),
+                list(kind = "chip", wt = 12),
+                list(kind = "bar", wt = 20, wl = 1, wr = 3))
+  st <- .hs_legend_layout(items, "stack")
+  expect_equal(st$gutter, rep(4.8, 3))                 # one shared gutter
+  expect_equal(st$y, c(0, 3.9 + 1.4, 3.9 + 1.4 + 2.6 + 1.4))
+  expect_equal(st$h, 3.9 + 2.6 + 3.9 + 2 * 1.4)
+  expect_equal(st$w, 4.8 + 20)
+
+  # widths 18.6 / 15 / 21.8 with a 3.5 gap: the third entry wraps at 40 mm
+  fl <- .hs_legend_layout(items, "flow", avail_mm = 40)
+  expect_equal(fl$w, 18.6 + 3.5 + 15)
+  expect_equal(fl$x, c(0, 18.6 + 3.5, (fl$w - 21.8) / 2))
+  # the chip sits on its row's bar centre line; row 1 is then 4.4 mm tall
+  expect_equal(fl$y, c(0, 1.8, 4.4 + 1.4))
+  expect_equal(fl$h, 4.4 + 1.4 + 3.9)
+  expect_equal(.hs_legend_layout(items, "flow")$y, c(0, 1.8, 0))
+})
+
+test_that("an outside legend clears the circle and only ever adds height", {
+  fr <- .hs_circos_frame("center", 21, 26.5, 89)
+  expect_equal(fr$ylim, c(-1.06, 1.06))
+  expect_equal(fr$height_mm, 89)
+  V <- 1.06 * 1.08
+  for (w in c(89, 183)) for (pos in c("bottomright", "bottomleft",
+                                      "topright", "topleft", "bottom")) {
+    fr <- .hs_circos_frame(pos, 21, 26.5, w)
+    expect_gte(fr$height_mm, w)
+    # the page as R pads it (4 % per side), and the box as render() anchors it
+    sp  <- diff(fr$ylim)
+    usr <- c(-V, V, fr$ylim[1L] - 0.04 * sp, fr$ylim[2L] + 0.04 * sp)
+    expect_equal(diff(usr[3:4]) / diff(usr[1:2]), fr$height_mm / w)
+    k <- 2 * V / w
+    a <- .hs_legend_anchor(pos, 21, 26.5, k, usr)
+    bx <- c(a[1L], a[1L] + 21 * k); by <- c(a[2L] - 26.5 * k, a[2L])
+    near <- function(r) if (r[1L] > 0) r[1L] else if (r[2L] < 0) r[2L] else 0
+    expect_gte(sqrt(near(bx)^2 + near(by)^2), 1 + (5 + 1.5) * k - 1e-9)
+    expect_true(bx[1L] >= usr[1L] && bx[2L] <= usr[2L] &&
+                  by[1L] >= usr[3L] - 1e-9 && by[2L] <= usr[4L] + 1e-9)
+  }
+  # at double column a corner legend fits the free corner: no extra height
+  expect_equal(.hs_circos_frame("bottomright", 21, 26.5, 183)$height_mm, 183)
+  expect_gt(.hs_circos_frame("bottomright", 21, 26.5, 89)$height_mm, 89)
+})
+
+test_that("legend_position renders every placement and sizes the saved page", {
+  skip_if_not_installed("circlize")
+  fx <- .circos_fixture()
+  tracks <- list(track_annotation(fx$ann),
+                 track_block_effect(fx$analysis, trait = "T1"),
+                 track_marker_labels(
+                   data.frame(Chrom = "1", Pos = 5e6, Name = "L1", w = 1),
+                   value_col = "w"))
+  expect_error(plot_meta_circos(tracks, meta = fx$meta, draw = FALSE,
+                                legend_position = "middle"), "should be one")
+
+  sq <- plot_meta_circos(tracks, meta = fx$meta, draw = FALSE)
+  expect_identical(sq$legend_position, "center")
+  expect_equal(sq$height_mm(89), 89)
+  expect_identical(plot_meta_circos(tracks, meta = fx$meta, draw = FALSE,
+                                    legend_position = "centre")$legend_position,
+                   "center")
+  off <- plot_meta_circos(tracks, meta = fx$meta, draw = FALSE,
+                          legend = FALSE, legend_position = "bottom")
+  expect_identical(off$legend_position, "none")
+  expect_equal(off$height_mm(89), 89)
+
+  for (pos in c("bottomright", "bottomleft", "topright", "topleft",
+                "bottom")) {
+    obj <- plot_meta_circos(tracks, meta = fx$meta, draw = FALSE,
+                            legend_position = pos)
+    h <- obj$height_mm(89)
+    expect_gt(h, 89)
+    f <- tempfile(fileext = ".png")
+    grDevices::png(f, width = 89 / 25.4, height = h / 25.4, units = "in",
+                   res = 100, type = "cairo")
+    graphics::par(mar = c(0, 0, 0, 0))
+    msgs <- character(0)
+    withCallingHandlers(obj$render(89), message = function(m) {
+      msgs <<- c(msgs, conditionMessage(m))
+      invokeRestart("muffleMessage")
+    })
+    grDevices::dev.off()
+    expect_false(any(grepl("legend skipped", msgs)))
+    expect_true(file.size(f) > 0)
+  }
+
+  # a hole too small for a centre legend: skipped, pointing outside
+  f <- tempfile(fileext = ".png")
+  grDevices::png(f, width = 60 / 25.4, height = 60 / 25.4, units = "in",
+                 res = 100, type = "cairo")
+  suppressMessages(expect_message(sq$render(60), "legend_position"))
+  grDevices::dev.off()
+
+  # the saver takes the page height from the object
+  ob <- plot_meta_circos(tracks, meta = fx$meta, draw = FALSE,
+                         legend_position = "bottom")
+  f2 <- tempfile(fileext = ".pdf")
+  suppressMessages(save_journal_figure(ob, f2, width = "single"))
+  expect_true(file.size(f2) > 0)
+  if (requireNamespace("pdftools", quietly = TRUE)) {
+    sz <- pdftools::pdf_pagesize(f2)
+    expect_equal(sz$width, 89 / 25.4 * 72, tolerance = 0.01)
+    expect_equal(sz$height, ob$height_mm(89) / 25.4 * 72, tolerance = 0.01)
+  }
+})
+
 test_that("the angular deconfliction keeps top-ranked, gap-separated labels", {
   theta <- c(0, 0.05, 1, 2)
   value <- c(5, 10, 1, 3)

@@ -5,6 +5,16 @@
 Developed for the GRDC Barley Phase 2 project at the University of Queensland.
 Generalised for use with any biparental or multiparental diploid breeding programme.
 
+> ### 0.8.2 — the legend can leave the circle
+>
+> Owner request 2026-10-20, a stage-6 follow-up on thread
+> [#033](project_record/threads/033-block-annotation-native.md): the 0.8.1 SIM
+> circos
+> (`data/SIM/.../haplostack_annotation/circos/sim_meta_circos_183mm.png`) has
+> its legend in the centre — "add the option that can place it to bottom
+> (right/left) or somewhere else to make clean main plot". 150 exports
+> (unchanged).
+>
 > ### 0.8.1 — the catalogue draws the annotation: the circos meta plot and the journal standard
 >
 > BAN stage 6, the viz phase (thread [#033](project_record/threads/033-block-

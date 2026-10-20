@@ -14,7 +14,9 @@ plot_meta_circos(
   start_degree = 90,
   chr_colors = NULL,
   legend = TRUE,
-  draw = TRUE
+  draw = TRUE,
+  legend_position = c("center", "bottomright", "bottomleft", "topright", "topleft",
+    "bottom", "none")
 )
 }
 \arguments{
@@ -38,14 +40,28 @@ parameters.}
 \item{chr_colors}{Optional named colours per chromosome (default
 Okabe–Ito in natural order).}
 
-\item{legend}{Draw the centre legend (default \code{TRUE}).}
+\item{legend}{Draw the legend (default \code{TRUE}); \code{FALSE} is
+\code{legend_position = "none"}.}
 
 \item{draw}{Render now on the current device (default \code{TRUE}).}
+
+\item{legend_position}{Where the legend goes: \code{"center"} (default;
+\code{"centre"} also accepted) inside the hole, skipped with a message
+when the hole is too small for it; \code{"bottomright"},
+\code{"bottomleft"}, \code{"topright"} or \code{"topleft"} — one column
+tucked into that corner, outside the circle; \code{"bottom"} — the
+entries in rows under the circle; or \code{"none"}. An outside legend
+keeps the circle at its declared size and makes the figure taller by
+only what the legend needs — often nothing for a corner at double
+column — never wider; \code{\link{save_journal_figure}} takes the page
+height from \code{$height_mm()}.}
 }
 \value{
 Invisibly, an \code{hs_meta_circos} object: \code{$render(width_mm)}
 re-draws the figure at any declared width (what
-\code{\link{save_journal_figure}} calls), plus the frame parameters.
+\code{\link{save_journal_figure}} calls), \code{$height_mm(width_mm)}
+gives the figure height at that width (the width itself unless an
+outside legend needs room), plus the frame parameters.
 }
 \description{
 The polar analogue of \code{\link{plot_meta_alignment}} (Q25.n): the caller
@@ -53,8 +69,9 @@ supplies an ordered list of \code{\link{circos_track}} specs and this
 function owns the shared frame. The outermost ring is always the
 \strong{chr–pos bar} — one sector per chromosome in natural order,
 Okabe–Ito colours, Mb ticks — and \code{tracks[[1]]} is the outermost data
-ring, the last element the innermost. A centre legend names each ring
-(with a mini colourbar for \code{"rect"} rings).
+ring, the last element the innermost. A legend names each ring (with a
+mini colourbar for \code{"rect"} rings) — in the centre by default, or
+outside the circle via \code{legend_position}.
 }
 \details{
 Sizing follows \code{dev/figure_standards_nature.md}: the figure is
