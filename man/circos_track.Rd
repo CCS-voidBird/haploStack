@@ -12,18 +12,28 @@ circos_track(
   palette = NULL,
   height_mm = NULL,
   label_top_n = 10L,
-  min_gap_rad = 0.14
+  min_gap_rad = 0.14,
+  window_bp = NULL,
+  window_name = "search window"
 )
 }
 \arguments{
 \item{data}{data.frame/data.table with \code{Chrom} and \code{Start}/
 \code{End} (for \code{"rect"}) or \code{Pos} (for \code{"points"},
-\code{"line"}, \code{"labels"}; \code{"rect"} data carrying only
-\code{Pos} is widened to a visible sliver). \code{"labels"} also needs
-\code{Name}.}
+\code{"line"}; \code{"rect"} data carrying only \code{Pos} is widened to
+a visible sliver). \code{"labels"} needs \code{Name} and a
+\strong{region} per locus: \code{Start}/\code{End} (a gene model, a QTL
+interval); a locus reported at a single coordinate \code{a} (\code{Pos}
+alone, only one of \code{Start}/\code{End}, or \code{Start == End})
+becomes \code{Start = a}, \code{End = a + 1}, and a reversed span is
+swapped. Optional \code{Window_start}/\code{Window_end} give each
+locus's search window (see \code{window_bp}).}
 
 \item{type}{Mark: \code{"rect"} (filled block segments), \code{"points"},
-\code{"line"}, or \code{"labels"} (leader line + text).}
+\code{"line"}, or \code{"labels"} (each locus's region as a band at the
+ring's outer edge, its text just inside, and — when present — its
+search window as a lighter, taller band behind the region, with no
+text).}
 
 \item{value_col}{Column mapped to the mark's value: fill for \code{"rect"},
 y for \code{"points"}/\code{"line"}, the ranking for \code{"labels"}
@@ -41,8 +51,10 @@ to diverging when the values cross 0, sequential otherwise. For a
 categorical \code{"rect"} ring: a colour vector named by category (it
 must name every category; its order sets the level order unless the
 column is a factor), or an unnamed vector recycled in level order
-(default Okabe–Ito). For point / line / label marks: a single colour
-(defaults drawn from the Okabe–Ito order).}
+(default Okabe–Ito). For point / line marks: a single colour (defaults
+drawn from the Okabe–Ito order). For \code{"labels"}: the region colour,
+optionally followed by the search-window colour (defaults
+\code{"grey20"} and Okabe–Ito sky blue \code{"#56B4E9"}).}
 
 \item{height_mm}{Ring height in mm at the declared figure width (defaults
 per type: rect 3.5, line 4.5, points 5.5, labels 8).}
@@ -52,6 +64,14 @@ per type: rect 3.5, line 4.5, points 5.5, labels 8).}
 
 \item{min_gap_rad}{\code{"labels"} only: minimum angular gap between kept
 labels (default 0.14 rad, the Python circos' deconfliction gap).}
+
+\item{window_bp}{\code{"labels"} only: a search window of the region
+\eqn{\pm} \code{window_bp} bp (floored at 0) for every locus without its
+own \code{Window_start}/\code{Window_end}. \code{NULL} (default): only
+those columns give windows; with neither, no window is drawn.}
+
+\item{window_name}{\code{"labels"} only: the search window's legend name
+(default \code{"search window"}). The window has no text of its own.}
 }
 \value{
 An \code{hs_circos_track} spec.

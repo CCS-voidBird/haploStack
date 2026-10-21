@@ -710,6 +710,100 @@ published repo ships:
   holder is still "University of Queensland", which is a rights statement, not an
   authorship one, and it already matches the published copy byte for byte.
 
+## [0.8.4] - 2026-10-21 — A label marks a region, and its search window
+
+Owner request 2026-10-21 on the circos label ring, thread
+[#033](project_record/threads/033-block-annotation-native.md):
+1. "the annotation labels (the text label for genes) need to be regions
+   rather than snp position (if reported as single, then use start=a and
+   end=a+1)";
+2. "If the searching window added, also show it with the gene region use a
+   different represenetation and with no text label (only legend)".
+
+150 exports (unchanged).
+
+### Changed
+
+- **A `"labels"` ring draws each locus as a region.** The region is a dark
+  band at the ring's outer edge (0.86–0.96 of the ring height), and the name
+  sits just inside it as before. The band replaces the leader line.
+  - Regions under 0.35 mm of arc are widened to 0.35 mm, measured in true mm
+    on the live device (`circlize::mm_x()`). A gene model shows as a short
+    dash; a 20 Mb QTL interval shows at its real width.
+  - The ring's legend chip is now a square in the region colour. Before, it
+    was a short line for the leader.
+- **The label data contract takes regions.** A `"labels"` ring reads
+  `Start`/`End`, and `Pos` is set to the region midpoint, which anchors the
+  text and the deconfliction angle.
+  - A locus reported at a single coordinate `a` becomes `Start = a`,
+    `End = a + 1`. This covers `Pos` alone, only one of `Start`/`End`, or
+    `Start == End`.
+  - A reversed span is swapped.
+- **`track_marker_labels()` takes `Chrom` + `Start`/`End` directly.** On the
+  `Marker` route it carries `Start`/`End`, the window columns and
+  `value_col` past the standardizer. A row without its own region falls
+  back to its marker's position.
+
+### Added
+
+- **Search windows on a label ring.** A window is drawn behind its region
+  as a taller band (0.82–1.0 of the ring height) in a second colour, with no
+  text. The legend gets one entry for it.
+  - Per locus: `Window_start`/`Window_end` columns. A missing side takes
+    the region's bound.
+  - For every locus without those columns:
+    `circos_track(window_bp =)` / `track_marker_labels(window_bp =)`, the
+    region ± `window_bp`, floored at 0. `NULL` (the default) means windows
+    come only from the columns. `window_bp` on a non-label track is an error.
+  - `window_name =` sets the legend entry (default `"search window"`). It
+    appears only when at least one drawn locus has a window.
+  - Colour: the label `palette`'s second element; default Okabe–Ito sky blue
+    `#56B4E9`. The first element stays the region colour (default
+    `grey20`).
+  - A window is always drawn at least 0.3 mm wider than its drawn region on
+    each side, so it reads as a halo even when both are below print
+    resolution (a 10 kb window around a gene). A window wider than that is
+    drawn at its true extent.
+- **`hs_meta_circos$legend`** — the legend entry names, in order.
+
+### Fixed
+
+- **A label locus with no usable position no longer stops the render.**
+  Loci without a position, or on a chromosome outside the frame, are now
+  dropped before the angular deconfliction. Before, their `NA` angle reached
+  `.hs_deconflict()`, which stopped with "missing value where TRUE/FALSE
+  needed" once any label had been kept. This was reproduced on the installed
+  0.8.4 build, calling the unchanged helper directly. An unplaced row from
+  `standardize_marker_annotations()` (unknown `Marker`, no position) is one
+  way to hit it.
+- **`track_marker_labels()` lost `value_col` on the `Marker` route.** The
+  standardizer returns its own columns only, so the ranking column was
+  dropped and the labels were deconflicted unranked, with no warning. It is
+  now carried over.
+
+### Tests
+
+- `test-circos-meta.R` 160 → 186 assertions:
+  - the region rules (single position, reversed, zero-length, one-sided);
+  - the window rules (columns win, `window_bp` fill floored at 0, one-sided
+    window, validation, `window_bp` on a non-label track);
+  - the `Marker` route carrying region, window and rank;
+  - the window's legend entry appears only when a drawn locus has a window;
+  - a locus off the frame is dropped, and the ring renders warning-free at
+    89 and 183 mm.
+- Suite **3 072 pass / 0 fail / 12 skips** against the dev tree (= 0.8.3's
+  3 046 + 26).
+
+### Verified
+
+- The SIM six-ring figure was re-rendered with the label ring rebuilt. The
+  six anchored major QTLs are drawn at their MorexV3 gene models
+  (`raw/gene_anchors_MorexV3.tsv`), the other six at their QTL marker
+  position as `[a, a + 1]`, with a ±5 Mb search window. Rendered at 89 and
+  183 mm with and without windows, and checked by eye. The renders and
+  script are in
+  `data/SIM/.../haplostack_annotation/circos/label_regions_0.8.4/`.
+
 ## [0.8.3] - 2026-10-20 — A ring can name categories
 
 Needed for the owner's real-data circos request of 2026-10-20 (VP1

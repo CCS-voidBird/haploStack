@@ -13,12 +13,15 @@ track_marker_labels(
   min_gap_rad = 0.14,
   name = "loci",
   palette = NULL,
-  height_mm = NULL
+  height_mm = NULL,
+  window_bp = NULL,
+  window_name = "search window"
 )
 }
 \arguments{
-\item{x}{data.frame with \code{Name} and \code{Chrom}+\code{Pos} or
-\code{Marker}; or an already-standardized table.}
+\item{x}{data.frame with \code{Name} and \code{Chrom} + \code{Start}/
+\code{End}, \code{Chrom} + \code{Pos}, or \code{Marker}; optional
+\code{Window_start}/\code{Window_end}; or an already-standardized table.}
 
 \item{meta}{GenoMeta for the \code{Marker} route (and for \code{match_bp}
 matching); optional when \code{x} carries positions.}
@@ -28,15 +31,31 @@ survive deconfliction first.}
 
 \item{match_bp}{Passed to the standardizer (default the shared 10 kb).}
 
-\item{label_top_n, min_gap_rad, name, palette, height_mm}{Passed to
-\code{\link{circos_track}}.}
+\item{label_top_n, min_gap_rad, name, palette, height_mm, window_name}{Passed
+to \code{\link{circos_track}} (\code{palette}: the region colour, then
+optionally the window colour).}
+
+\item{window_bp}{Optional search-window flank (bp) either side of each
+region, for loci without \code{Window_start}/\code{Window_end}.
+\code{NULL} (default) draws windows only from those columns.}
 }
 \value{
 An \code{hs_circos_track}.
 }
 \description{
-Builds a \code{"labels"} track (leader line + text, angularly deconflicted)
-from a marker-level annotation data.frame — the Q25.o contract: \code{Name}
-plus either \code{Chrom}+\code{Pos} or \code{Marker} (resolved through
-\code{\link{standardize_marker_annotations}} against \code{meta}).
+Builds a \code{"labels"} track from a locus-level annotation data.frame:
+each locus is drawn as its \strong{region} (a band at the ring's outer
+edge) with its name just inside, the names angularly deconflicted. The
+Q25.o contract plus regions: \code{Name} with \code{Chrom} +
+\code{Start}/\code{End} (a gene model, a QTL interval), or \code{Chrom} +
+\code{Pos}, or \code{Marker} (resolved through
+\code{\link{standardize_marker_annotations}} against \code{meta}). A locus
+reported at a single position \code{a} is drawn as \code{[a, a + 1]}.
+}
+\details{
+A \strong{search window} — the stretch searched around each locus, e.g.
+for markers or blocks — is drawn behind its region as a lighter, taller
+band with no text; the legend names it (\code{window_name}). Give it per
+locus as \code{Window_start}/\code{Window_end} columns, or for every locus
+as \code{window_bp} either side of the region.
 }

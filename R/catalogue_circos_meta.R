@@ -9,7 +9,8 @@
 #   track_block_effect()      — one trait ring from analyze_block_catalogue()
 #   track_block_variance()    — per-block variance (line or rect)
 #   track_marker_stat()       — marker-level points
-#   track_marker_labels()     — named loci with leader lines + deconfliction
+#   track_marker_labels()     — named loci as regions (+ optional search
+#                               window band) with deconflicted text
 #   plot_meta_circos()        — chr–pos bar outline + the ranked track list
 #   theme_hs_journal()        — the journal ggplot theme (post hoc)
 #   save_journal_figure()     — mm-width cairo_pdf/PNG saver; re-renders a
@@ -73,11 +74,19 @@
 #'
 #' @param data data.frame/data.table with \code{Chrom} and \code{Start}/
 #'   \code{End} (for \code{"rect"}) or \code{Pos} (for \code{"points"},
-#'   \code{"line"}, \code{"labels"}; \code{"rect"} data carrying only
-#'   \code{Pos} is widened to a visible sliver). \code{"labels"} also needs
-#'   \code{Name}.
+#'   \code{"line"}; \code{"rect"} data carrying only \code{Pos} is widened to
+#'   a visible sliver). \code{"labels"} needs \code{Name} and a
+#'   \strong{region} per locus: \code{Start}/\code{End} (a gene model, a QTL
+#'   interval); a locus reported at a single coordinate \code{a} (\code{Pos}
+#'   alone, only one of \code{Start}/\code{End}, or \code{Start == End})
+#'   becomes \code{Start = a}, \code{End = a + 1}, and a reversed span is
+#'   swapped. Optional \code{Window_start}/\code{Window_end} give each
+#'   locus's search window (see \code{window_bp}).
 #' @param type Mark: \code{"rect"} (filled block segments), \code{"points"},
-#'   \code{"line"}, or \code{"labels"} (leader line + text).
+#'   \code{"line"}, or \code{"labels"} (each locus's region as a band at the
+#'   ring's outer edge, its text just inside, and — when present — its
+#'   search window as a lighter, taller band behind the region, with no
+#'   text).
 #' @param value_col Column mapped to the mark's value: fill for \code{"rect"},
 #'   y for \code{"points"}/\code{"line"}, the ranking for \code{"labels"}
 #'   (optional there). For \code{"rect"}, a character or factor column makes
@@ -92,14 +101,22 @@
 #'   categorical \code{"rect"} ring: a colour vector named by category (it
 #'   must name every category; its order sets the level order unless the
 #'   column is a factor), or an unnamed vector recycled in level order
-#'   (default Okabe–Ito). For point / line / label marks: a single colour
-#'   (defaults drawn from the Okabe–Ito order).
+#'   (default Okabe–Ito). For point / line marks: a single colour (defaults
+#'   drawn from the Okabe–Ito order). For \code{"labels"}: the region colour,
+#'   optionally followed by the search-window colour (defaults
+#'   \code{"grey20"} and Okabe–Ito sky blue \code{"#56B4E9"}).
 #' @param height_mm Ring height in mm at the declared figure width (defaults
 #'   per type: rect 3.5, line 4.5, points 5.5, labels 8).
 #' @param label_top_n \code{"labels"} only: at most this many labels, highest
 #'   \code{value_col} first, after angular deconfliction. Default 10.
 #' @param min_gap_rad \code{"labels"} only: minimum angular gap between kept
 #'   labels (default 0.14 rad, the Python circos' deconfliction gap).
+#' @param window_bp \code{"labels"} only: a search window of the region
+#'   \eqn{\pm} \code{window_bp} bp (floored at 0) for every locus without its
+#'   own \code{Window_start}/\code{Window_end}. \code{NULL} (default): only
+#'   those columns give windows; with neither, no window is drawn.
+#' @param window_name \code{"labels"} only: the search window's legend name
+#'   (default \code{"search window"}). The window has no text of its own.
 #'
 #' @return An \code{hs_circos_track} spec.
 #' @seealso \code{\link{plot_meta_circos}}
@@ -107,16 +124,29 @@
 circos_track <- function(data, type = c("rect", "points", "line", "labels"),
                          value_col = NULL, name = NULL, palette = NULL,
                          height_mm = NULL, label_top_n = 10L,
-                         min_gap_rad = 0.14) {
+                         min_gap_rad = 0.14, window_bp = NULL,
+                         window_name = "search window") {
   type <- match.arg(type)
   dt <- as.data.table(data)
   if (!"Chrom" %in% names(dt))
     stop("circos_track: 'data' needs a Chrom column.")
   dt[, Chrom := as.character(Chrom)]
+  if (!is.null(window_bp)) {
+    if (type != "labels")
+      stop("circos_track: 'window_bp' applies to 'labels' tracks only.")
+    if (!is.numeric(window_bp) || length(window_bp) != 1L ||
+        !is.finite(window_bp) || window_bp < 0)
+      stop("circos_track: 'window_bp' must be a single number >= 0.")
+  }
 
   has_int <- all(c("Start", "End") %in% names(dt))
   has_pos <- "Pos" %in% names(dt)
-  if (type == "rect") {
+  if (type == "labels") {
+    if (!any(c("Start", "End", "Pos") %in% names(dt)))
+      stop("circos_track: a 'labels' track needs Start/End (a region) or ",
+           "Pos (a single position) columns.")
+    dt <- .hs_label_regions(dt, window_bp)
+  } else if (type == "rect") {
     if (!has_int && !has_pos)
       stop("circos_track: a 'rect' track needs Start/End (or Pos) columns.")
     if (!has_int) dt[, `:=`(Start = as.numeric(Pos), End = as.numeric(Pos))]
@@ -159,8 +189,65 @@ circos_track <- function(data, type = c("rect", "points", "line", "labels"),
                  categories = categories,
                  height_mm = as.numeric(height_mm),
                  label_top_n = as.integer(label_top_n),
-                 min_gap_rad = as.numeric(min_gap_rad)),
+                 min_gap_rad = as.numeric(min_gap_rad),
+                 window_name = as.character(window_name)),
             class = "hs_circos_track")
+}
+
+# A label ring's loci as regions. Start/End where given; a locus reported at a
+# single coordinate a (Pos alone, one of Start/End, or Start == End) becomes
+# [a, a + 1]; a reversed span is swapped. Pos becomes the region midpoint (the
+# text anchor and deconfliction angle). The window: Window_start/Window_end
+# where given (a missing side takes the region's bound), else the region +-
+# window_bp floored at 0, else none (NA).
+.hs_label_regions <- function(dt, window_bp = NULL) {
+  num <- function(col) if (col %in% names(dt)) as.numeric(dt[[col]])
+                       else rep(NA_real_, nrow(dt))
+  s <- num("Start"); e <- num("End"); p <- num("Pos")
+  one <- is.na(s) | is.na(e)
+  a <- ifelse(is.na(s), ifelse(is.na(e), p, e), s)
+  s[one] <- a[one]; e[one] <- a[one] + 1
+  lo <- pmin(s, e); hi <- pmax(s, e)
+  pt <- !is.na(lo) & lo == hi
+  hi[pt] <- lo[pt] + 1
+
+  ws <- num("Window_start"); we <- num("Window_end")
+  half <- xor(is.na(ws), is.na(we))
+  ws[half & is.na(ws)] <- lo[half & is.na(ws)]
+  we[half & is.na(we)] <- hi[half & is.na(we)]
+  if (!is.null(window_bp)) {
+    fill <- is.na(ws) & is.na(we)
+    ws[fill] <- pmax(0, lo[fill] - window_bp)
+    we[fill] <- hi[fill] + window_bp
+  }
+  dt[, c("Start", "End", "Pos", "Window_start", "Window_end") :=
+       list(lo, hi, (lo + hi) / 2, pmin(ws, we), pmax(ws, we))]
+  dt
+}
+
+# A label ring's colours: c(region, window).
+.hs_label_cols <- function(tr) {
+  pal <- tr$palette %||% "grey20"
+  c(pal[1L], if (length(pal) >= 2L) pal[2L] else "#56B4E9")
+}
+
+# A label ring's radial layout (ylim 0–1, 1 = the outer edge): the window band
+# stands proud of the region band on both sides, so the two read apart even
+# when both are at their minimum arc; text starts at text_y and runs inward.
+# Arcs narrower than reg_mm are widened to it; a window is drawn at least
+# halo_mm wider than its region on each side.
+.hs_lab_geom <- list(win = c(0.82, 1), reg = c(0.86, 0.96), text_y = 0.76,
+                     reg_mm = 0.35, halo_mm = 0.3)
+
+# Widen each [s, e] to at least w (bp, recycled) about its midpoint, then
+# clamp to the sector's xlim.
+.hs_widen <- function(s, e, w, xl) {
+  w <- rep_len(w, length(s))
+  narrow <- (e - s) < w
+  mid <- (s + e) / 2
+  s[narrow] <- mid[narrow] - w[narrow] / 2
+  e[narrow] <- mid[narrow] + w[narrow] / 2
+  list(s = pmax(xl[1L], s), e = pmin(xl[2L], e))
 }
 
 # A categorical rect ring's levels and colours. Levels: factor order, else the
@@ -337,39 +424,64 @@ track_marker_stat <- function(x, stat, name = stat, palette = NULL,
 
 #' Named-locus label ring
 #'
-#' Builds a \code{"labels"} track (leader line + text, angularly deconflicted)
-#' from a marker-level annotation data.frame — the Q25.o contract: \code{Name}
-#' plus either \code{Chrom}+\code{Pos} or \code{Marker} (resolved through
-#' \code{\link{standardize_marker_annotations}} against \code{meta}).
+#' Builds a \code{"labels"} track from a locus-level annotation data.frame:
+#' each locus is drawn as its \strong{region} (a band at the ring's outer
+#' edge) with its name just inside, the names angularly deconflicted. The
+#' Q25.o contract plus regions: \code{Name} with \code{Chrom} +
+#' \code{Start}/\code{End} (a gene model, a QTL interval), or \code{Chrom} +
+#' \code{Pos}, or \code{Marker} (resolved through
+#' \code{\link{standardize_marker_annotations}} against \code{meta}). A locus
+#' reported at a single position \code{a} is drawn as \code{[a, a + 1]}.
 #'
-#' @param x data.frame with \code{Name} and \code{Chrom}+\code{Pos} or
-#'   \code{Marker}; or an already-standardized table.
+#' A \strong{search window} — the stretch searched around each locus, e.g.
+#' for markers or blocks — is drawn behind its region as a lighter, taller
+#' band with no text; the legend names it (\code{window_name}). Give it per
+#' locus as \code{Window_start}/\code{Window_end} columns, or for every locus
+#' as \code{window_bp} either side of the region.
+#'
+#' @param x data.frame with \code{Name} and \code{Chrom} + \code{Start}/
+#'   \code{End}, \code{Chrom} + \code{Pos}, or \code{Marker}; optional
+#'   \code{Window_start}/\code{Window_end}; or an already-standardized table.
 #' @param meta GenoMeta for the \code{Marker} route (and for \code{match_bp}
 #'   matching); optional when \code{x} carries positions.
 #' @param value_col Optional ranking column — the top \code{label_top_n}
 #'   survive deconfliction first.
 #' @param match_bp Passed to the standardizer (default the shared 10 kb).
-#' @param label_top_n,min_gap_rad,name,palette,height_mm Passed to
-#'   \code{\link{circos_track}}.
+#' @param window_bp Optional search-window flank (bp) either side of each
+#'   region, for loci without \code{Window_start}/\code{Window_end}.
+#'   \code{NULL} (default) draws windows only from those columns.
+#' @param label_top_n,min_gap_rad,name,palette,height_mm,window_name Passed
+#'   to \code{\link{circos_track}} (\code{palette}: the region colour, then
+#'   optionally the window colour).
 #' @return An \code{hs_circos_track}.
 #' @export
 track_marker_labels <- function(x, meta = NULL, value_col = NULL,
                                 match_bp = .HS_ANNOT_DEFAULT_BP,
                                 label_top_n = 10L, min_gap_rad = 0.14,
                                 name = "loci", palette = NULL,
-                                height_mm = NULL) {
+                                height_mm = NULL, window_bp = NULL,
+                                window_name = "search window") {
   dt <- as.data.table(x)
-  if (!all(c("Chrom", "Pos") %in% names(dt)) || !"Name" %in% names(dt)) {
-    std <- standardize_marker_annotations(x, meta = meta, match_bp = match_bp)
-    dt <- as.data.table(std)
+  located <- "Chrom" %in% names(dt) &&
+    any(c("Start", "End", "Pos") %in% names(dt))
+  if (!located || !"Name" %in% names(dt)) {
+    std <- as.data.table(standardize_marker_annotations(x, meta = meta,
+                                                        match_bp = match_bp))
+    # one row per input row, in order: carry region, window and rank over
+    carry <- setdiff(intersect(c("Start", "End", "Window_start", "Window_end",
+                                 value_col), names(dt)), names(std))
+    for (cc in carry) std[, (cc) := dt[[cc]]]
+    dt <- std
   }
-  keep <- c("Chrom", "Pos", "Name", intersect(value_col, names(dt)))
+  keep <- intersect(c("Chrom", "Start", "End", "Pos", "Window_start",
+                      "Window_end", "Name", value_col), names(dt))
   circos_track(dt[, keep, with = FALSE], type = "labels",
                value_col = if (!is.null(value_col) &&
                                value_col %in% names(dt)) value_col else NULL,
                name = name, palette = palette %||% "grey20",
                height_mm = height_mm, label_top_n = label_top_n,
-               min_gap_rad = min_gap_rad)
+               min_gap_rad = min_gap_rad, window_bp = window_bp,
+               window_name = window_name)
 }
 
 
@@ -430,9 +542,9 @@ track_marker_labels <- function(x, meta = NULL, value_col = NULL,
 
 # Legend geometry, mm at print size (text is 5 pt). A colourbar entry: title
 # centred 0.9 mm under its top, a 10 x 1.6 mm bar from 2.3 mm, min / max
-# beside the bar — 3.9 mm tall. A chip entry (point, line, leader, or a
-# categorical ring's square): chip and name centred 1.3 mm under its top —
-# 2.6 mm tall. `reach` is how far
+# beside the bar — 3.9 mm tall. A chip entry (point, line, or a square: a
+# categorical ring's level, a label ring's region or search window): chip and
+# name centred 1.3 mm under its top — 2.6 mm tall. `reach` is how far
 # the tick labels stand outside the chr bar, `air` the clearance kept from
 # them, `margin` the gap to the page edge.
 .hs_lg <- list(bar_w = 10, bar_h = 1.6, bar_top = 2.3, title_y = 0.9,
@@ -561,7 +673,7 @@ track_marker_labels <- function(x, meta = NULL, value_col = NULL,
       yc <- y0 - g$chip_y * k
       if (it$mark == "points")
         graphics::points(gx, yc, pch = 16, cex = .pt_cex(4), col = it$col)
-      else if (it$mark == "square")              # a categorical ring's level
+      else if (it$mark == "square")       # a category, a region, a window
         graphics::rect(gx - k, yc - 0.8 * k, gx + k, yc + 0.8 * k,
                        col = it$col, border = NA)
       else
@@ -582,8 +694,9 @@ track_marker_labels <- function(x, meta = NULL, value_col = NULL,
 #' Okabe–Ito colours, Mb ticks — and \code{tracks[[1]]} is the outermost data
 #' ring, the last element the innermost. A legend names each ring (with a
 #' mini colourbar for \code{"rect"} rings, one chip per category for a
-#' categorical one) — in the centre by default, or outside the circle via
-#' \code{legend_position}.
+#' categorical one, and for a \code{"labels"} ring one chip for the regions
+#' plus one for the search windows when any drawn locus has one) — in the
+#' centre by default, or outside the circle via \code{legend_position}.
 #'
 #' Sizing follows \code{dev/figure_standards_nature.md}: the figure is
 #' authored at \code{width_mm} (89 mm single column by default) — ring heights
@@ -626,7 +739,8 @@ track_marker_labels <- function(x, meta = NULL, value_col = NULL,
 #'   re-draws the figure at any declared width (what
 #'   \code{\link{save_journal_figure}} calls), \code{$height_mm(width_mm)}
 #'   gives the figure height at that width (the width itself unless an
-#'   outside legend needs room), plus the frame parameters.
+#'   outside legend needs room), \code{$legend} the legend entry names in
+#'   order, plus the frame parameters.
 #'
 #' @seealso \code{\link{circos_track}}, \code{\link{track_annotation}},
 #'   \code{\link{track_block_effect}}, \code{\link{track_block_variance}},
@@ -660,6 +774,8 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
       d <- tr$data
       hi <- if (all(c("Start", "End") %in% names(d))) pmax(d$Start, d$End)
             else d$Pos
+      if ("Window_end" %in% names(d))
+        hi <- pmax(hi, d$Window_end, na.rm = TRUE)
       data.table::data.table(Chrom = d$Chrom, hi = as.numeric(hi))
     }))
     v <- dd[, max(hi, na.rm = TRUE), by = Chrom]
@@ -685,6 +801,22 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
   if (!is.null(rel_heights)) heights_mm <- heights_mm * rel_heights
   track_names <- vapply(tracks, `[[`, character(1L), "name")
 
+  # --- label rings: which loci are drawn (width-independent) -----------------
+  # theta per locus (region midpoint), deconflicted globally; loci with no
+  # position, or on no drawn chromosome, are dropped first.
+  label_kept <- lapply(tracks, function(tr) {
+    if (tr$type != "labels") return(NULL)
+    d <- tr$data
+    ci <- match(d$Chrom, chr_levels)
+    off <- c(0, cumsum(sizes))[seq_along(sizes)]
+    theta <- ((off[ci] + d$Pos) / sum(sizes) * (360 - gap_degree *
+                                                  length(chr_levels)) +
+                (ci - 1L) * gap_degree) * pi / 180
+    ok <- which(is.finite(theta))
+    ok[.hs_deconflict(theta[ok], d$.val[ok], tr$label_top_n,
+                      tr$min_gap_rad)]
+  })
+
   # --- one ring's palette ----------------------------------------------------
   ring_fill <- function(tr) {
     v <- tr$data$.val
@@ -707,11 +839,22 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
 
   # --- the legend: one entry per ring, measured in mm (width-independent) ---
   use_legend <- isTRUE(legend) && legend_position != "none"
-  legend_items <- unlist(lapply(tracks, function(tr) {
+  legend_items <- unlist(lapply(seq_along(tracks), function(i) {
+    tr <- tracks[[i]]
     if (!is.null(tr$categories))                  # one chip per category
       return(lapply(tr$categories, function(l)
         list(kind = "chip", name = l, mark = "square",
              col = unname(tr$palette[[l]]), wt = .hs_text_mm(l))))
+    if (tr$type == "labels") {                    # region (+ search window)
+      lc <- .hs_label_cols(tr)
+      dk <- tr$data[label_kept[[i]]]
+      win <- any(is.finite(dk$Window_start) & is.finite(dk$Window_end))
+      return(c(list(list(kind = "chip", name = tr$name, mark = "square",
+                         col = lc[1L], wt = .hs_text_mm(tr$name))),
+               if (win) list(list(kind = "chip", name = tr$window_name,
+                                  mark = "square", col = lc[2L],
+                                  wt = .hs_text_mm(tr$window_name)))))
+    }
     list(if (tr$type == "rect") {
       rf  <- ring_fill(tr)
       lab <- c(rf$lab[1L], rf$lab[length(rf$lab)])
@@ -767,8 +910,9 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
       last <- tracks[[length(tracks)]]
       if (last$type == "labels")
         hole_u <- min(hole_u, hole_u +
-                        0.76 * .mm_frac(heights_mm[length(tracks)],
-                                        width_mm_now) -
+                        .hs_lab_geom$text_y *
+                          .mm_frac(heights_mm[length(tracks)],
+                                   width_mm_now) -
                         max(.hs_text_mm(last$data$Name), 0) * k0)
       do_legend <- (sqrt(lay$w^2 + lay$h^2) / 2 + .hs_lg$air) * k0 <= hole_u
       if (!do_legend)
@@ -886,27 +1030,39 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
             }
           })
       } else {                                            # labels
-        # theta per candidate, deconflicted globally, then drawn per sector.
-        gaps  <- gap_degree * length(chr_levels)
-        avail <- 360 - gaps
-        off   <- c(0, cumsum(sizes))[seq_along(sizes)]
-        frac  <- (off[match(d$Chrom, chr_levels)] + d$Pos) / sum(sizes)
-        theta <- (frac * avail +
-                    (match(d$Chrom, chr_levels) - 1L) * gap_degree) * pi / 180
-        kept  <- .hs_deconflict(theta, d$.val, tr$label_top_n, tr$min_gap_rad)
-        dk    <- d[kept, ]
-        col1  <- (tr$palette %||% "grey20")[1L]
+        # The deconflicted loci, drawn per sector: search windows first, the
+        # regions over them, then the text (windows carry none).
+        dk <- d[label_kept[[k]], ]
+        lc <- .hs_label_cols(tr)
+        g  <- .hs_lab_geom
         circlize::circos.track(
           ylim = c(0, 1), track.height = th, bg.border = NA,
           panel.fun = function(x, y) {
             ch <- circlize::CELL_META$sector.index
             sd <- dk[dk$Chrom == ch, ]
             if (nrow(sd) == 0L) return()
-            circlize::circos.segments(sd$Pos, 1, sd$Pos, 0.82, col = col1,
-                                      lwd = .lwd_pt(0.5))
-            circlize::circos.text(sd$Pos, 0.76, sd$Name, cex = .pt_cex(5),
-                                  col = "black", facing = "clockwise",
-                                  niceFacing = TRUE, adj = c(1, 0.5))
+            xl <- circlize::CELL_META$xlim
+            n  <- nrow(sd)
+            reg <- .hs_widen(sd$Start, sd$End,
+                             circlize::mm_x(g$reg_mm, h = mean(g$reg)), xl)
+            w <- which(is.finite(sd$Window_start) & is.finite(sd$Window_end))
+            if (length(w) > 0L) {
+              halo <- circlize::mm_x(g$halo_mm, h = mean(g$win))
+              win <- .hs_widen(sd$Window_start[w], sd$Window_end[w],
+                               reg$e[w] - reg$s[w] + 2 * halo, xl)
+              circlize::circos.rect(pmin(win$s, reg$s[w]),
+                                    rep(g$win[1L], length(w)),
+                                    pmax(win$e, reg$e[w]),
+                                    rep(g$win[2L], length(w)),
+                                    col = lc[2L], border = NA)
+            }
+            circlize::circos.rect(reg$s, rep(g$reg[1L], n), reg$e,
+                                  rep(g$reg[2L], n), col = lc[1L],
+                                  border = NA)
+            circlize::circos.text(sd$Pos, g$text_y, sd$Name,
+                                  cex = .pt_cex(5), col = "black",
+                                  facing = "clockwise", niceFacing = TRUE,
+                                  adj = c(1, 0.5))
           })
       }
     }
@@ -930,7 +1086,10 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
                           frame_at(width_mm)$height_mm,
                         legend_position = if (use_legend) legend_position
                                           else "none",
-                        tracks = track_names, chr_levels = chr_levels),
+                        tracks = track_names,
+                        legend = vapply(legend_items, `[[`, character(1L),
+                                        "name"),
+                        chr_levels = chr_levels),
                    class = "hs_meta_circos")
   if (isTRUE(draw)) render(width_mm)
   invisible(out)

@@ -183,6 +183,90 @@ test_that("a character / factor rect ring is categorical", {
   grDevices::dev.off()
 })
 
+test_that("a label ring draws regions; a single position a is [a, a + 1]", {
+  d <- data.frame(Chrom = "1", Name = c("pt", "reg", "rev", "zero", "half"),
+                  Pos   = c(100, NA, NA, NA, NA),
+                  Start = c(NA, 200, 900, 50, 70),
+                  End   = c(NA, 400, 700, 50, NA))
+  tr <- circos_track(d, type = "labels")
+  expect_equal(tr$data$Start, c(100, 200, 700, 50, 70))
+  expect_equal(tr$data$End,   c(101, 400, 900, 51, 71))
+  expect_equal(tr$data$Pos, (tr$data$Start + tr$data$End) / 2)
+  expect_true(all(is.na(tr$data$Window_start) & is.na(tr$data$Window_end)))
+  expect_identical(tr$window_name, "search window")
+  # Pos alone, through the constructor: the documented [a, a + 1]
+  t1 <- track_marker_labels(data.frame(Chrom = "1", Pos = 5e6, Name = "A"))
+  expect_equal(c(t1$data$Start, t1$data$End), c(5e6, 5e6 + 1))
+  expect_error(circos_track(data.frame(Chrom = "1", Name = "x"),
+                            type = "labels"), "Start/End")
+})
+
+test_that("a label ring's search window: columns, window_bp, validation", {
+  d <- data.frame(Chrom = "1", Name = c("a", "b", "c", "d"),
+                  Start = c(1000, 5e6, 8e6, 9e6), End = c(3000, 6e6, 8e6, 9e6),
+                  Window_start = c(NA, 4e6, 7e6, NA),
+                  Window_end   = c(NA, 7e6, NA, NA))
+  tr <- circos_track(d, type = "labels", window_bp = 2000)
+  # window_bp fills rows with no window column, floored at 0
+  expect_equal(tr$data$Window_start, c(0, 4e6, 7e6, 9e6 - 2000))
+  # given columns win; a missing side takes the region's bound
+  expect_equal(tr$data$Window_end, c(5000, 7e6, 8e6 + 1, 9e6 + 1 + 2000))
+  # without window_bp only the columns give windows
+  tr0 <- circos_track(d, type = "labels")
+  expect_equal(is.na(tr0$data$Window_start), c(TRUE, FALSE, FALSE, TRUE))
+  expect_error(circos_track(d, type = "labels", window_bp = -1), ">= 0")
+  expect_error(circos_track(d, type = "labels", window_bp = c(1, 2)), ">= 0")
+  expect_error(circos_track(transform(d, v = 1), type = "points",
+                            value_col = "v", window_bp = 10),
+               "'labels' tracks only")
+  t2 <- track_marker_labels(d, window_bp = 2000, window_name = "+-2 kb")
+  expect_equal(t2$data$Window_start, tr$data$Window_start)
+  expect_identical(t2$window_name, "+-2 kb")
+})
+
+test_that("the Marker route keeps region, window and rank columns", {
+  fx <- .circos_fixture()
+  map <- fx$meta$map_info
+  x <- data.frame(Marker = map$Marker[c(2L, 5L)], Name = c("A", "B"),
+                  Start = c(NA, 10), End = c(NA, 20000), w = c(2, 1),
+                  Window_start = c(NA, 0), Window_end = c(NA, 30000))
+  tr <- track_marker_labels(x, meta = fx$meta, value_col = "w")
+  p2 <- as.numeric(map$Pos[2L])
+  expect_equal(tr$data$Start, c(p2, 10))           # A from its marker's Pos
+  expect_equal(tr$data$End,   c(p2 + 1, 20000))
+  expect_equal(tr$data$.val, c(2, 1))
+  expect_equal(tr$data$Window_end, c(NA, 30000))
+})
+
+test_that("a search window shows in the legend only, and only when drawn", {
+  skip_if_not_installed("circlize")
+  fx <- .circos_fixture()
+  d <- data.frame(Chrom = c("1", "2", "9"), Name = c("G1", "Q2", "off"),
+                  Start = c(2e6, 4e6, 1e6), End = c(2e6, 9e6, 2e6),
+                  rank = c(1, 2, 3))
+  build <- function(...) plot_meta_circos(
+    list(track_annotation(fx$ann),
+         track_marker_labels(d, value_col = "rank", name = "loci", ...)),
+    meta = fx$meta, draw = FALSE, legend_position = "bottomright")
+  expect_identical(build()$legend, c("gene_count", "loci"))
+  ob <- build(window_bp = 5e5, window_name = "window")
+  expect_identical(ob$legend, c("gene_count", "loci", "window"))
+  # a window on a locus that is not drawn (chromosome 9) adds no legend entry
+  d$Window_start <- c(NA, NA, 0); d$Window_end <- c(NA, NA, 3e6)
+  expect_identical(build()$legend, c("gene_count", "loci"))
+
+  # renders warning-free; the off-frame locus is dropped, not an error
+  for (w in c(89, 183)) {
+    f <- tempfile(fileext = ".png")
+    grDevices::png(f, width = w / 25.4, height = ob$height_mm(w) / 25.4,
+                   units = "in", res = 100, type = "cairo")
+    graphics::par(mar = c(0, 0, 0, 0))
+    expect_no_warning(suppressMessages(ob$render(w)))
+    grDevices::dev.off()
+    expect_true(file.size(f) > 0)
+  }
+})
+
 test_that("legend text is measured from Helvetica's metrics, in mm", {
   expect_equal(.hs_text_mm("0", pt = 5), 0.556 * 5 * 25.4 / 72)
   expect_equal(.hs_text_mm(c("ab", NA)), c(2 * 0.556 * 5 * 25.4 / 72, 0))

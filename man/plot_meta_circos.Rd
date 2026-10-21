@@ -61,7 +61,8 @@ Invisibly, an \code{hs_meta_circos} object: \code{$render(width_mm)}
 re-draws the figure at any declared width (what
 \code{\link{save_journal_figure}} calls), \code{$height_mm(width_mm)}
 gives the figure height at that width (the width itself unless an
-outside legend needs room), plus the frame parameters.
+outside legend needs room), \code{$legend} the legend entry names in
+order, plus the frame parameters.
 }
 \description{
 The polar analogue of \code{\link{plot_meta_alignment}} (Q25.n): the caller
@@ -71,8 +72,9 @@ function owns the shared frame. The outermost ring is always the
 Okabe–Ito colours, Mb ticks — and \code{tracks[[1]]} is the outermost data
 ring, the last element the innermost. A legend names each ring (with a
 mini colourbar for \code{"rect"} rings, one chip per category for a
-categorical one) — in the centre by default, or outside the circle via
-\code{legend_position}.
+categorical one, and for a \code{"labels"} ring one chip for the regions
+plus one for the search windows when any drawn locus has one) — in the
+centre by default, or outside the circle via \code{legend_position}.
 }
 \details{
 Sizing follows \code{dev/figure_standards_nature.md}: the figure is

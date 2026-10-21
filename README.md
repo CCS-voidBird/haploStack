@@ -5,6 +5,15 @@
 Developed for the GRDC Barley Phase 2 project at the University of Queensland.
 Generalised for use with any biparental or multiparental diploid breeding programme.
 
+> ### 0.8.4 — a label marks a region, and its search window
+>
+> Owner request 2026-10-21 on the circos label ring, thread
+> [#033](project_record/threads/033-block-annotation-native.md): 1. "the
+> annotation labels (the text label for genes) need to be regions rather than
+> snp position (if reported as single, then use start=a and end=a+1)"; 2. "If
+> the searching window added, also show it with the gene region use a
+> different represenetation and with no text label (only legend)".
+>
 > ### 0.8.3 — a ring can name categories
 >
 > Needed for the owner's real-data circos request of 2026-10-20 (VP1
