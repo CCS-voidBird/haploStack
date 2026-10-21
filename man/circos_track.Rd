@@ -31,9 +31,9 @@ locus's search window (see \code{window_bp}).}
 
 \item{type}{Mark: \code{"rect"} (filled block segments), \code{"points"},
 \code{"line"}, or \code{"labels"} (each locus's region as a band at the
-ring's outer edge, its text just inside, and — when present — its
-search window as a lighter, taller band behind the region, with no
-text).}
+ring's outer edge with a hairline white edge, so regions that meet stay
+apart; its text just inside; and — when present — its search window as
+a lighter, taller band behind the region, with no text).}
 
 \item{value_col}{Column mapped to the mark's value: fill for \code{"rect"},
 y for \code{"points"}/\code{"line"}, the ranking for \code{"labels"}

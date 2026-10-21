@@ -710,6 +710,41 @@ published repo ships:
   holder is still "University of Queensland", which is a rights statement, not an
   authorship one, and it already matches the published copy byte for byte.
 
+## [0.8.5] - 2026-10-21 — Regions that meet stay two regions
+
+Found while re-plotting the VP1 MorexV3 circos with the owner's resistance
+intervals (2026-10-21), thread
+[#033](project_record/threads/033-block-annotation-native.md). Rrs1 (3H
+489.99–499.36 Mb) and Rpt1 (3H 499.36–637.92 Mb) share a boundary. On 0.8.4
+their region bands joined into one continuous bar, so nothing showed where
+Rrs1 ended. 150 exports (unchanged).
+
+### Fixed
+
+- **A label ring's regions carry a 0.4 pt white edge.** Regions that meet or
+  overlap therefore stay separate bands.
+  - Each region is widened so that at least 0.35 mm of colour still shows
+    inside the edge. The arc minimum is now 0.35 mm plus the edge (≈ 0.49 mm
+    in all), and a narrow dash keeps 0.8.4's visible width.
+  - Where a search window is drawn, the edge also leaves a hairline between
+    the region and its window halo.
+  - The constant is `.hs_lab_geom$sep_pt`.
+
+### Tests
+
+- `test-circos-meta.R` 186 → 191: the region rects are drawn with a white
+  border and a positive line width, and two regions sharing a boundary are
+  drawn as two rects that meet there. The test records the `circos.rect()`
+  calls through `local_mocked_bindings(.package = "circlize")`.
+- Suite **3 077 pass / 0 fail / 12 skips** against the dev tree (= 0.8.4's
+  3 072 + 5).
+
+### Verified
+
+- The VP1 MorexV3 circos figures were re-rendered from the installed 0.8.5
+  build. Rrs1 and Rpt1 now read as two bands. The run is in
+  `GRDC_project/.../Archive_VP1_manuscript/haploStack_MorexV3_circos/`.
+
 ## [0.8.4] - 2026-10-21 — A label marks a region, and its search window
 
 Owner request 2026-10-21 on the circos label ring, thread

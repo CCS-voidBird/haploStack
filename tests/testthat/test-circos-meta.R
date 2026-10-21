@@ -267,6 +267,32 @@ test_that("a search window shows in the legend only, and only when drawn", {
   }
 })
 
+test_that("label regions that meet stay apart: each carries a white edge", {
+  skip_if_not_installed("circlize")
+  calls <- list()
+  orig <- circlize::circos.rect
+  local_mocked_bindings(circos.rect = function(...) {
+    calls[[length(calls) + 1L]] <<- list(...)
+    orig(...)
+  }, .package = "circlize")
+  d <- data.frame(Chrom = "1", Name = c("Rrs1", "Rpt1"),
+                  Start = c(40e6, 50e6), End = c(50e6, 90e6))
+  ob <- plot_meta_circos(track_marker_labels(d), chr_sizes = c(`1` = 1e8),
+                         draw = FALSE, legend = FALSE)
+  f <- tempfile(fileext = ".png")
+  grDevices::png(f, width = 89 / 25.4, height = 89 / 25.4, units = "in",
+                 res = 100, type = "cairo")
+  graphics::par(mar = c(0, 0, 0, 0))
+  suppressMessages(ob$render(89))
+  grDevices::dev.off()
+  reg <- Filter(function(a) identical(a$col, "grey20"), calls)
+  expect_length(reg, 1L)
+  expect_identical(reg[[1L]]$border, "white")
+  expect_gt(reg[[1L]]$lwd, 0)
+  expect_equal(reg[[1L]][[3L]][1L], 50e6)      # Rrs1 ends where Rpt1 starts:
+  expect_equal(reg[[1L]][[1L]][2L], 50e6)      # two rects, not one bar
+})
+
 test_that("legend text is measured from Helvetica's metrics, in mm", {
   expect_equal(.hs_text_mm("0", pt = 5), 0.556 * 5 * 25.4 / 72)
   expect_equal(.hs_text_mm(c("ab", NA)), c(2 * 0.556 * 5 * 25.4 / 72, 0))

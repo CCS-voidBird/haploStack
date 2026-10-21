@@ -5,6 +5,14 @@
 Developed for the GRDC Barley Phase 2 project at the University of Queensland.
 Generalised for use with any biparental or multiparental diploid breeding programme.
 
+> ### 0.8.5 — regions that meet stay two regions
+>
+> Found while re-plotting the VP1 MorexV3 circos with the owner's resistance
+> intervals (2026-10-21), thread [#033](project_record/threads/033-block-
+> annotation-native.md). Rrs1 (3H 489.99–499.36 Mb) and Rpt1 (3H 499.36–637.92
+> Mb) share a boundary. On 0.8.4 their region bands joined into one continuous
+> bar, so nothing showed where Rrs1 ended. 150 exports (unchanged).
+>
 > ### 0.8.4 — a label marks a region, and its search window
 >
 > Owner request 2026-10-21 on the circos label ring, thread

@@ -84,9 +84,9 @@
 #'   locus's search window (see \code{window_bp}).
 #' @param type Mark: \code{"rect"} (filled block segments), \code{"points"},
 #'   \code{"line"}, or \code{"labels"} (each locus's region as a band at the
-#'   ring's outer edge, its text just inside, and — when present — its
-#'   search window as a lighter, taller band behind the region, with no
-#'   text).
+#'   ring's outer edge with a hairline white edge, so regions that meet stay
+#'   apart; its text just inside; and — when present — its search window as
+#'   a lighter, taller band behind the region, with no text).
 #' @param value_col Column mapped to the mark's value: fill for \code{"rect"},
 #'   y for \code{"points"}/\code{"line"}, the ranking for \code{"labels"}
 #'   (optional there). For \code{"rect"}, a character or factor column makes
@@ -234,10 +234,12 @@ circos_track <- function(data, type = c("rect", "points", "line", "labels"),
 # A label ring's radial layout (ylim 0–1, 1 = the outer edge): the window band
 # stands proud of the region band on both sides, so the two read apart even
 # when both are at their minimum arc; text starts at text_y and runs inward.
-# Arcs narrower than reg_mm are widened to it; a window is drawn at least
+# Each region carries a sep_pt white edge, so regions that meet or overlap
+# (Rrs1 / Rpt1 share a boundary) stay separate bands; arcs are widened so at
+# least reg_mm of ink shows inside that edge. A window is drawn at least
 # halo_mm wider than its region on each side.
 .hs_lab_geom <- list(win = c(0.82, 1), reg = c(0.86, 0.96), text_y = 0.76,
-                     reg_mm = 0.35, halo_mm = 0.3)
+                     reg_mm = 0.35, halo_mm = 0.3, sep_pt = 0.4)
 
 # Widen each [s, e] to at least w (bp, recycled) about its midpoint, then
 # clamp to the sector's xlim.
@@ -1043,8 +1045,10 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
             if (nrow(sd) == 0L) return()
             xl <- circlize::CELL_META$xlim
             n  <- nrow(sd)
+            sep_mm <- g$sep_pt * 25.4 / 72
             reg <- .hs_widen(sd$Start, sd$End,
-                             circlize::mm_x(g$reg_mm, h = mean(g$reg)), xl)
+                             circlize::mm_x(g$reg_mm + sep_mm,
+                                            h = mean(g$reg)), xl)
             w <- which(is.finite(sd$Window_start) & is.finite(sd$Window_end))
             if (length(w) > 0L) {
               halo <- circlize::mm_x(g$halo_mm, h = mean(g$win))
@@ -1058,7 +1062,7 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
             }
             circlize::circos.rect(reg$s, rep(g$reg[1L], n), reg$e,
                                   rep(g$reg[2L], n), col = lc[1L],
-                                  border = NA)
+                                  border = "white", lwd = .lwd_pt(g$sep_pt))
             circlize::circos.text(sd$Pos, g$text_y, sd$Name,
                                   cex = .pt_cex(5), col = "black",
                                   facing = "clockwise", niceFacing = TRUE,
