@@ -363,10 +363,12 @@ test_that("outer_labels draws the annotation outside the chr bar's ticks", {
   expect_identical(ob$tracks, c("loci", "effects"))   # outermost first
   expect_identical(ob$legend, c("loci", "effects"))
 
-  # ring order and heights: outer labels, the tick-label gap, the chr bar
-  rings <- list(); texts <- list()
+  # ring order and heights: outer labels, the 1.5 mm gap, the chr bar; and
+  # the labelled ticks drawn per sector
+  rings <- list(); texts <- list(); ticks <- list()
   o_track <- circlize::circos.track
   o_text  <- circlize::circos.text
+  o_axis  <- circlize::circos.axis
   local_mocked_bindings(
     circos.track = function(...) {
       rings[[length(rings) + 1L]] <<- list(...)$track.height
@@ -375,6 +377,12 @@ test_that("outer_labels draws the annotation outside the chr bar's ticks", {
     circos.text = function(...) {
       texts[[length(texts) + 1L]] <<- list(...)
       o_text(...)
+    },
+    circos.axis = function(...) {
+      a <- list(...)
+      if (!isFALSE(a$labels))
+        ticks[[circlize::get.cell.meta.data("sector.index")]] <<- a$major.at
+      o_axis(...)
     }, .package = "circlize")
   f <- tempfile(fileext = ".png")
   grDevices::png(f, width = 89 / 25.4, height = ob$height_mm(89) / 25.4,
@@ -383,8 +391,12 @@ test_that("outer_labels draws the annotation outside the chr bar's ticks", {
   expect_no_warning(suppressMessages(ob$render(89)))
   grDevices::dev.off()
   h <- unlist(rings)
-  expect_equal(h[1:3], c(.mm_frac(12, 89), .mm_frac(.hs_lg$reach - 0.5, 89),
+  expect_equal(h[1:3], c(.mm_frac(12, 89), .mm_frac(1.5, 89),
                          .mm_frac(2.2, 89)))
+  # 10 Mb ticks: the numerals under Rpt3 (chr 1, 20-30 Mb) and GeneB (chr 2,
+  # 30 Mb) are left out; every other one is drawn
+  expect_equal(ticks[["1"]], c(1e7, 4e7, 5e7))
+  expect_equal(ticks[["2"]], c(1e7, 2e7, 4e7, 5e7, 6e7))
   # names read outward from the ring's inner part (the package's own call;
   # niceFacing re-calls circos.text() with a flipped adj for turned labels)
   nm <- Filter(function(a) isTRUE(a$niceFacing) && any(a[[3L]] %in% d$Name),
@@ -393,11 +405,18 @@ test_that("outer_labels draws the annotation outside the chr bar's ticks", {
   expect_true(all(vapply(nm, function(a) a$adj[1L] == 0 &&
                            a[[2L]][1L] == .hs_lab_geom$text_y_out,
                          logical(1L))))
-  # a ring too low for its longest name says which height fits
+  # names may run on into the page margin; one that would run off the page
+  # says which height fits
   short <- track_marker_labels(d, name = "loci", height_mm = 4)
+  expect_no_message(plot_meta_circos(inner,
+                                     chr_sizes = c(`1` = 5e7, `2` = 6e7),
+                                     draw = FALSE, outer_labels = short))
+  long <- track_marker_labels(transform(d, Name = c("Rpt3",
+                                                    "AVeryLongLocusNameHere")),
+                              name = "loci", height_mm = 4)
   expect_message(plot_meta_circos(inner, chr_sizes = c(`1` = 5e7, `2` = 6e7),
-                                  draw = FALSE, outer_labels = short),
-                 "height_mm = ")
+                                  draw = FALSE, outer_labels = long),
+                 "runs off the page.*height_mm = ")
 })
 
 test_that("legend text is measured from Helvetica's metrics, in mm", {

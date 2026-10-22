@@ -710,6 +710,43 @@ published repo ships:
   holder is still "University of Queensland", which is a rights statement, not an
   authorship one, and it already matches the published copy byte for byte.
 
+## [0.8.8] - 2026-10-22 — The outer annotation sits on the ticks
+
+Owner feedback on the 0.8.7 VP1 figure a2: "the position of the annotation
+text/regions bit high, try 1/2 the height". Thread
+[#033](project_record/threads/033-block-annotation-native.md). 150 exports
+(unchanged).
+
+### Changed
+
+- **`outer_labels` sits about half as high.**
+  - **Gap.** The gap between the chr bar and the outer ring is now 1.5 mm
+    (it was 4.5). With the track margins, a region band sits about 3 mm
+    above the bar (about 6 mm on 0.8.7). That clears the minor ticks and an
+    upright tick numeral at 12 / 6 o'clock.
+  - **Tick numerals.** A numeral within 2 mm of arc of an outer band (region
+    or window) would now meet it, so it is left out; its minor tick stays.
+    On 0.8.7 the gap cleared every numeral everywhere instead. On VP1 a2 this
+    drops 3H "600" (under Rpt1), 7H "600" (QRptt7) and 4H "600" (QRptt4).
+  - **Long names.** A name may run past its ring into the page margin
+    beyond the circle; 80 % of the margin, up to the page edge, is used. So
+    the ring only needs to be tall enough for the band. The VP1 ring went
+    from 14 mm to 7 mm, and the circle gains that radius back.
+  - **Message.** The overrun message now fires only when a name would run
+    off the page at the declared width ("runs off the page …
+    height_mm = N fits"). It used to fire at the ring's own edge.
+
+### Tests
+
+- `test-circos-meta.R` 213 → 216:
+  - the ring order now expects the 1.5 mm gap;
+  - the labelled ticks drawn per sector, recorded from `circos.axis()`,
+    leave out exactly the numerals under the two test loci;
+  - a short ring whose names fit in the margin gives no message, and a very
+    long name gives the off-page message.
+- Suite **3 102 pass / 0 fail / 12 skips** against the dev tree (= 0.8.7's
+  3 099 + 3).
+
 ## [0.8.7] - 2026-10-22 — The annotation can sit above the chromosome ticks
 
 Owner request 2026-10-22, on VP1 figure a2: "make the annotation and its

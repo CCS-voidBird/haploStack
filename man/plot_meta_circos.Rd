@@ -59,12 +59,14 @@ height from \code{$height_mm()}.}
 
 \item{outer_labels}{Optional \code{"labels"} track (e.g. from
 \code{\link{track_marker_labels}}) drawn \strong{outside} the chr–pos
-bar, beyond its tick labels: each region (and search window) sits just
-above the ticks, its name reads outward. The circle keeps the declared
-width, so the bar and every data ring move inward by the ring's height
-plus the tick-label gap. Its legend entries come first. A message names
-the \code{height_mm} that fits when the longest drawn name would run
-past the ring.}
+bar: each region (and search window) sits ~3 mm above the bar, on top
+of the ticks, and its name reads outward — on into the page margin
+beyond the circle when the ring is shorter than the name. A tick numeral
+that would meet a band is left out (its minor tick stays). The circle
+keeps the declared width, so the bar and every data ring move inward by
+the ring's height plus a 1.5 mm gap. Its legend entries come first. A
+message names the \code{height_mm} that fits when the longest drawn
+name would run off the page.}
 }
 \value{
 Invisibly, an \code{hs_meta_circos} object: \code{$render(width_mm)}

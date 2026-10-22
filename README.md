@@ -5,6 +5,13 @@
 Developed for the GRDC Barley Phase 2 project at the University of Queensland.
 Generalised for use with any biparental or multiparental diploid breeding programme.
 
+> ### 0.8.8 — the outer annotation sits on the ticks
+>
+> Owner feedback on the 0.8.7 VP1 figure a2: "the position of the annotation
+> text/regions bit high, try 1/2 the height". Thread
+> [#033](project_record/threads/033-block-annotation-native.md). 150 exports
+> (unchanged).
+>
 > ### 0.8.7 — the annotation can sit above the chromosome ticks
 >
 > Owner request 2026-10-22, on VP1 figure a2: "make the annotation and its

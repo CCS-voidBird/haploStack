@@ -764,12 +764,14 @@ track_marker_labels <- function(x, meta = NULL, value_col = NULL,
 #'   height from \code{$height_mm()}.
 #' @param outer_labels Optional \code{"labels"} track (e.g. from
 #'   \code{\link{track_marker_labels}}) drawn \strong{outside} the chr–pos
-#'   bar, beyond its tick labels: each region (and search window) sits just
-#'   above the ticks, its name reads outward. The circle keeps the declared
-#'   width, so the bar and every data ring move inward by the ring's height
-#'   plus the tick-label gap. Its legend entries come first. A message names
-#'   the \code{height_mm} that fits when the longest drawn name would run
-#'   past the ring.
+#'   bar: each region (and search window) sits ~3 mm above the bar, on top
+#'   of the ticks, and its name reads outward — on into the page margin
+#'   beyond the circle when the ring is shorter than the name. A tick numeral
+#'   that would meet a band is left out (its minor tick stays). The circle
+#'   keeps the declared width, so the bar and every data ring move inward by
+#'   the ring's height plus a 1.5 mm gap. Its legend entries come first. A
+#'   message names the \code{height_mm} that fits when the longest drawn
+#'   name would run off the page.
 #'
 #' @return Invisibly, an \code{hs_meta_circos} object: \code{$render(width_mm)}
 #'   re-draws the figure at any declared width (what
@@ -811,9 +813,13 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
     stop("plot_meta_circos: 'outer_labels' must be a \"labels\" ",
          "circos_track() (e.g. from track_marker_labels()).")
   outer_mm <- if (is.null(outer_labels)) 0 else outer_labels$height_mm
-  # The ring the tick labels stand in: their widest ("600" set horizontal at
-  # 3 / 9 o'clock) reach ~4.3 mm past the bar; this leaves ~1 mm of air.
-  gap_mm   <- if (is.null(outer_labels)) 0 else .hs_lg$reach - 0.5
+  # The gap between the bar and the outer ring. 0.8.7 cleared every tick
+  # numeral everywhere (4.5 mm, bands ~6 mm above the bar), which the owner
+  # found too high (2026-10-22). Now 1.5 mm: with the margins, a band sits
+  # ~3 mm above the bar — clear of the minor ticks and of an upright numeral
+  # at 12 / 6 o'clock — and a numeral that would meet a band is left out
+  # (see the chr bar below).
+  gap_mm   <- if (is.null(outer_labels)) 0 else 1.5
 
   # --- chromosome frame: sizes + order --------------------------------------
   union_max <- function() {
@@ -868,17 +874,28 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
   }
   label_kept <- lapply(tracks, kept_of)
   outer_kept <- if (!is.null(outer_labels)) kept_of(outer_labels)
-  # An outer ring's names read outward from 0.24 of its height: say when the
-  # longest drawn one would run past the ring (page mm are 1/1.08 of the
-  # nominal mm — INDEX discrepancy 36).
+  # An outer ring's names read outward from 0.24 of its height and may run on
+  # into the page margin beyond the circle (radius 1 to the 1.06 x 1.08 page
+  # edge; 80 % of it is used). Say when the longest drawn one would reach the
+  # page edge at the declared width (page mm are 1/1.08 of nominal mm —
+  # INDEX discrepancy 36).
   if (!is.null(outer_labels) && length(outer_kept) > 0L) {
-    need <- max(.hs_text_mm(outer_labels$data$Name[outer_kept]))
-    have <- (1 - .hs_lab_geom$text_y_out) * outer_mm / 1.08
+    need   <- max(.hs_text_mm(outer_labels$data$Name[outer_kept]))
+    margin <- (1.06 * 1.08 - 1) * width_mm / (2 * 1.06 * 1.08)
+    have   <- (1 - .hs_lab_geom$text_y_out) * outer_mm / 1.08 + 0.8 * margin
     if (need > have)
       message("plot_meta_circos: the longest outer label (", round(need, 1),
-              " mm) runs past its ", outer_mm, " mm ring — height_mm = ",
-              ceiling(need * 1.08 / (1 - .hs_lab_geom$text_y_out)),
-              " fits.")
+              " mm) runs off the page at ", width_mm, " mm — height_mm = ",
+              ceiling((need - 0.8 * margin) * 1.08 /
+                        (1 - .hs_lab_geom$text_y_out)), " fits.")
+  }
+  # The outer bands per chromosome (region or window, whichever is wider):
+  # a chr-bar tick numeral under one is left out.
+  outer_bands <- if (!is.null(outer_labels) && length(outer_kept) > 0L) {
+    od <- outer_labels$data[outer_kept]
+    split(data.frame(s = pmin(od$Start, od$Window_start, na.rm = TRUE),
+                     e = pmax(od$End, od$Window_end, na.rm = TRUE)),
+          od$Chrom)
   }
 
   # --- one ring's palette ----------------------------------------------------
@@ -1050,8 +1067,8 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
                                                  levels = chr_levels),
                                 xlim = cbind(0, sizes))
 
-    # An outer annotation ring, then an empty ring the chr bar's tick labels
-    # stand in (they reach ~5 mm out; .hs_lg$reach).
+    # An outer annotation ring, then a narrow empty ring above the chr bar's
+    # ticks (gap_mm).
     if (!is.null(outer_labels)) {
       draw_labels(outer_labels, outer_kept, .mm_frac(outer_mm, width_mm_now),
                   outside = TRUE)
@@ -1077,6 +1094,16 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
                               lwd = .lwd_pt(0.4))
         # a sector shorter than one step (a small scaffold) gets no label
         at <- if (xl[2L] >= tick) seq(tick, xl[2L], by = tick) else numeric(0)
+        # an outer annotation band sits just above the ticks: a numeral within
+        # 2 mm of arc of one (half a "600" plus air) would meet it — leave it
+        # out; the minor tick marks stay
+        ob <- outer_bands[[ch]]
+        if (length(at) > 0L && !is.null(ob) && nrow(ob) > 0L) {
+          pad <- circlize::mm_x(2)
+          at <- at[!vapply(at, function(a) any(ob$s - pad <= a &
+                                                 ob$e + pad >= a),
+                           logical(1L))]
+        }
         if (length(at) > 0L)
           circlize::circos.axis(h = "top", major.at = at,
                                 labels = at / 1e6,
