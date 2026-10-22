@@ -346,6 +346,60 @@ test_that("a needles ring draws signed values as uprights from a 0 baseline", {
   grDevices::dev.off()
 })
 
+test_that("outer_labels draws the annotation outside the chr bar's ticks", {
+  skip_if_not_installed("circlize")
+  d <- data.frame(Chrom = c("1", "2"), Name = c("Rpt3", "GeneB"),
+                  Start = c(2e7, 3e7), End = c(3e7, 3e7 + 1), r = c(2, 1))
+  inner <- circos_track(data.frame(Chrom = c("1", "2"), Pos = c(1e7, 2e7),
+                                   v = c(1, -1)), "needles", value_col = "v",
+                        name = "effects")
+  expect_error(plot_meta_circos(inner, chr_sizes = c(`1` = 5e7, `2` = 6e7),
+                                outer_labels = inner), "\"labels\"")
+  lab <- track_marker_labels(d, value_col = "r", name = "loci",
+                             height_mm = 12)
+  ob <- plot_meta_circos(inner, chr_sizes = c(`1` = 5e7, `2` = 6e7),
+                         draw = FALSE, legend_position = "bottom",
+                         outer_labels = lab)
+  expect_identical(ob$tracks, c("loci", "effects"))   # outermost first
+  expect_identical(ob$legend, c("loci", "effects"))
+
+  # ring order and heights: outer labels, the tick-label gap, the chr bar
+  rings <- list(); texts <- list()
+  o_track <- circlize::circos.track
+  o_text  <- circlize::circos.text
+  local_mocked_bindings(
+    circos.track = function(...) {
+      rings[[length(rings) + 1L]] <<- list(...)$track.height
+      o_track(...)
+    },
+    circos.text = function(...) {
+      texts[[length(texts) + 1L]] <<- list(...)
+      o_text(...)
+    }, .package = "circlize")
+  f <- tempfile(fileext = ".png")
+  grDevices::png(f, width = 89 / 25.4, height = ob$height_mm(89) / 25.4,
+                 units = "in", res = 100, type = "cairo")
+  graphics::par(mar = c(0, 0, 0, 0))
+  expect_no_warning(suppressMessages(ob$render(89)))
+  grDevices::dev.off()
+  h <- unlist(rings)
+  expect_equal(h[1:3], c(.mm_frac(12, 89), .mm_frac(.hs_lg$reach - 0.5, 89),
+                         .mm_frac(2.2, 89)))
+  # names read outward from the ring's inner part (the package's own call;
+  # niceFacing re-calls circos.text() with a flipped adj for turned labels)
+  nm <- Filter(function(a) isTRUE(a$niceFacing) && any(a[[3L]] %in% d$Name),
+               texts)
+  expect_true(length(nm) >= 1L)
+  expect_true(all(vapply(nm, function(a) a$adj[1L] == 0 &&
+                           a[[2L]][1L] == .hs_lab_geom$text_y_out,
+                         logical(1L))))
+  # a ring too low for its longest name says which height fits
+  short <- track_marker_labels(d, name = "loci", height_mm = 4)
+  expect_message(plot_meta_circos(inner, chr_sizes = c(`1` = 5e7, `2` = 6e7),
+                                  draw = FALSE, outer_labels = short),
+                 "height_mm = ")
+})
+
 test_that("legend text is measured from Helvetica's metrics, in mm", {
   expect_equal(.hs_text_mm("0", pt = 5), 0.556 * 5 * 25.4 / 72)
   expect_equal(.hs_text_mm(c("ab", NA)), c(2 * 0.556 * 5 * 25.4 / 72, 0))

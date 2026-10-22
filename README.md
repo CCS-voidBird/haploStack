@@ -5,6 +5,15 @@
 Developed for the GRDC Barley Phase 2 project at the University of Queensland.
 Generalised for use with any biparental or multiparental diploid breeding programme.
 
+> ### 0.8.7 — the annotation can sit above the chromosome ticks
+>
+> Owner request 2026-10-22, on VP1 figure a2: "make the annotation and its
+> regions to the most outer of the circos? like the top of the chr ticks".
+> Until now the chr–pos bar was always the outermost ring, so an annotation
+> ring could only sit inside it. Thread
+> [#033](project_record/threads/033-block-annotation-native.md). 150 exports
+> (unchanged).
+>
 > ### 0.8.6 — marker effects as needles
 >
 > Owner request 2026-10-22, for an alternative VP1 circos figure: - the

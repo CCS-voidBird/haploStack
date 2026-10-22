@@ -16,7 +16,8 @@ plot_meta_circos(
   legend = TRUE,
   draw = TRUE,
   legend_position = c("center", "bottomright", "bottomleft", "topright", "topleft",
-    "bottom", "none")
+    "bottom", "none"),
+  outer_labels = NULL
 )
 }
 \arguments{
@@ -55,6 +56,15 @@ keeps the circle at its declared size and makes the figure taller by
 only what the legend needs — often nothing for a corner at double
 column — never wider; \code{\link{save_journal_figure}} takes the page
 height from \code{$height_mm()}.}
+
+\item{outer_labels}{Optional \code{"labels"} track (e.g. from
+\code{\link{track_marker_labels}}) drawn \strong{outside} the chr–pos
+bar, beyond its tick labels: each region (and search window) sits just
+above the ticks, its name reads outward. The circle keeps the declared
+width, so the bar and every data ring move inward by the ring's height
+plus the tick-label gap. Its legend entries come first. A message names
+the \code{height_mm} that fits when the longest drawn name would run
+past the ring.}
 }
 \value{
 Invisibly, an \code{hs_meta_circos} object: \code{$render(width_mm)}
@@ -62,15 +72,18 @@ re-draws the figure at any declared width (what
 \code{\link{save_journal_figure}} calls), \code{$height_mm(width_mm)}
 gives the figure height at that width (the width itself unless an
 outside legend needs room), \code{$legend} the legend entry names in
-order, plus the frame parameters.
+order, \code{$tracks} the ring names outermost first (an
+\code{outer_labels} ring leads), plus the frame parameters.
 }
 \description{
 The polar analogue of \code{\link{plot_meta_alignment}} (Q25.n): the caller
 supplies an ordered list of \code{\link{circos_track}} specs and this
-function owns the shared frame. The outermost ring is always the
-\strong{chr–pos bar} — one sector per chromosome in natural order,
-Okabe–Ito colours, Mb ticks — and \code{tracks[[1]]} is the outermost data
-ring, the last element the innermost. A legend names each ring (with a
+function owns the shared frame. The frame is the \strong{chr–pos bar} — one
+sector per chromosome in natural order, Okabe–Ito colours, Mb ticks — and
+\code{tracks[[1]]} is the outermost data ring inside it, the last element
+the innermost. The bar is the outermost ring unless \code{outer_labels}
+puts an annotation ring outside it, beyond the tick labels. A legend names
+each ring (with a
 mini colourbar for \code{"rect"} rings, one chip per category for a
 categorical one, and for a \code{"labels"} ring one chip for the regions
 plus one for the search windows when any drawn locus has one) — in the

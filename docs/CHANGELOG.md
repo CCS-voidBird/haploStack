@@ -710,6 +710,61 @@ published repo ships:
   holder is still "University of Queensland", which is a rights statement, not an
   authorship one, and it already matches the published copy byte for byte.
 
+## [0.8.7] - 2026-10-22 — The annotation can sit above the chromosome ticks
+
+Owner request 2026-10-22, on VP1 figure a2: "make the annotation and its
+regions to the most outer of the circos? like the top of the chr ticks".
+Until now the chr–pos bar was always the outermost ring, so an annotation
+ring could only sit inside it. Thread
+[#033](project_record/threads/033-block-annotation-native.md). 150 exports
+(unchanged).
+
+### Added
+
+- **`plot_meta_circos(outer_labels =)`.** The new last argument takes a
+  `"labels"` track and draws it outside the chr–pos bar, beyond its tick
+  labels.
+  - Each region (and search window) is a band at the ring's inner edge, just
+    above the tick numbers, and each name reads outward. The inner ring
+    mirrors this: bands at the outer edge, names inward.
+  - A 4.5 mm empty ring holds the tick labels. The widest, "600" set
+    horizontal at 3 / 9 o'clock, reach about 4.3 mm, which leaves about 1 mm
+    of air.
+  - The circle keeps the declared width, so the bar and every data ring move
+    inward by the label ring's height plus that gap.
+  - The ring's legend entries come first, and `$tracks` lists it first.
+  - A message names the `height_mm` that fits when the longest drawn name
+    would run past the ring. The names start at 0.24 of the ring's height.
+    Page mm are 1/1.08 of nominal mm (INDEX discrepancy 36).
+  - A track other than `"labels"` is refused.
+  - Internals: one `draw_labels()` serves both placements, and the ring's
+    geometry is `.hs_lab_geom$win_out` / `reg_out` / `text_y_out`.
+
+### Tests
+
+- `test-circos-meta.R` 205 → 213:
+  - a non-label `outer_labels` is refused;
+  - `$tracks` and `$legend` list the outer ring first;
+  - the first three rings drawn are the label ring, the 4.5 mm tick gap and
+    the 2.2 mm chr bar;
+  - the names are drawn at `text_y_out` with `adj = c(0, 0.5)` (outward);
+  - a ring too low for its names messages the height that fits;
+  - it renders warning-free.
+
+  The `circos.track()` / `circos.text()` calls are recorded with
+  `local_mocked_bindings(.package = "circlize")`. Only the package's own
+  `niceFacing` call is checked, because circlize re-calls `circos.text()`
+  with a flipped `adj` for the labels it turns.
+- Suite **3 099 pass / 0 fail / 12 skips** against the dev tree (= 0.8.6's
+  3 091 + 8).
+
+### Verified
+
+- VP1 figure a2 was redrawn from the installed 0.8.7 with the known loci
+  outside the chromosomes. The previous version, with the labels just
+  inside the chromosome bar, is kept beside it for comparison
+  (`figures/label_placement/…_labels-inside-chr_2026-10-22.png`).
+
 ## [0.8.6] - 2026-10-22 — Marker effects as needles
 
 Owner request 2026-10-22, for an alternative VP1 circos figure:

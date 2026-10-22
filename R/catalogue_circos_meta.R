@@ -244,7 +244,12 @@ circos_track <- function(data,
 # (Rrs1 / Rpt1 share a boundary) stay separate bands; arcs are widened so at
 # least reg_mm of ink shows inside that edge. A window is drawn at least
 # halo_mm wider than its region on each side.
+# An outer ring (plot_meta_circos(outer_labels =), outside the chr bar)
+# mirrors it: bands at the inner edge, against the tick labels, and names
+# reading outward from text_y_out.
 .hs_lab_geom <- list(win = c(0.82, 1), reg = c(0.86, 0.96), text_y = 0.76,
+                     win_out = c(0, 0.18), reg_out = c(0.04, 0.14),
+                     text_y_out = 0.24,
                      reg_mm = 0.35, halo_mm = 0.3, sep_pt = 0.4)
 
 # Widen each [s, e] to at least w (bp, recycled) about its midpoint, then
@@ -710,10 +715,12 @@ track_marker_labels <- function(x, meta = NULL, value_col = NULL,
 #'
 #' The polar analogue of \code{\link{plot_meta_alignment}} (Q25.n): the caller
 #' supplies an ordered list of \code{\link{circos_track}} specs and this
-#' function owns the shared frame. The outermost ring is always the
-#' \strong{chr–pos bar} — one sector per chromosome in natural order,
-#' Okabe–Ito colours, Mb ticks — and \code{tracks[[1]]} is the outermost data
-#' ring, the last element the innermost. A legend names each ring (with a
+#' function owns the shared frame. The frame is the \strong{chr–pos bar} — one
+#' sector per chromosome in natural order, Okabe–Ito colours, Mb ticks — and
+#' \code{tracks[[1]]} is the outermost data ring inside it, the last element
+#' the innermost. The bar is the outermost ring unless \code{outer_labels}
+#' puts an annotation ring outside it, beyond the tick labels. A legend names
+#' each ring (with a
 #' mini colourbar for \code{"rect"} rings, one chip per category for a
 #' categorical one, and for a \code{"labels"} ring one chip for the regions
 #' plus one for the search windows when any drawn locus has one) — in the
@@ -755,13 +762,22 @@ track_marker_labels <- function(x, meta = NULL, value_col = NULL,
 #'   only what the legend needs — often nothing for a corner at double
 #'   column — never wider; \code{\link{save_journal_figure}} takes the page
 #'   height from \code{$height_mm()}.
+#' @param outer_labels Optional \code{"labels"} track (e.g. from
+#'   \code{\link{track_marker_labels}}) drawn \strong{outside} the chr–pos
+#'   bar, beyond its tick labels: each region (and search window) sits just
+#'   above the ticks, its name reads outward. The circle keeps the declared
+#'   width, so the bar and every data ring move inward by the ring's height
+#'   plus the tick-label gap. Its legend entries come first. A message names
+#'   the \code{height_mm} that fits when the longest drawn name would run
+#'   past the ring.
 #'
 #' @return Invisibly, an \code{hs_meta_circos} object: \code{$render(width_mm)}
 #'   re-draws the figure at any declared width (what
 #'   \code{\link{save_journal_figure}} calls), \code{$height_mm(width_mm)}
 #'   gives the figure height at that width (the width itself unless an
 #'   outside legend needs room), \code{$legend} the legend entry names in
-#'   order, plus the frame parameters.
+#'   order, \code{$tracks} the ring names outermost first (an
+#'   \code{outer_labels} ring leads), plus the frame parameters.
 #'
 #' @seealso \code{\link{circos_track}}, \code{\link{track_annotation}},
 #'   \code{\link{track_block_effect}}, \code{\link{track_block_variance}},
@@ -775,7 +791,8 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
                              legend_position = c("center", "bottomright",
                                                  "bottomleft", "topright",
                                                  "topleft", "bottom",
-                                                 "none")) {
+                                                 "none"),
+                             outer_labels = NULL) {
   if (identical(legend_position, "centre")) legend_position <- "center"
   legend_position <- match.arg(legend_position)
   if (!requireNamespace("circlize", quietly = TRUE))
@@ -788,10 +805,21 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
          "(see the track_*() constructors).")
   if (!is.null(rel_heights) && length(rel_heights) != length(tracks))
     stop("plot_meta_circos: 'rel_heights' must have one value per track.")
+  if (!is.null(outer_labels) &&
+      !(inherits(outer_labels, "hs_circos_track") &&
+        identical(outer_labels$type, "labels")))
+    stop("plot_meta_circos: 'outer_labels' must be a \"labels\" ",
+         "circos_track() (e.g. from track_marker_labels()).")
+  outer_mm <- if (is.null(outer_labels)) 0 else outer_labels$height_mm
+  # The ring the tick labels stand in: their widest ("600" set horizontal at
+  # 3 / 9 o'clock) reach ~4.3 mm past the bar; this leaves ~1 mm of air.
+  gap_mm   <- if (is.null(outer_labels)) 0 else .hs_lg$reach - 0.5
 
   # --- chromosome frame: sizes + order --------------------------------------
   union_max <- function() {
-    dd <- data.table::rbindlist(lapply(tracks, function(tr) {
+    dd <- data.table::rbindlist(lapply(c(list(outer_labels), tracks),
+                                       function(tr) {
+      if (is.null(tr)) return(NULL)
       d <- tr$data
       hi <- if (all(c("Start", "End") %in% names(d))) pmax(d$Start, d$End)
             else d$Pos
@@ -820,12 +848,13 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
 
   heights_mm <- vapply(tracks, `[[`, numeric(1L), "height_mm")
   if (!is.null(rel_heights)) heights_mm <- heights_mm * rel_heights
-  track_names <- vapply(tracks, `[[`, character(1L), "name")
+  track_names <- c(outer_labels$name,
+                   vapply(tracks, `[[`, character(1L), "name"))
 
   # --- label rings: which loci are drawn (width-independent) -----------------
   # theta per locus (region midpoint), deconflicted globally; loci with no
   # position, or on no drawn chromosome, are dropped first.
-  label_kept <- lapply(tracks, function(tr) {
+  kept_of <- function(tr) {
     if (tr$type != "labels") return(NULL)
     d <- tr$data
     ci <- match(d$Chrom, chr_levels)
@@ -836,7 +865,21 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
     ok <- which(is.finite(theta))
     ok[.hs_deconflict(theta[ok], d$.val[ok], tr$label_top_n,
                       tr$min_gap_rad)]
-  })
+  }
+  label_kept <- lapply(tracks, kept_of)
+  outer_kept <- if (!is.null(outer_labels)) kept_of(outer_labels)
+  # An outer ring's names read outward from 0.24 of its height: say when the
+  # longest drawn one would run past the ring (page mm are 1/1.08 of the
+  # nominal mm — INDEX discrepancy 36).
+  if (!is.null(outer_labels) && length(outer_kept) > 0L) {
+    need <- max(.hs_text_mm(outer_labels$data$Name[outer_kept]))
+    have <- (1 - .hs_lab_geom$text_y_out) * outer_mm / 1.08
+    if (need > have)
+      message("plot_meta_circos: the longest outer label (", round(need, 1),
+              " mm) runs past its ", outer_mm, " mm ring — height_mm = ",
+              ceiling(need * 1.08 / (1 - .hs_lab_geom$text_y_out)),
+              " fits.")
+  }
 
   # --- one ring's palette ----------------------------------------------------
   ring_fill <- function(tr) {
@@ -860,15 +903,14 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
 
   # --- the legend: one entry per ring, measured in mm (width-independent) ---
   use_legend <- isTRUE(legend) && legend_position != "none"
-  legend_items <- unlist(lapply(seq_along(tracks), function(i) {
-    tr <- tracks[[i]]
+  legend_of <- function(tr, kept) {
     if (!is.null(tr$categories))                  # one chip per category
       return(lapply(tr$categories, function(l)
         list(kind = "chip", name = l, mark = "square",
              col = unname(tr$palette[[l]]), wt = .hs_text_mm(l))))
     if (tr$type == "labels") {                    # region (+ search window)
       lc <- .hs_label_cols(tr)
-      dk <- tr$data[label_kept[[i]]]
+      dk <- tr$data[kept]
       win <- any(is.finite(dk$Window_start) & is.finite(dk$Window_end))
       return(c(list(list(kind = "chip", name = tr$name, mark = "square",
                          col = lc[1L], wt = .hs_text_mm(tr$name))),
@@ -891,7 +933,11 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
            col = (tr$palette %||% "#0072B2")[1L],
            wt = .hs_text_mm(tr$name))
     })
-  }), recursive = FALSE)
+  }
+  legend_items <- c(
+    if (!is.null(outer_labels)) legend_of(outer_labels, outer_kept),
+    unlist(lapply(seq_along(tracks), function(i)
+      legend_of(tracks[[i]], label_kept[[i]])), recursive = FALSE))
   layout_at <- function(w_mm)
     .hs_legend_layout(legend_items,
                       if (legend_position == "bottom") "flow" else "stack",
@@ -901,6 +947,50 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
     if (!outside) return(list(ylim = c(-1.06, 1.06), height_mm = w_mm))
     lay <- layout_at(w_mm)
     .hs_circos_frame(legend_position, lay$w, lay$h, w_mm)
+  }
+
+  # One label ring: the deconflicted loci, drawn per sector — search windows
+  # first, the regions over them, then the text (windows carry none). Inside
+  # the chr bar the bands sit at the ring's outer edge and the names run
+  # inward; outside it (outer_labels) the bands sit at the inner edge, against
+  # the tick labels, and the names run outward.
+  draw_labels <- function(tr, kept, th, outside) {
+    dk <- tr$data[kept, ]
+    lc <- .hs_label_cols(tr)
+    g  <- .hs_lab_geom
+    win_y <- if (outside) g$win_out else g$win
+    reg_y <- if (outside) g$reg_out else g$reg
+    circlize::circos.track(
+      ylim = c(0, 1), track.height = th, bg.border = NA,
+      panel.fun = function(x, y) {
+        ch <- circlize::CELL_META$sector.index
+        sd <- dk[dk$Chrom == ch, ]
+        if (nrow(sd) == 0L) return()
+        xl <- circlize::CELL_META$xlim
+        n  <- nrow(sd)
+        sep_mm <- g$sep_pt * 25.4 / 72
+        reg <- .hs_widen(sd$Start, sd$End,
+                         circlize::mm_x(g$reg_mm + sep_mm, h = mean(reg_y)),
+                         xl)
+        w <- which(is.finite(sd$Window_start) & is.finite(sd$Window_end))
+        if (length(w) > 0L) {
+          halo <- circlize::mm_x(g$halo_mm, h = mean(win_y))
+          win <- .hs_widen(sd$Window_start[w], sd$Window_end[w],
+                           reg$e[w] - reg$s[w] + 2 * halo, xl)
+          circlize::circos.rect(pmin(win$s, reg$s[w]),
+                                rep(win_y[1L], length(w)),
+                                pmax(win$e, reg$e[w]),
+                                rep(win_y[2L], length(w)),
+                                col = lc[2L], border = NA)
+        }
+        circlize::circos.rect(reg$s, rep(reg_y[1L], n), reg$e,
+                              rep(reg_y[2L], n), col = lc[1L],
+                              border = "white", lwd = .lwd_pt(g$sep_pt))
+        circlize::circos.text(sd$Pos, if (outside) g$text_y_out else g$text_y,
+                              sd$Name, cex = .pt_cex(5), col = "black",
+                              facing = "clockwise", niceFacing = TRUE,
+                              adj = c(if (outside) 0 else 1, 0.5))
+      })
   }
 
   render <- function(width_mm_now = width_mm) {
@@ -915,7 +1005,8 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
     # legend) collide — say so, and drop a centre legend rather than overprint
     # it, pointing at the outside positions.
     radius_mm <- width_mm_now / (2 * 1.06)
-    used_mm   <- 2.2 + 2.5 + sum(heights_mm) + 0.8 * (length(tracks) + 1L)
+    used_mm   <- 2.2 + 2.5 + sum(heights_mm) + 0.8 * (length(tracks) + 1L) +
+      if (is.null(outer_labels)) 0 else outer_mm + gap_mm + 0.8 * 2
     hole_mm   <- radius_mm - used_mm
     if (hole_mm < 0.35 * radius_mm)
       message("plot_meta_circos: ", length(tracks), " rings (",
@@ -958,6 +1049,15 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
     circlize::circos.initialize(sectors = factor(chr_levels,
                                                  levels = chr_levels),
                                 xlim = cbind(0, sizes))
+
+    # An outer annotation ring, then an empty ring the chr bar's tick labels
+    # stand in (they reach ~5 mm out; .hs_lg$reach).
+    if (!is.null(outer_labels)) {
+      draw_labels(outer_labels, outer_kept, .mm_frac(outer_mm, width_mm_now),
+                  outside = TRUE)
+      circlize::circos.track(ylim = c(0, 1), bg.border = NA,
+                             track.height = .mm_frac(gap_mm, width_mm_now))
+    }
 
     # Chr–pos bar outline: coloured bar, sparse labelled Mb ticks (unlabelled
     # minors between), chromosome name inside the bar.
@@ -1062,42 +1162,7 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
             }
           })
       } else {                                            # labels
-        # The deconflicted loci, drawn per sector: search windows first, the
-        # regions over them, then the text (windows carry none).
-        dk <- d[label_kept[[k]], ]
-        lc <- .hs_label_cols(tr)
-        g  <- .hs_lab_geom
-        circlize::circos.track(
-          ylim = c(0, 1), track.height = th, bg.border = NA,
-          panel.fun = function(x, y) {
-            ch <- circlize::CELL_META$sector.index
-            sd <- dk[dk$Chrom == ch, ]
-            if (nrow(sd) == 0L) return()
-            xl <- circlize::CELL_META$xlim
-            n  <- nrow(sd)
-            sep_mm <- g$sep_pt * 25.4 / 72
-            reg <- .hs_widen(sd$Start, sd$End,
-                             circlize::mm_x(g$reg_mm + sep_mm,
-                                            h = mean(g$reg)), xl)
-            w <- which(is.finite(sd$Window_start) & is.finite(sd$Window_end))
-            if (length(w) > 0L) {
-              halo <- circlize::mm_x(g$halo_mm, h = mean(g$win))
-              win <- .hs_widen(sd$Window_start[w], sd$Window_end[w],
-                               reg$e[w] - reg$s[w] + 2 * halo, xl)
-              circlize::circos.rect(pmin(win$s, reg$s[w]),
-                                    rep(g$win[1L], length(w)),
-                                    pmax(win$e, reg$e[w]),
-                                    rep(g$win[2L], length(w)),
-                                    col = lc[2L], border = NA)
-            }
-            circlize::circos.rect(reg$s, rep(g$reg[1L], n), reg$e,
-                                  rep(g$reg[2L], n), col = lc[1L],
-                                  border = "white", lwd = .lwd_pt(g$sep_pt))
-            circlize::circos.text(sd$Pos, g$text_y, sd$Name,
-                                  cex = .pt_cex(5), col = "black",
-                                  facing = "clockwise", niceFacing = TRUE,
-                                  adj = c(1, 0.5))
-          })
+        draw_labels(tr, label_kept[[k]], th, outside = FALSE)
       }
     }
 
