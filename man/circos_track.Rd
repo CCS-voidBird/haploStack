@@ -6,7 +6,7 @@
 \usage{
 circos_track(
   data,
-  type = c("rect", "points", "line", "labels"),
+  type = c("rect", "points", "line", "needles", "labels"),
   value_col = NULL,
   name = NULL,
   palette = NULL,
@@ -20,8 +20,8 @@ circos_track(
 \arguments{
 \item{data}{data.frame/data.table with \code{Chrom} and \code{Start}/
 \code{End} (for \code{"rect"}) or \code{Pos} (for \code{"points"},
-\code{"line"}; \code{"rect"} data carrying only \code{Pos} is widened to
-a visible sliver). \code{"labels"} needs \code{Name} and a
+\code{"line"}, \code{"needles"}; \code{"rect"} data carrying only
+\code{Pos} is widened to a visible sliver). \code{"labels"} needs \code{Name} and a
 \strong{region} per locus: \code{Start}/\code{End} (a gene model, a QTL
 interval); a locus reported at a single coordinate \code{a} (\code{Pos}
 alone, only one of \code{Start}/\code{End}, or \code{Start == End})
@@ -30,7 +30,10 @@ swapped. Optional \code{Window_start}/\code{Window_end} give each
 locus's search window (see \code{window_bp}).}
 
 \item{type}{Mark: \code{"rect"} (filled block segments), \code{"points"},
-\code{"line"}, or \code{"labels"} (each locus's region as a band at the
+\code{"line"}, \code{"needles"} (one vertical line per row from a zero
+baseline to its value — signed values go both ways; the ring's y range
+always includes 0 and a thin grey baseline is drawn there), or
+\code{"labels"} (each locus's region as a band at the
 ring's outer edge with a hairline white edge, so regions that meet stay
 apart; its text just inside; and — when present — its search window as
 a lighter, taller band behind the region, with no text).}
@@ -51,13 +54,13 @@ to diverging when the values cross 0, sequential otherwise. For a
 categorical \code{"rect"} ring: a colour vector named by category (it
 must name every category; its order sets the level order unless the
 column is a factor), or an unnamed vector recycled in level order
-(default Okabe–Ito). For point / line marks: a single colour (defaults
-drawn from the Okabe–Ito order). For \code{"labels"}: the region colour,
+(default Okabe–Ito). For point / line / needle marks: a single colour
+(defaults drawn from the Okabe–Ito order). For \code{"labels"}: the region colour,
 optionally followed by the search-window colour (defaults
 \code{"grey20"} and Okabe–Ito sky blue \code{"#56B4E9"}).}
 
 \item{height_mm}{Ring height in mm at the declared figure width (defaults
-per type: rect 3.5, line 4.5, points 5.5, labels 8).}
+per type: rect 3.5, line 4.5, points 5.5, needles 5.5, labels 8).}
 
 \item{label_top_n}{\code{"labels"} only: at most this many labels, highest
 \code{value_col} first, after angular deconfliction. Default 10.}

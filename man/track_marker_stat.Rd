@@ -4,7 +4,14 @@
 \alias{track_marker_stat}
 \title{Marker-statistic ring}
 \usage{
-track_marker_stat(x, stat, name = stat, palette = NULL, height_mm = NULL)
+track_marker_stat(
+  x,
+  stat,
+  name = stat,
+  palette = NULL,
+  height_mm = NULL,
+  mark = c("points", "needles")
+)
 }
 \arguments{
 \item{x}{data.frame or GenoMeta.}
@@ -13,14 +20,22 @@ track_marker_stat(x, stat, name = stat, palette = NULL, height_mm = NULL)
 \code{x$marker_effects} (GenoMeta route).}
 
 \item{name, palette, height_mm}{Passed to \code{\link{circos_track}}.}
+
+\item{mark}{\code{"points"} (default) or \code{"needles"} — one vertical
+line per marker from a zero baseline.}
 }
 \value{
 An \code{hs_circos_track}.
 }
 \description{
-Builds a \code{"points"} track from marker-level values: either a
-data.frame with \code{Chrom, Pos} + \code{stat}, or a \code{GenoMeta} plus
-the name of a stored effect trait (then \code{stat} values are
-\code{|Effect|} per marker, joined to \code{map_info} positions; zero
-effects are dropped).
+Builds a \code{"points"} (default) or \code{"needles"} track from
+marker-level values: either a data.frame with \code{Chrom, Pos} +
+\code{stat}, or a \code{GenoMeta} plus the name of a stored effect trait
+(then \code{stat} values are \code{|Effect|} per marker, joined to
+\code{map_info} positions; zero effects are dropped).
+}
+\details{
+For signed marker effects as needles, give the data.frame route one row
+per marker — e.g. the largest-\code{|Effect|} allele with its sign, the
+\code{\link{plot_marker_effects}} default.
 }

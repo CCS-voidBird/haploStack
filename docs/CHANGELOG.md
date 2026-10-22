@@ -710,6 +710,56 @@ published repo ships:
   holder is still "University of Queensland", which is a rights statement, not an
   authorship one, and it already matches the published copy byte for byte.
 
+## [0.8.6] - 2026-10-22 — Marker effects as needles
+
+Owner request 2026-10-22, for an alternative VP1 circos figure:
+- the Disease score's marker effects as a "vertical line plot";
+- BLUE haplotype-variance rings;
+- the annotation ring outermost.
+
+The package had no ring type for that mark. Thread
+[#033](project_record/threads/033-block-annotation-native.md). 150 exports
+(unchanged).
+
+### Added
+
+- **`circos_track(type = "needles")`.** Each row is drawn as one vertical
+  line from a zero baseline to its value, so signed values go both ways.
+  - The ring's y range always includes 0, and a thin grey baseline is drawn
+    there in every sector.
+  - It needs a `value_col` and takes one colour. Default height 5.5 mm.
+  - The legend chip is three short uprights (`mark = "needle"`).
+- **`track_marker_stat(mark = "points" | "needles")`.** The new last argument
+  defaults to `"points"`, so existing calls are unchanged. For signed effects
+  as needles, give the data.frame route one row per marker, e.g. the
+  largest-|Effect| allele with its sign (the `plot_marker_effects()`
+  default). The GenoMeta route still uses |Effect|.
+
+### Fixed
+
+- **A chromosome shorter than one tick step stopped `plot_meta_circos()`.**
+  The chr bar's labelled ticks ran `seq(tick, chr_end, by = tick)`, which
+  errors when the chromosome is shorter than the step (10 Mb at the
+  smallest). A small scaffold therefore stopped the plot. Such a sector now
+  just gets no tick label. Found by the new needles test, which uses a 5 Mb
+  chromosome.
+
+### Tests
+
+- `test-circos-meta.R` 191 → 205:
+  - `"needles"` needs a `value_col`;
+  - the default height;
+  - `track_marker_stat(mark =)` and its validation;
+  - all-positive values still get a 0 baseline in range;
+  - the uprights run from 0 to each value at each `Pos`, with one grey
+    baseline per sector (the `circos.segments()` calls are recorded through
+    `local_mocked_bindings(.package = "circlize")`);
+  - the legend lists the ring;
+  - the needle chip draws;
+  - a 5 Mb chromosome renders.
+- Suite **3 091 pass / 0 fail / 12 skips** against the dev tree (= 0.8.5's
+  3 077 + 14).
+
 ## [0.8.5] - 2026-10-21 — Regions that meet stay two regions
 
 Found while re-plotting the VP1 MorexV3 circos with the owner's resistance

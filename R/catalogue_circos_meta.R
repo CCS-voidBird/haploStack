@@ -8,7 +8,7 @@
 #   track_annotation()        — gene / QTL counts from an annotation df
 #   track_block_effect()      — one trait ring from analyze_block_catalogue()
 #   track_block_variance()    — per-block variance (line or rect)
-#   track_marker_stat()       — marker-level points
+#   track_marker_stat()       — marker-level points or needles
 #   track_marker_labels()     — named loci as regions (+ optional search
 #                               window band) with deconflicted text
 #   plot_meta_circos()        — chr–pos bar outline + the ranked track list
@@ -74,8 +74,8 @@
 #'
 #' @param data data.frame/data.table with \code{Chrom} and \code{Start}/
 #'   \code{End} (for \code{"rect"}) or \code{Pos} (for \code{"points"},
-#'   \code{"line"}; \code{"rect"} data carrying only \code{Pos} is widened to
-#'   a visible sliver). \code{"labels"} needs \code{Name} and a
+#'   \code{"line"}, \code{"needles"}; \code{"rect"} data carrying only
+#'   \code{Pos} is widened to a visible sliver). \code{"labels"} needs \code{Name} and a
 #'   \strong{region} per locus: \code{Start}/\code{End} (a gene model, a QTL
 #'   interval); a locus reported at a single coordinate \code{a} (\code{Pos}
 #'   alone, only one of \code{Start}/\code{End}, or \code{Start == End})
@@ -83,7 +83,10 @@
 #'   swapped. Optional \code{Window_start}/\code{Window_end} give each
 #'   locus's search window (see \code{window_bp}).
 #' @param type Mark: \code{"rect"} (filled block segments), \code{"points"},
-#'   \code{"line"}, or \code{"labels"} (each locus's region as a band at the
+#'   \code{"line"}, \code{"needles"} (one vertical line per row from a zero
+#'   baseline to its value — signed values go both ways; the ring's y range
+#'   always includes 0 and a thin grey baseline is drawn there), or
+#'   \code{"labels"} (each locus's region as a band at the
 #'   ring's outer edge with a hairline white edge, so regions that meet stay
 #'   apart; its text just inside; and — when present — its search window as
 #'   a lighter, taller band behind the region, with no text).
@@ -101,12 +104,12 @@
 #'   categorical \code{"rect"} ring: a colour vector named by category (it
 #'   must name every category; its order sets the level order unless the
 #'   column is a factor), or an unnamed vector recycled in level order
-#'   (default Okabe–Ito). For point / line marks: a single colour (defaults
-#'   drawn from the Okabe–Ito order). For \code{"labels"}: the region colour,
+#'   (default Okabe–Ito). For point / line / needle marks: a single colour
+#'   (defaults drawn from the Okabe–Ito order). For \code{"labels"}: the region colour,
 #'   optionally followed by the search-window colour (defaults
 #'   \code{"grey20"} and Okabe–Ito sky blue \code{"#56B4E9"}).
 #' @param height_mm Ring height in mm at the declared figure width (defaults
-#'   per type: rect 3.5, line 4.5, points 5.5, labels 8).
+#'   per type: rect 3.5, line 4.5, points 5.5, needles 5.5, labels 8).
 #' @param label_top_n \code{"labels"} only: at most this many labels, highest
 #'   \code{value_col} first, after angular deconfliction. Default 10.
 #' @param min_gap_rad \code{"labels"} only: minimum angular gap between kept
@@ -121,7 +124,9 @@
 #' @return An \code{hs_circos_track} spec.
 #' @seealso \code{\link{plot_meta_circos}}
 #' @export
-circos_track <- function(data, type = c("rect", "points", "line", "labels"),
+circos_track <- function(data,
+                         type = c("rect", "points", "line", "needles",
+                                  "labels"),
                          value_col = NULL, name = NULL, palette = NULL,
                          height_mm = NULL, label_top_n = 10L,
                          min_gap_rad = 0.14, window_bp = NULL,
@@ -175,14 +180,15 @@ circos_track <- function(data, type = c("rect", "points", "line", "labels"),
     } else {
       dt[, .val := as.numeric(get(value_col))]
     }
-  } else if (type %in% c("points", "line")) {
+  } else if (type %in% c("points", "line", "needles")) {
     stop("circos_track: '", type, "' tracks need a value_col.")
   } else {
     dt[, .val := NA_real_]
   }
 
   if (is.null(height_mm))
-    height_mm <- c(rect = 3.5, points = 5.5, line = 4.5, labels = 8)[[type]]
+    height_mm <- c(rect = 3.5, points = 5.5, line = 4.5, needles = 5.5,
+                   labels = 8)[[type]]
 
   structure(list(data = dt[], type = type, value_col = value_col,
                  name = name %||% value_col %||% type, palette = palette,
@@ -384,20 +390,28 @@ track_block_variance <- function(x, value_col = "Block_Var", trait = NULL,
 
 #' Marker-statistic ring
 #'
-#' Builds a \code{"points"} track from marker-level values: either a
-#' data.frame with \code{Chrom, Pos} + \code{stat}, or a \code{GenoMeta} plus
-#' the name of a stored effect trait (then \code{stat} values are
-#' \code{|Effect|} per marker, joined to \code{map_info} positions; zero
-#' effects are dropped).
+#' Builds a \code{"points"} (default) or \code{"needles"} track from
+#' marker-level values: either a data.frame with \code{Chrom, Pos} +
+#' \code{stat}, or a \code{GenoMeta} plus the name of a stored effect trait
+#' (then \code{stat} values are \code{|Effect|} per marker, joined to
+#' \code{map_info} positions; zero effects are dropped).
+#'
+#' For signed marker effects as needles, give the data.frame route one row
+#' per marker — e.g. the largest-\code{|Effect|} allele with its sign, the
+#' \code{\link{plot_marker_effects}} default.
 #'
 #' @param x data.frame or GenoMeta.
 #' @param stat Column name in \code{x} (data.frame route) or trait name in
 #'   \code{x$marker_effects} (GenoMeta route).
+#' @param mark \code{"points"} (default) or \code{"needles"} — one vertical
+#'   line per marker from a zero baseline.
 #' @param name,palette,height_mm Passed to \code{\link{circos_track}}.
 #' @return An \code{hs_circos_track}.
 #' @export
 track_marker_stat <- function(x, stat, name = stat, palette = NULL,
-                              height_mm = NULL) {
+                              height_mm = NULL,
+                              mark = c("points", "needles")) {
+  mark <- match.arg(mark)
   if (is.data.frame(x)) {
     dt <- as.data.table(x)
     if (!all(c("Chrom", "Pos", stat) %in% names(dt)))
@@ -418,7 +432,7 @@ track_marker_stat <- function(x, stat, name = stat, palette = NULL,
   } else {
     stop("track_marker_stat: 'x' must be a data.frame or a GenoMeta.")
   }
-  circos_track(dt, type = "points", value_col = "value",
+  circos_track(dt, type = mark, value_col = "value",
                name = name %||% stat, palette = palette %||% "#E69F00",
                height_mm = height_mm)
 }
@@ -678,6 +692,11 @@ track_marker_labels <- function(x, meta = NULL, value_col = NULL,
       else if (it$mark == "square")       # a category, a region, a window
         graphics::rect(gx - k, yc - 0.8 * k, gx + k, yc + 0.8 * k,
                        col = it$col, border = NA)
+      else if (it$mark == "needle")       # three short uprights, one taller
+        graphics::segments(gx + c(-0.6, 0, 0.6) * k, yc - 0.8 * k,
+                           gx + c(-0.6, 0, 0.6) * k,
+                           yc + c(0.1, 0.8, -0.3) * k, col = it$col,
+                           lwd = .lwd_pt(0.75))
       else
         graphics::segments(gx - k, yc, gx + k, yc, col = it$col,
                            lwd = .lwd_pt(0.75))
@@ -867,7 +886,8 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
            wl = .hs_text_mm(lo), wr = .hs_text_mm(hi))
     } else {
       list(kind = "chip", name = tr$name,
-           mark = if (tr$type == "points") "points" else "line",
+           mark = switch(tr$type, points = "points", needles = "needle",
+                         "line"),
            col = (tr$palette %||% "#0072B2")[1L],
            wt = .hs_text_mm(tr$name))
     })
@@ -955,7 +975,8 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
                               col = "grey30",
                               major.tick.length = circlize::mm_y(0.5),
                               lwd = .lwd_pt(0.4))
-        at <- seq(tick, xl[2L], by = tick)
+        # a sector shorter than one step (a small scaffold) gets no label
+        at <- if (xl[2L] >= tick) seq(tick, xl[2L], by = tick) else numeric(0)
         if (length(at) > 0L)
           circlize::circos.axis(h = "top", major.at = at,
                                 labels = at / 1e6,
@@ -1007,8 +1028,9 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
                                   rep(1, nrow(sd)), col = fill[o],
                                   border = NA)
           })
-      } else if (tr$type %in% c("points", "line")) {
+      } else if (tr$type %in% c("points", "line", "needles")) {
         rng <- range(d$.val, na.rm = TRUE)
+        if (tr$type == "needles") rng <- range(c(0, rng))   # baseline in view
         if (!all(is.finite(rng)) || diff(rng) == 0)
           rng <- rng[1L] + c(-0.5, 0.5)
         pad <- diff(rng) * 0.06
@@ -1025,6 +1047,14 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
               circlize::circos.points(sd$Pos, sd$.val, pch = 16,
                                       cex = .pt_cex(2.2),
                                       col = grDevices::adjustcolor(col1, 0.55))
+            } else if (tr$type == "needles") {
+              xl <- circlize::CELL_META$xlim
+              circlize::circos.segments(xl[1L], 0, xl[2L], 0, col = "grey60",
+                                        lwd = .lwd_pt(0.25))
+              ok <- is.finite(sd$.val)
+              circlize::circos.segments(sd$Pos[ok], 0, sd$Pos[ok],
+                                        sd$.val[ok], col = col1,
+                                        lwd = .lwd_pt(0.3))
             } else {
               o <- order(sd$Pos)
               circlize::circos.lines(sd$Pos[o], sd$.val[o], col = col1,

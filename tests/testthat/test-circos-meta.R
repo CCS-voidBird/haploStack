@@ -293,6 +293,59 @@ test_that("label regions that meet stay apart: each carries a white edge", {
   expect_equal(reg[[1L]][[1L]][2L], 50e6)      # two rects, not one bar
 })
 
+test_that("a needles ring draws signed values as uprights from a 0 baseline", {
+  d <- data.frame(Chrom = "1", Pos = c(1e6, 2e6, 3e6), eff = c(0.4, -0.2, 0.1))
+  expect_error(circos_track(d, type = "needles"), "need a value_col")
+  tr <- circos_track(d, type = "needles", value_col = "eff", name = "effects")
+  expect_identical(tr$type, "needles")
+  expect_equal(tr$height_mm, 5.5)
+  t2 <- track_marker_stat(d, stat = "eff", mark = "needles")
+  expect_identical(t2$type, "needles")
+  expect_identical(track_marker_stat(d, stat = "eff")$type, "points")
+  expect_error(track_marker_stat(d, stat = "eff", mark = "bars"),
+               "should be one of")
+
+  skip_if_not_installed("circlize")
+  segs <- list()
+  orig <- circlize::circos.segments
+  local_mocked_bindings(circos.segments = function(...) {
+    segs[[length(segs) + 1L]] <<- list(...)
+    orig(...)
+  }, .package = "circlize")
+  # all-positive values: the ring's range is widened down to 0. The 5 Mb
+  # chromosome is shorter than one 10 Mb tick step — it used to stop the
+  # chr bar in seq() (fixed in 0.8.6)
+  dp <- transform(d, eff = abs(eff))
+  ob <- plot_meta_circos(list(circos_track(dp, "needles", value_col = "eff",
+                                           name = "effects")),
+                         chr_sizes = c(`1` = 5e6), draw = FALSE,
+                         legend_position = "bottom")
+  expect_identical(ob$legend, "effects")
+  f <- tempfile(fileext = ".png")
+  grDevices::png(f, width = 89 / 25.4, height = ob$height_mm(89) / 25.4,
+                 units = "in", res = 100, type = "cairo")
+  graphics::par(mar = c(0, 0, 0, 0))
+  expect_no_warning(suppressMessages(ob$render(89)))
+  grDevices::dev.off()
+  ups <- Filter(function(a) length(a[[1L]]) == 3L, segs)
+  expect_length(ups, 1L)
+  expect_equal(ups[[1L]][[1L]], dp$Pos)                # x0 = x1 = Pos
+  expect_equal(ups[[1L]][[2L]], 0)                     # from the baseline
+  expect_equal(ups[[1L]][[4L]], dp$eff)                # to the value
+  base <- Filter(function(a) identical(a$col, "grey60"), segs)
+  expect_length(base, 1L)                              # one baseline/sector
+  # the needle chip draws
+  items <- list(list(kind = "chip", name = "effects", mark = "needle",
+                     col = "#332288", wt = .hs_text_mm("effects")))
+  f2 <- tempfile(fileext = ".png")
+  grDevices::png(f2, width = 2, height = 1, units = "in", res = 100)
+  graphics::par(mar = c(0, 0, 0, 0))
+  graphics::plot.new()
+  expect_no_error(.hs_draw_legend(items, .hs_legend_layout(items), 0.1, 0.9,
+                                  0.02))
+  grDevices::dev.off()
+})
+
 test_that("legend text is measured from Helvetica's metrics, in mm", {
   expect_equal(.hs_text_mm("0", pt = 5), 0.556 * 5 * 25.4 / 72)
   expect_equal(.hs_text_mm(c("ab", NA)), c(2 * 0.556 * 5 * 25.4 / 72, 0))

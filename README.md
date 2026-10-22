@@ -5,6 +5,12 @@
 Developed for the GRDC Barley Phase 2 project at the University of Queensland.
 Generalised for use with any biparental or multiparental diploid breeding programme.
 
+> ### 0.8.6 — marker effects as needles
+>
+> Owner request 2026-10-22, for an alternative VP1 circos figure: - the
+> Disease score's marker effects as a "vertical line plot"; - BLUE haplotype-
+> variance rings; - the annotation ring outermost.
+>
 > ### 0.8.5 — regions that meet stay two regions
 >
 > Found while re-plotting the VP1 MorexV3 circos with the owner's resistance
