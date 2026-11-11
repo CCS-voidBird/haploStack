@@ -90,7 +90,7 @@ test_that("combine_haplotypes: pure-R and Rcpp agree (delimiter + concat, NA->-1
 
 test_that("split_haplotypes agrees across engines on realistic simulated data", {
   skip_if_not(split_kernel(), "kernel not compiled")
-  g <- sim_geno_matrix(n_samples = 15L, n_markers = 40L, encoding = "selectiontools")
+  g <- sim_geno_matrix(n_samples = 15L, n_markers = 40L, encoding = "nucleotide")
   # sim matrix is markers x samples -> orientation = 2
   a <- toggle(FALSE, split_haplotypes(g, split_char = "/", orientation = 2L))
   b <- toggle(TRUE,  split_haplotypes(g, split_char = "/", orientation = 2L))

@@ -14,7 +14,7 @@
 library(testthat)
 library(haploStack)
 
-kernel_available <- function() is.function(haploStack:::.gebv_kernel())
+kernel_available <- function() is.function(haploStack:::.hs_kernel("local_gebv_block_sum_cpp"))
 
 # Compare two wide/long catalogue tables: structure (dims, names, non-numeric
 # columns) must be IDENTICAL; numeric columns may differ only by `tol` (the Rcpp
@@ -32,7 +32,7 @@ expect_engine_parity <- function(a, b, tol = 1e-8) {
 .eng_meta <- sim_geno_meta(n_samples = 8L, n_markers = 18L,
                            n_chrom = 2L, block_size = 3L, seed = 21L)
 .eng_eff  <- sim_effect_df(dimnames(.eng_meta$geno_arrays)[[2L]],
-                           alleles = c("1", "4"), seed = 21L)
+                           alleles = c("A", "T"), seed = 21L)
 
 # ── .catalogue_core ───────────────────────────────────────────────────────────
 
@@ -68,7 +68,7 @@ test_that(".catalogue_core flags empty input", {
 
 test_that("local_gebv_block_sum_cpp validates its inputs", {
   skip_if_not(kernel_available(), "Rcpp kernel not compiled")
-  k <- haploStack:::.gebv_kernel()
+  k <- haploStack:::.hs_kernel("local_gebv_block_sum_cpp")
   code    <- matrix(1L, 2L, 3L)
   contrib <- matrix(0,  3L, 2L)
   blk     <- c(1L, 1L, 2L)
@@ -83,7 +83,7 @@ test_that("local_gebv_block_sum_cpp validates its inputs", {
 
 test_that("kernel skips NA codes and 0 block indices", {
   skip_if_not(kernel_available(), "Rcpp kernel not compiled")
-  k <- haploStack:::.gebv_kernel()
+  k <- haploStack:::.hs_kernel("local_gebv_block_sum_cpp")
   code    <- matrix(c(1L, NA_integer_, 2L, 1L), nrow = 2L)  # 2 copies x 2 markers
   contrib <- matrix(c(10, 20, 30, 40), nrow = 2L)           # 2 markers x 2 codes
   res <- k(code, contrib, c(1L, 0L), 1L)                    # marker 2 skipped
@@ -93,11 +93,11 @@ test_that("kernel skips NA codes and 0 block indices", {
 
 # ── use_rcpp toggle ───────────────────────────────────────────────────────────
 
-test_that(".use_rcpp honours the option and kernel availability", {
+test_that(".hs_use_rcpp honours the option and kernel availability", {
   withr::local_options(haploStack.use_rcpp = FALSE)
-  expect_false(haploStack:::.use_rcpp())
+  expect_false(haploStack:::.hs_use_rcpp("local_gebv_block_sum_cpp"))
   withr::local_options(haploStack.use_rcpp = TRUE)
-  expect_equal(haploStack:::.use_rcpp(), kernel_available())
+  expect_equal(haploStack:::.hs_use_rcpp("local_gebv_block_sum_cpp"), kernel_available())
 })
 
 # ── pure-R vs Rcpp parity ─────────────────────────────────────────────────────
@@ -105,9 +105,9 @@ test_that(".use_rcpp honours the option and kernel availability", {
 test_that("compute_profile_localgebv: pure-R and Rcpp agree (genotype)", {
   skip_if_not(kernel_available(), "Rcpp kernel not compiled")
   a <- withr::with_options(list(haploStack.use_rcpp = FALSE),
-         compute_profile_localgebv(.eng_meta, .eng_eff, center_by_freq = TRUE))
+         compute_profile_localgebv(.eng_meta, .eng_eff, center = "allele_freq"))
   b <- withr::with_options(list(haploStack.use_rcpp = TRUE),
-         compute_profile_localgebv(.eng_meta, .eng_eff, center_by_freq = TRUE))
+         compute_profile_localgebv(.eng_meta, .eng_eff, center = "allele_freq"))
   expect_engine_parity(a, b)
 })
 
@@ -115,10 +115,10 @@ test_that("compute_profile_localgebv: pure-R and Rcpp agree (haplotype, no centr
   skip_if_not(kernel_available(), "Rcpp kernel not compiled")
   a <- withr::with_options(list(haploStack.use_rcpp = FALSE),
          compute_profile_localgebv(.eng_meta, .eng_eff, level = "haplotype",
-                                   center_by_freq = FALSE))
+                                   center = "none"))
   b <- withr::with_options(list(haploStack.use_rcpp = TRUE),
          compute_profile_localgebv(.eng_meta, .eng_eff, level = "haplotype",
-                                   center_by_freq = FALSE))
+                                   center = "none"))
   expect_engine_parity(a, b)
 })
 
@@ -150,8 +150,8 @@ test_that("run_haplotype_catalogue: pure-R and Rcpp agree on every table", {
 test_that("passing a shared .core matches building one internally", {
   withr::local_options(haploStack.use_rcpp = FALSE)
   core <- haploStack:::.catalogue_core(.eng_meta, use_rcpp = FALSE)
-  a <- compute_profile_localgebv(.eng_meta, .eng_eff, center_by_freq = TRUE)
-  b <- compute_profile_localgebv(.eng_meta, .eng_eff, center_by_freq = TRUE,
+  a <- compute_profile_localgebv(.eng_meta, .eng_eff, center = "allele_freq")
+  b <- compute_profile_localgebv(.eng_meta, .eng_eff, center = "allele_freq",
                                  .core = core)
   expect_identical(a, b)
   ca <- compute_block_catalogue(.eng_meta, .eng_eff)
@@ -173,7 +173,7 @@ test_that("analyze_block_catalogue agrees across engines (shared core path)", {
   skip_if_not(kernel_available(), "Rcpp kernel not compiled")
   eff2 <- list(T1 = .eng_eff,
                T2 = sim_effect_df(dimnames(.eng_meta$geno_arrays)[[2L]],
-                                  alleles = c("1", "4"), seed = 99L))
+                                  alleles = c("A", "T"), seed = 99L))
   ar <- suppressWarnings(withr::with_options(list(haploStack.use_rcpp = FALSE),
           analyze_block_catalogue(.eng_meta, eff2, plots = character(0))))
   ac <- suppressWarnings(withr::with_options(list(haploStack.use_rcpp = TRUE),

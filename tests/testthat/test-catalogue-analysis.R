@@ -21,11 +21,11 @@ library(data.table)
   mk   <- dimnames(meta$geno_arrays)[[2L]]
   set.seed(seed)
   eff1 <- data.frame(Marker = rep(mk, each = 2L),
-                     Allele = rep(c("1", "4"), length(mk)),
+                     Allele = rep(c("A", "T"), length(mk)),
                      Effect = round(rnorm(2L * length(mk), 0, 0.5), 3),
                      stringsAsFactors = FALSE)
   eff2 <- data.frame(Marker = rep(mk, each = 2L),
-                     Allele = rep(c("1", "4"), length(mk)),
+                     Allele = rep(c("A", "T"), length(mk)),
                      Effect = round(rnorm(2L * length(mk), 0, 3.0), 3),
                      stringsAsFactors = FALSE)
   list(meta = meta, eff1 = eff1, eff2 = eff2)
@@ -49,7 +49,9 @@ test_that("analyze_block_catalogue returns the documented components", {
                                                   plots = character(0)))
   expect_setequal(names(res),
     c("subtypes", "selected", "S", "N", "top_blocks", "gebv", "plots",
-      "value_source", "normalize"))
+      "value_source", "normalize",
+      "figures", "notes", "provenance"))          # 0.9.0: hs_block_analysis (D3.4)
+  expect_s3_class(res, "hs_block_analysis")
   expect_s3_class(res$selected, "data.table")
   expect_true(all(c("Block", "Trait", "S", "is_top") %in% names(res$S)))
   expect_true(all(c("Block", "Trait", "N", "is_top") %in% names(res$N)))
@@ -405,21 +407,24 @@ test_that("output_dir writes the revised table set (+ PNGs for requested plots)"
   expect_true("block_density.png" %in% list.files(od2))
 })
 
-test_that("NULL output_dir warns and writes nothing", {
+test_that("NULL output_dir writes nothing and no longer warns (0.9.0, D3.4)", {
   fx <- .analysis_fixture()
-  expect_warning(
-    suppressMessages(analyze_block_catalogue(fx$meta, list(Yield = fx$eff1),
-                                             plots = character(0))),
-    "nothing written")
+  d <- withr::local_tempdir(); withr::local_dir(d)
+  expect_no_warning(
+    res <- suppressMessages(analyze_block_catalogue(fx$meta, list(Yield = fx$eff1),
+                                                    plots = character(0))))
+  expect_s3_class(res, "hs_block_analysis")
+  expect_identical(list.files(d), character(0))
 })
 
-test_that("write_outputs = FALSE suppresses writes without warning", {
+test_that("write_outputs = FALSE is deprecated but still honoured (0.9.0, D3.4)", {
   fx <- .analysis_fixture()
   od <- tempfile("nowrite")
-  expect_silent(suppressMessages(
+  expect_warning(suppressMessages(
     analyze_block_catalogue(fx$meta, list(Yield = fx$eff1),
                             output_dir = od, write_outputs = FALSE,
-                            plots = character(0))))
+                            plots = character(0))),
+    class = "hs_warning_deprecated")
   expect_false(dir.exists(od) && length(list.files(od)) > 0L)
 })
 
@@ -488,7 +493,8 @@ test_that("plot_block_effect_circos renders a recorded plot with circlize", {
             list(Yield = fx$eff1, Protein = fx$eff2), plots = character(0)))
   grDevices::pdf(NULL)
   on.exit(grDevices::dev.off(), add = TRUE)
-  p <- plot_block_effect_circos(res, link_top = TRUE)
+  expect_warning(p <- plot_block_effect_circos(res, link_top = TRUE),
+                 class = "hs_warning_deprecated")          # row 12 b (0.9.0)
   expect_s3_class(p, "recordedplot")
 })
 

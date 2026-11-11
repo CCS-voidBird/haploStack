@@ -52,12 +52,15 @@ read_phenotype <- function(file,
                            sep        = NULL) {
   file <- as.character(file)
   if (!file.exists(file))
-    stop("read_phenotype: file not found: ", file)
+    .hs_abort("read_phenotype: file not found: ", file)
 
+  # Read as text: the sample IDs keep their spelling ("007" stays "007"), and
+  # every trait column is converted with as.numeric() below anyway.
   raw <- data.table::fread(file, header = TRUE, data.table = FALSE,
+                           colClasses = "character",
                            sep = if (is.null(sep)) "auto" else sep)
   if (ncol(raw) < 2L)
-    stop("read_phenotype: file must have an identifier column plus at least ",
+    .hs_abort("read_phenotype: file must have an identifier column plus at least ",
          "one trait column.")
 
   # Resolve the sample-id column.
@@ -68,7 +71,7 @@ read_phenotype <- function(file,
     sample_col <- names(raw)[as.integer(sample_col)]
   }
   if (!sample_col %in% names(raw))
-    stop("read_phenotype: sample column '", sample_col, "' not found in file.")
+    .hs_abort("read_phenotype: sample column '", sample_col, "' not found in file.")
 
   sample_ids <- as.character(raw[[sample_col]])
 
@@ -77,12 +80,12 @@ read_phenotype <- function(file,
   if (!is.null(traits)) {
     missing_t <- setdiff(traits, trait_cols)
     if (length(missing_t) > 0L)
-      stop("read_phenotype: requested trait(s) not found: ",
+      .hs_abort("read_phenotype: requested trait(s) not found: ",
            paste(missing_t, collapse = ", "), ".")
     trait_cols <- traits
   }
   if (length(trait_cols) == 0L)
-    stop("read_phenotype: no trait columns remain after dropping id columns.")
+    .hs_abort("read_phenotype: no trait columns remain after dropping id columns.")
 
   ph <- data.frame(Sample = sample_ids, stringsAsFactors = FALSE)
   for (tc in trait_cols)
@@ -120,13 +123,12 @@ read_phenotype <- function(file,
 #'
 #' @export
 attach_phenotype <- function(geno_meta, phenotype, traits = NULL) {
-  if (!is_geno_meta(geno_meta))
-    stop("attach_phenotype: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "attach_phenotype", "geno_meta")
 
   if (is.character(phenotype) && length(phenotype) == 1L)
     phenotype <- read_phenotype(phenotype, traits = traits)
   if (!is.data.frame(phenotype))
-    stop("attach_phenotype: 'phenotype' must be a data.frame or a file path.")
+    .hs_abort("attach_phenotype: 'phenotype' must be a data.frame or a file path.")
   phenotype <- as.data.frame(phenotype, stringsAsFactors = FALSE)
 
   # Resolve / normalise the Sample column to be named "Sample".
@@ -139,7 +141,7 @@ attach_phenotype <- function(geno_meta, phenotype, traits = NULL) {
   if (!is.null(traits)) {
     missing_t <- setdiff(traits, setdiff(names(phenotype), "Sample"))
     if (length(missing_t) > 0L)
-      stop("attach_phenotype: requested trait(s) not found: ",
+      .hs_abort("attach_phenotype: requested trait(s) not found: ",
            paste(missing_t, collapse = ", "), ".")
     phenotype <- phenotype[, c("Sample", traits), drop = FALSE]
   }
@@ -147,24 +149,13 @@ attach_phenotype <- function(geno_meta, phenotype, traits = NULL) {
   geno_samples <- dimnames(geno_meta$geno_arrays)[[1L]]
   shared <- intersect(as.character(phenotype$Sample), geno_samples)
   if (length(shared) == 0L)
-    stop("attach_phenotype: no samples shared between the phenotype and the ",
+    .hs_abort("attach_phenotype: no samples shared between the phenotype and the ",
          "genotype data.")
 
   # .standardise_phenotype() (via new_geno_meta) performs the drop/NA-fill/reorder
-  # and warns; rebuild so the entire object is revalidated.
-  out <- new_geno_meta(
-    geno_arrays           = geno_meta$geno_arrays,
-    map_info              = geno_meta$map_info,
-    block_info            = geno_meta$block_info,
-    block_marker_map_info = geno_meta$block_marker_map_info,
-    metadata              = geno_meta$metadata,
-    sample_info           = geno_meta$sample_info,
-    marker_effects        = geno_meta$marker_effects,
-    phenotype             = phenotype
-  )
-  # Blocks are unchanged, so a stored block annotation stays valid (#033).
-  out$annotation <- geno_meta$annotation
-  out
+  # and warns; rebuild so the entire object is revalidated. Everything else is
+  # forwarded (one rebuild path, 0.9.0).
+  .rebuild_geno_meta(geno_meta, phenotype = phenotype, .caller = "attach_phenotype")
 }
 
 
@@ -180,15 +171,14 @@ attach_phenotype <- function(geno_meta, phenotype, traits = NULL) {
 #'
 #' @export
 get_phenotype <- function(geno_meta, traits = NULL) {
-  if (!is_geno_meta(geno_meta))
-    stop("get_phenotype: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "get_phenotype", "geno_meta")
   ph <- geno_meta$phenotype
   if (is.null(ph))
-    stop("get_phenotype: no phenotype attached. Use attach_phenotype() first.")
+    .hs_abort("get_phenotype: no phenotype attached. Use attach_phenotype() first.")
   if (!is.null(traits)) {
     missing_t <- setdiff(traits, setdiff(names(ph), "Sample"))
     if (length(missing_t) > 0L)
-      stop("get_phenotype: requested trait(s) not found: ",
+      .hs_abort("get_phenotype: requested trait(s) not found: ",
            paste(missing_t, collapse = ", "), ".")
     ph <- ph[, c("Sample", traits), drop = FALSE]
   }

@@ -6,6 +6,12 @@
 #   ocs_selection(), compute_grm(), summarise_simulation()
 # =============================================================================
 
+# 0.9.0 (row 27 a): both selectors are deprecated and warn on every call. The
+# tests still exercise the package functions, quietly; the ladder itself is
+# tested in test-090-deprecation.R (L6).
+greedy_q <- function(...) suppressWarnings(greedy_selection(...), classes = "hs_warning_deprecated")
+ga_q     <- function(...) suppressWarnings(genetic_algorithm_selection(...), classes = "hs_warning_deprecated")
+
 library(testthat)
 library(haploStack)
 
@@ -65,52 +71,52 @@ test_that("make_cross_design errors on custom without cross_table", {
 # ── greedy_selection ──────────────────────────────────────────────────────────
 
 test_that("greedy_selection returns exactly n_parents names", {
-  selected <- greedy_selection(.gebv_mat, n_parents = 5L)
+  selected <- greedy_q(.gebv_mat, n_parents = 5L)
   expect_equal(length(selected), 5L)
 })
 
 test_that("greedy_selection returns only names from the GEBV matrix", {
-  selected <- greedy_selection(.gebv_mat, n_parents = 4L)
+  selected <- greedy_q(.gebv_mat, n_parents = 4L)
   expect_true(all(selected %in% paste0("S", 1:10)))
 })
 
 test_that("greedy_selection returns all candidates when n_parents = n_cand", {
   small_mat <- .make_gebv_mat(n_blocks = 4L, n_samples = 3L)
-  selected  <- suppressWarnings(greedy_selection(small_mat, n_parents = 3L))
+  selected  <- suppressWarnings(greedy_q(small_mat, n_parents = 3L))
   expect_equal(length(selected), 3L)
 })
 
 test_that("greedy_selection warns when n_parents > n_candidates", {
   small_mat <- .make_gebv_mat(n_blocks = 4L, n_samples = 2L)
-  expect_warning(greedy_selection(small_mat, n_parents = 5L),
+  expect_warning(greedy_q(small_mat, n_parents = 5L),
                  "available candidates")
 })
 
 test_that("greedy_selection errors without Block column", {
   bad_mat <- data.table(S1 = 1, S2 = 2)
-  expect_error(greedy_selection(bad_mat, 2L), "Block")
+  expect_error(greedy_q(bad_mat, 2L), "Block")
 })
 
 # ── genetic_algorithm_selection ───────────────────────────────────────────────
 
 test_that("genetic_algorithm_selection returns exactly n_parents names", {
-  selected <- genetic_algorithm_selection(.gebv_mat, n_parents = 4L,
+  selected <- ga_q(.gebv_mat, n_parents = 4L,
                                            n_generations = 10L)
   expect_equal(length(selected), 4L)
 })
 
 test_that("genetic_algorithm_selection is reproducible with same seed", {
-  s1 <- genetic_algorithm_selection(.gebv_mat, n_parents = 4L,
+  s1 <- ga_q(.gebv_mat, n_parents = 4L,
                                      n_generations = 10L, seed = 1L)
-  s2 <- genetic_algorithm_selection(.gebv_mat, n_parents = 4L,
+  s2 <- ga_q(.gebv_mat, n_parents = 4L,
                                      n_generations = 10L, seed = 1L)
   expect_equal(s1, s2)
 })
 
 test_that("genetic_algorithm_selection returns different results with different seeds", {
-  s1 <- genetic_algorithm_selection(.gebv_mat, n_parents = 4L,
+  s1 <- ga_q(.gebv_mat, n_parents = 4L,
                                      n_generations = 50L, seed = 1L)
-  s2 <- genetic_algorithm_selection(.gebv_mat, n_parents = 4L,
+  s2 <- ga_q(.gebv_mat, n_parents = 4L,
                                      n_generations = 50L, seed = 99L)
   # Not guaranteed to differ but extremely likely for n_parents = 4, n_cand = 10
   # Skip if deterministically same

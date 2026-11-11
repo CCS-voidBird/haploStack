@@ -36,8 +36,11 @@ A named list:
 \item{\code{array}}{3D character array \code{(n_samples, n_markers, ploidy)}.}
 \item{\code{samples}}{Character vector of sample names.}
 \item{\code{markers}}{Character vector of marker names.}
-\item{\code{encode}}{Detected encoding (\code{"selectiontools"},
-\code{"nucleotide"}, or \code{"numeric"}).}
+\item{\code{encode}}{Detected vocabulary of the cells
+(\code{"nucleotide"}, \code{"numeric"}, \code{"selectiontools"} for
+slash-separated integer codes, or \code{"unknown"}). This is a report
+on the input, not a container encoding: a \code{GenoMeta} stores
+nucleotide alleles only (0.9.0).}
 }
 }
 \description{
@@ -46,7 +49,7 @@ a 3D array \code{(n_samples, n_markers, ploidy)} by splitting each cell on
 the specified delimiter.
 }
 \examples{
-geno <- matrix(c("1/1","1/4","4/4","1/1"), nrow = 2,
+geno <- matrix(c("A/A","A/T","T/T","A/A"), nrow = 2,
                dimnames = list(c("Mkr1","Mkr2"), c("S1","S2")))
 res <- split_haplotypes(geno, orientation = 2)
 dim(res$array)  # 2 x 2 x 2

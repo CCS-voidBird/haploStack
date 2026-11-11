@@ -48,11 +48,12 @@ directly). The full matrix of what can be combined with what is in
 The default crossing backend is pure-R (`"block"`), so no external simulation
 package is required.
 
-> **Note on replicates.** In a single call with `replications > 1`, `OCS`
-> re-seeds the random-number stream with the fixed `seed` every cycle, so its
-> replicates come out identical; run OCS replicates as separate calls with
-> different seeds (as the HaploSim campaign driver does). `TS`, `OHS` (since
-> 0.7.3 the GA engine restores the stream) and `GBS` are unaffected.
+> **Note on replicates.** Since 0.9.0 every replicate runs on its own random
+> stream (`seed + rep`) and no scheme reseeds it, so in a single call with
+> `replications > 1` the replicates differ for every scheme, OCS included (up
+> to 0.8.8 OCS reseeded the stream every cycle and its replicates coincided).
+> The caller's random stream is left as it was after the call; a fixed `seed`
+> reproduces a run exactly.
 
 ```{r load}
 library(haploStack)
@@ -72,7 +73,7 @@ n_founders <- 16L; n_per_chrom <- 8L; n_chrom <- 3L; block_size <- 4L
 n_mk    <- n_per_chrom * n_chrom
 markers <- paste0("M", seq_len(n_mk))
 chrom   <- rep(seq_len(n_chrom), each = n_per_chrom)
-alleles <- c("1", "4")
+alleles <- c("A", "T")
 
 arr <- array(sample(alleles, n_founders * n_mk * 2L, replace = TRUE),
              dim = c(n_founders, n_mk, 2L),
@@ -94,9 +95,9 @@ effects <- data.frame(Marker = rep(markers, each = 2L),
 
 meta <- new_geno_meta(
   geno_arrays = arr, map_info = map, block_marker_map_info = bmm,
-  metadata = list(ploidy = 2L, char_dict = c("1" = 1L, "4" = 2L),
+  metadata = list(ploidy = 2L, char_dict = c("A" = 1L, "T" = 2L),
                   n_samples = n_founders, n_markers = n_mk,
-                  source_format = "selectiontools", encoding = "selectiontools"),
+                  source_format = "simulated", encoding = "nucleotide"),
   marker_effects = effects)
 
 rds_path <- file.path(tempdir(), "founders.rds")

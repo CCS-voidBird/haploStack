@@ -20,7 +20,7 @@
 # Internal: validate the analysis list carries the named tables a plotter needs.
 .check_analysis <- function(analysis, need, fn) {
   if (!is.list(analysis) || !all(need %in% names(analysis)))
-    stop(fn, ": 'analysis' must be the list returned by ",
+    .hs_abort(fn, ": 'analysis' must be the list returned by ",
          "analyze_block_catalogue() (missing: ",
          paste(setdiff(need, names(analysis)), collapse = ", "), ").")
   invisible(TRUE)
@@ -53,7 +53,7 @@
 # Internal: short, readable subtype label for plot annotation.
 .subtype_label <- function(x, n = 6L) {
   x <- as.character(x)
-  ifelse(nchar(x) > n, paste0(substr(x, 1L, n), "…"), x)
+  ifelse(nchar(x) > n, paste0(substr(x, 1L, n), "\u2026"), x)
 }
 
 
@@ -257,7 +257,7 @@ plot_top_block_heatmap <- function(analysis, top_n = 1L, scale = TRUE,
   parts <- lapply(unique(bm$Trait), function(tr) {
     gm <- gebv[[tr]]
     if (is.null(gm)) {
-      message("plot_top_block_heatmap: no GEBV matrix for trait '", tr,
+      .hs_inform("plot_top_block_heatmap: no GEBV matrix for trait '", tr,
               "'; skipped.")
       return(NULL)
     }
@@ -279,7 +279,7 @@ plot_top_block_heatmap <- function(analysis, top_n = 1L, scale = TRUE,
   })
   dt <- data.table::rbindlist(Filter(Negate(is.null), parts))
   if (nrow(dt) == 0L)
-    stop("plot_top_block_heatmap: no GEBV matrices available to plot.")
+    .hs_abort("plot_top_block_heatmap: no GEBV matrices available to plot.")
 
   # Row order. Without one the Y axis is ggplot2's alphabetical discrete scale,
   # which is what this figure always had; `rev()` because a discrete Y axis draws
@@ -342,13 +342,26 @@ plot_top_block_heatmap <- function(analysis, top_n = 1L, scale = TRUE,
 plot_block_effect_circos <- function(analysis, value_source = NULL,
                                      link_top = FALSE,
                                      palette = c("#2166ac", "grey92", "#b2182b")) {
+  # Decision-form row 12 b (0.9.0): deprecated in favour of the circos engine;
+  # the chord links return as a "links" track in 0.9.x.
+  .hs_deprecated("plot_block_effect_circos()",
+                 "plot_meta_circos(lapply(traits, track_block_effect, analysis = x))",
+                 "0.9.0")
   .check_analysis(analysis, c("S", "N"), "plot_block_effect_circos")
   vs <- .resolve_value_source(analysis, value_source)
 
   if (!requireNamespace("circlize", quietly = TRUE)) {
-    message("plot_block_effect_circos: package 'circlize' is not installed; ",
+    .hs_inform("plot_block_effect_circos: package 'circlize' is not installed; ",
             "returning the linear equivalent (plot_block_effect_genome()).")
     return(plot_block_effect_genome(analysis, value_source = vs$source))
+  }
+
+  # No device open: draw on a null PDF device with recording enabled, so the
+  # recorded plot is returned and no Rplots.pdf is left behind (I06).
+  if (grDevices::dev.cur() == 1L) {
+    grDevices::pdf(NULL)
+    grDevices::dev.control("enable")
+    on.exit(grDevices::dev.off(), add = TRUE)
   }
 
   dt <- as.data.table(vs$table)
@@ -358,12 +371,8 @@ plot_block_effect_circos <- function(analysis, value_source = NULL,
   dt[is.na(Block_start), Block_start := Pos]
   dt[is.na(Block_end),   Block_end   := Pos]
 
-  # Chromosome sectors (natural order) and their genomic spans.
-  chr_levels <- {
-    u <- unique(as.character(dt$Chrom))
-    n <- suppressWarnings(as.integer(u))
-    u[order(!is.na(n), n, u, na.last = TRUE)]
-  }
+  # Chromosome sectors (the one natural order, row 29 a) and their genomic spans.
+  chr_levels <- hs_chrom_levels(dt$Chrom)
   xlim <- do.call(rbind, lapply(chr_levels, function(ch) {
     z <- dt[Chrom == ch]
     range(c(z$Block_start, z$Block_end), na.rm = TRUE)
@@ -375,7 +384,9 @@ plot_block_effect_circos <- function(analysis, value_source = NULL,
   traits  <- unique(as.character(dt$Trait))
 
   circlize::circos.clear()
-  on.exit(circlize::circos.clear(), add = TRUE)
+  # after = FALSE: clear circlize while the device is still open (the null
+  # device's dev.off() above was registered first and must run last).
+  on.exit(circlize::circos.clear(), add = TRUE, after = FALSE)
   circlize::circos.par(cell.padding = c(0, 0, 0, 0), gap.degree = 3,
                        start.degree = 90)
   circlize::circos.initialize(sectors = chr_levels, xlim = xlim)
@@ -427,29 +438,47 @@ plot_block_effect_circos <- function(analysis, value_source = NULL,
 # ---------------------------------------------------------------------------
 
 # Returns a named list of plot objects for the requested `plots`. Each plotter is
-# wrapped so a single failure degrades to a warning rather than aborting the whole
-# analysis. Every plotter is passed the analysis-chosen `value_source` (read off
-# the result, D2) so the built figures fill by the same value the selection used.
-# "circos" builds via plot_block_effect_circos() (falling back to the linear
-# genome plot with a message when 'circlize' is not installed).
-.build_analysis_plots <- function(result, plots, multi) {
+# wrapped so a single failure degrades to a note (hs_warning_fallback,
+# "plot_skipped") rather than aborting the whole analysis. Every plotter is
+# passed the analysis-chosen `value_source` (read off the result, D2) so the
+# built figures fill by the same value the selection used. "circos" is built on
+# the circos engine (plot_meta_circos over one track_block_effect() per trait,
+# draw = FALSE), never through the deprecated plot_block_effect_circos(); it is
+# skipped with a note when 'circlize' is not installed. Nothing here touches a
+# device (D3 §3.3).
+.build_analysis_plots <- function(result, plots, multi, geno_meta = NULL) {
   if (length(plots) == 0L) return(list())
   plots <- unique(plots)
   out   <- list()
   vsrc  <- result$value_source
 
+  skip <- function(nm, why)
+    .hs_note("analyze_block_catalogue", "plot_skipped",
+             paste0("plot '", nm, "' skipped: ", why))
   safe <- function(nm, expr) {
-    tryCatch(out[[nm]] <<- expr,
-             error = function(e)
-               warning("analyze_block_catalogue: plot '", nm, "' skipped: ",
-                       conditionMessage(e)))
+    tryCatch(out[[nm]] <<- expr, error = function(e) skip(nm, conditionMessage(e)))
   }
 
   if ("rectangular" %in% plots) safe("rectangular", plot_block_effect_genome(result, value_source = vsrc))
   if ("manhattan"   %in% plots) safe("manhattan",   plot_block_effect_manhattan(result, value_source = vsrc))
   if ("density"     %in% plots) safe("density",     plot_block_effect_density(result, value_source = vsrc))
-  if ("heatmap"     %in% plots) safe("heatmap",     plot_top_block_heatmap(result))
-  if ("circos"      %in% plots) safe("circos",      plot_block_effect_circos(result, value_source = vsrc))
-
+  if ("heatmap" %in% plots) {
+    if (!length(result$gebv) || all(vapply(result$gebv, is.null, TRUE)))
+      skip("heatmap", "genotype-level GEBV matrices were not built (gebv_matrices = FALSE)")
+    else safe("heatmap", plot_top_block_heatmap(result))
+  }
+  if ("circos" %in% plots) {
+    if (!requireNamespace("circlize", quietly = TRUE))
+      skip("circos", "package 'circlize' is not installed")
+    else safe("circos", .analysis_circos(result, vsrc, geno_meta))
+  }
   out
+}
+
+# The analysis circos on the engine: one block-effect ring per trait.
+.analysis_circos <- function(result, value_source = NULL, geno_meta = NULL) {
+  traits <- unique(as.character(result$S$Trait))
+  tracks <- lapply(traits, function(tr)
+    track_block_effect(result, trait = tr, value_source = value_source))
+  plot_meta_circos(tracks, meta = geno_meta, draw = FALSE)
 }

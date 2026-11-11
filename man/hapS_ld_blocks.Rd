@@ -15,7 +15,8 @@ hapS_ld_blocks(
   output_dir = NULL,
   prefix = "hapS_blocks",
   parallelize = FALSE,
-  verbose = TRUE
+  verbose = TRUE,
+  progress = NULL
 )
 }
 \arguments{
@@ -52,6 +53,17 @@ would drop them). \code{FALSE}: return the block tables only.}
 
 \item{verbose}{\code{TRUE} (default) prints a summary (and HapSelect's
 progress bar where \pkg{progressr} shows one); \code{FALSE} is silent.}
+
+\item{progress}{\code{NULL} (default) or a function of one argument,
+called after each chromosome with the event
+\code{list(stage = "ld_blocks", unit = "chromosome", i, n, label =
+  <chromosome>, elapsed, payload = list(chrom, n_blocks))} (the one
+progress contract of the package, 0.9.0). LD and blocks are computed per
+chromosome, which gives the same tables and block IDs as one call over
+the panel (HapSelect never pairs markers across chromosomes). A callback
+that returns \code{FALSE} stops the run with an \code{hs_error_cancelled}
+error whose \code{partial} field holds the finished chromosomes' block
+marker map.}
 }
 \value{
 With \code{attach = TRUE}, the \code{GenoMeta} with

@@ -25,8 +25,12 @@ A \code{data.table} with columns:
 \item{\code{Block}}{Block ID.}
 \item{\code{Parent}}{Inferred parental origin (\code{Parent1},
 \code{Parent2}, \code{"ambiguous"}, or \code{"unknown"}).}
-\item{\code{n_match}}{Number of markers matching the assigned parent.}
+\item{\code{n_match}}{Number of markers matching the assigned parent's
+best-matching copy.}
 \item{\code{n_total}}{Total markers compared in the block.}
+\item{\code{ParentHap}}{The assigned parent's copy (haplotype index) that
+matched; \code{NA} when the parent is ambiguous or unknown. New in
+0.9.0.}
 }
 }
 \description{
@@ -41,6 +45,18 @@ in each haplotype match each parent's alleles and assigns the parent with
 the higher count. Ties are labelled \code{"ambiguous"}; offspring with no
 parent in the profile are labelled \code{"unknown"}.
 }
+\section{Both parental copies (0.9.0)}{
+
+Each offspring copy is compared, per block, with \strong{both} copies of each
+parent; the parent's best-matching copy counts and is reported as
+\code{ParentHap} (decision-form row 17 a). Up to 0.8.8 only parent copy 1 was
+read, so a block inherited from a heterozygous parent's second copy scored 0
+and went to the other parent, \dQuote{ambiguous} or \dQuote{unknown}.
+Assignments (\code{Parent}, \code{n_match}) therefore change wherever a parent
+is heterozygous in the block; the row order follows the offspring, copy and
+block.
+}
+
 \examples{
 \dontrun{
 ped <- data.frame(Sample  = c("Offspring1","Offspring2"),

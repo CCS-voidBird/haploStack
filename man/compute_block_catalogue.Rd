@@ -12,6 +12,7 @@ compute_block_catalogue(
   center = NULL,
   center_by_freq = NULL,
   group_by = c("effect", "signature"),
+  blocks = NULL,
   .core = NULL,
   .signatures = NULL
 )
@@ -34,12 +35,14 @@ per-trait \code{geno_meta$marker_effects} list when \code{effect_df} is
 \code{Block_length}). Recomputed from \code{geno_meta} when \code{NULL}.}
 
 \item{center}{Centring mode applied to the allele effects:
-�\code{"none"}, �\code{"locus_mean"} or �\code{"allele_freq"}. See
-�\code{\link{compute_profile_localgebv}} for what each preserves.}
+\code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
+\code{\link{compute_profile_localgebv}} for what each preserves.}
 
-\item{center_by_freq}{Logical. Mean-centre allele effects by population
-frequency before summing per block (matches the catalogue pipeline).
-Default \code{TRUE}.}
+\item{center_by_freq}{\strong{Deprecated} logical form of \code{center}
+(\code{TRUE} = \code{"allele_freq"}, \code{FALSE} = \code{"none"}); warns
+on every call. The default centring is \code{"none"} since 0.9.0 (it was
+\code{"allele_freq"} up to 0.8.8; pass \code{center = "allele_freq"} to
+reproduce those numbers).}
 
 \item{group_by}{How distinct subtypes are enumerated within a block.
 \code{"effect"} (default) groups haplotype states by their local-GEBV
@@ -50,6 +53,10 @@ block's member markers, read from \code{geno_meta$geno_arrays} — so two
 distinct allele combinations sharing an effect become separate rows. Either
 way a \code{signature} column is present. Signatures are content-based and
 trait-invariant (independent of \code{effect_df}).}
+
+\item{blocks}{Optional character vector of block ids restricting the
+catalogue to those blocks (0.9.0, cc/F05; \code{\link{run_haplotype_catalogue}}
+passes its \code{selected_blocks}). Default \code{NULL}: every block.}
 
 \item{.core}{Internal. A pre-built trait-invariant compute core
 (\code{.catalogue_core()}) shared across traits by

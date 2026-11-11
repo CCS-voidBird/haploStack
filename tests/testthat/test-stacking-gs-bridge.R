@@ -49,26 +49,26 @@ test_that(".gs_write_files writes geno/map/eff in genomicSimulation layout", {
   expect_match(cells[2L], "^[ACGT]{2}$")        # two-character genotype
 
   ml <- strsplit(readLines(f[["map"]])[1L], "\t")[[1L]]
-  expect_equal(ml, c("Marker", "Chrom", "Pos"))
+  expect_equal(ml, c("marker", "chr", "pos"))      # the header names gS 0.3 reads (0.9.0)
 })
 
 test_that(".gs_positions_to_cM scales bp maps to cM but leaves cM maps alone", {
   # physical (bp) positions -> cM at 1 cM/Mb
-  expect_equal(haploStack:::.gs_positions_to_cM(c(1e6, 3.9e7, 9.86e7)),
-               c(1, 39, 98.6))
+  expect_equal(suppressWarnings(haploStack:::.gs_positions_to_cM(c(1e6, 3.9e7, 9.86e7))),
+               c(1, 39, 98.6))                       # "auto" scales and notes it (0.9.0)
   # already-cM positions (small) pass through unchanged
   expect_equal(haploStack:::.gs_positions_to_cM(c(10, 20, 30, 40)),
                c(10, 20, 30, 40))
   # rate override
-  expect_equal(haploStack:::.gs_positions_to_cM(1e6, cM_per_mb = 2), 2)
+  expect_equal(suppressWarnings(haploStack:::.gs_positions_to_cM(1e6, cM_per_mb = 2)), 2)
 })
 
 test_that(".gs_write_files emits cM (non-scientific) positions for a bp map", {
   m <- .gsb$meta
   m$map_info$Pos <- c(1e6, 3.9e7, 5.78e7, 9.86e7)      # bp
-  f  <- haploStack:::.gs_write_files(m, work_dir = tempfile("gsb"))
+  f  <- suppressWarnings(haploStack:::.gs_write_files(m, work_dir = tempfile("gsb")))
   ml <- read.delim(f[["map"]], stringsAsFactors = FALSE)
-  expect_equal(ml$Pos, c(1, 39, 57.8, 98.6))            # bp -> cM
+  expect_equal(ml$pos, c(1, 39, 57.8, 98.6))            # bp -> cM
   # written plainly, not as "3.9e+07" (gS's parser needs decimal notation)
   expect_false(any(grepl("e\\+?[0-9]", readLines(f[["map"]]))))
 })
@@ -249,6 +249,7 @@ test_that("persistent gS session crosses across cycles with name sync (FR1+FR3)"
 test_that("genomicSimulation cross round-trip (integration)", {
   skip_if_not_installed("genomicSimulation")
   h    <- gs_load_geno_meta(.gsb$meta)
+  withr::defer(gs_close(h))               # one session per process (0.9.0)
   plan <- make_cross_design(c("P1","P2","P3"), method = "all_pairs",
                             n_offspring = 2L)
   res  <- gs_cross_plan(h, plan)

@@ -16,7 +16,7 @@ library(data.table)
 .metrics_fixture <- function(seed = 5L) {
   m <- sim_geno_meta(n_samples = 12L, n_markers = 24L, n_chrom = 2L,
                      block_size = 3L, seed = seed)
-  e <- sim_effect_df(dimnames(m$geno_arrays)[[2L]], alleles = c("1", "4"))
+  e <- sim_effect_df(dimnames(m$geno_arrays)[[2L]], alleles = c("A", "T"))
   list(meta = m, eff = e)
 }
 

@@ -164,6 +164,26 @@ test_that("bayesc fit returns marker effects and GEBVs", {
 })
 
 
+test_that("D1-7: BayesC chain files go to a private directory, never getwd()", {
+  skip_if_not_installed("BGLR")
+  wd <- withr::local_tempdir()
+  withr::local_dir(wd)
+  before <- list.files(tempdir(), pattern = "^hs_bglr_")
+  res <- fit_genomic_prediction(.gp_fixture$meta, .gp_fixture$ph, model = "bayesc",
+                                nIter = 300L, burnIn = 100L)
+  expect_identical(list.files(wd), character(0L))                      # nothing in getwd()
+  expect_identical(list.files(tempdir(), pattern = "^hs_bglr_"), before)  # private dir removed
+  expect_true(is.na(res$model$ETA[[1L]]$NamefileOut))
+  expect_identical(res$summary$nIter, 300L)
+  expect_identical(res$summary$burnIn, 100L)
+  # a caller's saveAt is passed through untouched
+  keep <- file.path(withr::local_tempdir(), "chain_")
+  res2 <- fit_genomic_prediction(.gp_fixture$meta, .gp_fixture$ph, model = "bayesc",
+                                 nIter = 300L, burnIn = 100L, saveAt = keep)
+  expect_true(length(list.files(dirname(keep))) > 0L)
+  expect_false(is.na(res2$model$ETA[[1L]]$NamefileOut))
+})
+
 test_that("missing-backend and missing-phenotype paths error clearly", {
   expect_error(
     fit_genomic_prediction(.gp_fixture$meta, model = "rrblup"),

@@ -16,9 +16,9 @@ translate_alleles(
 \item{geno_array}{3D character array.}
 
 \item{from_encode}{Source encoding: \code{"nucleotide"} (A/C/G/T),
-\code{"selectiontools"} (numeric allele codes), or \code{"allele"} (dosage;
-requires \code{minor_alleles}). The legacy names \code{"char"} and
-\code{"number"} were removed in 0.5.1.}
+\code{"selectiontools"} (numeric allele codes; deprecated), or
+\code{"allele"} (dosage; requires \code{minor_alleles}). The legacy names
+\code{"char"} and \code{"number"} were removed in 0.5.1.}
 
 \item{to_encode}{Target encoding: same options.}
 
@@ -33,5 +33,8 @@ required when converting \emph{to} or \emph{from} \code{"allele"} encoding.}
 \description{
 Converts all allele values in a \code{(n_samples, n_markers, ploidy)} array
 from one encoding to another using \code{DEFAULT_ENCODING_DICT} or a custom
-\code{char_dict}.
+\code{char_dict}. Part of the legacy \code{\link{process_genotype}} layer:
+a translation to or from \code{"selectiontools"} is deprecated since 0.9.0
+(a \code{GenoMeta} stores nucleotide alleles only; SelectionTools' own
+formats go through \code{\link{st_convert}}).
 }

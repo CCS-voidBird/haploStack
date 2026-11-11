@@ -24,9 +24,8 @@
 # "<CrossID>n<NN>", identical to gs_cross_plan(), so the two backends produce
 # directly comparable output.
 #
-# NB: .cross_block() superseded the legacy genotype-level
-# .simulate_offspring_gebv(); the driver (run_stacking_simulation(), issue 03)
-# now routes every cross through .cross_backend_dispatch().
+# The driver (run_stacking_simulation()) routes every cross through
+# .cross_backend_dispatch().
 # =============================================================================
 
 
@@ -34,13 +33,16 @@
 # Internal — expand a crossing design to one row per offspring
 # ---------------------------------------------------------------------------
 
-# Mirrors gs_cross_plan()'s expansion/naming so the block and genomicSimulation
-# backends generate the same offspring identifiers. Returns a data.table with
-# Parent1, Parent2, CrossID.
-.expand_cross_plan <- function(cross_design, offspring_prefix = "F") {
+# The one expansion of a crossing design to one row per offspring, shared by
+# the block backend and gs_cross_plan() (io/F19), so the two backends generate
+# the same offspring identifiers. Returns a data.table with Parent1, Parent2,
+# CrossID; with `keep_cols = TRUE` (gs_cross_plan()) the design's own columns
+# are kept, as a data.frame of the expanded rows, with CrossID set.
+.expand_cross_plan <- function(cross_design, offspring_prefix = "F",
+                               keep_cols = FALSE) {
   cd <- as.data.frame(cross_design, stringsAsFactors = FALSE)
   if (!all(c("Parent1", "Parent2") %in% names(cd)))
-    stop(".expand_cross_plan: 'cross_design' needs 'Parent1' and 'Parent2'.")
+    .hs_abort(".expand_cross_plan: 'cross_design' needs 'Parent1' and 'Parent2'.")
 
   cross_id <- if ("CrossID" %in% names(cd)) cd$CrossID
               else if ("Cross_ID" %in% names(cd)) cd$Cross_ID
@@ -49,12 +51,14 @@
   reps <- if ("n_offspring" %in% names(cd)) as.integer(cd$n_offspring)
           else rep(1L, nrow(cd))
   idx  <- rep(seq_len(nrow(cd)), times = reps)
+  ids  <- paste0(cross_id[idx], "n", sprintf("%02i", sequence(reps)))
 
-  data.table(
-    Parent1 = cd$Parent1[idx],
-    Parent2 = cd$Parent2[idx],
-    CrossID = paste0(cross_id[idx], "n", sprintf("%02i", sequence(reps)))
-  )
+  if (isTRUE(keep_cols)) {
+    out <- cd[idx, , drop = FALSE]
+    out$CrossID <- ids
+    return(out)
+  }
+  data.table(Parent1 = cd$Parent1[idx], Parent2 = cd$Parent2[idx], CrossID = ids)
 }
 
 
@@ -109,13 +113,15 @@
 # GenoMeta (+ a per-offspring plan). Diploid only (gamete model). When effects
 # are available (`effect_df` or the GenoMeta's `marker_effects`), each
 # offspring's F1mean (total local GEBV) is computed; otherwise F1mean is NA.
+# `f1mean = FALSE` (the driver, 0.9.0 D4-2) skips that genotype-level pass:
+# the driver scores the offspring once at haplotype level and fills F1mean
+# from that table (the same numbers; the pass was the third one per cycle).
 .cross_block <- function(geno_meta, cross_design, offspring_prefix = "F",
-                         effect_df = NULL) {
-  if (!is_geno_meta(geno_meta))
-    stop(".cross_block: 'geno_meta' is not a valid GenoMeta.")
+                         effect_df = NULL, f1mean = TRUE) {
+  .hs_check_meta(geno_meta, ".cross_block", "geno_meta")
   ploidy <- geno_meta$metadata$ploidy %||% 2L
   if (ploidy != 2L)
-    stop(".cross_block: the block backend models a diploid gamete (ploidy 2); ",
+    .hs_abort(".cross_block: the block backend models a diploid gamete (ploidy 2); ",
          "got ploidy ", ploidy, ". Use cross_backend = 'genomicSimulation'.")
 
   arr     <- geno_meta$geno_arrays
@@ -129,11 +135,11 @@
   exp   <- .expand_cross_plan(cross_design, offspring_prefix)
   n_off <- nrow(exp)
   if (n_off == 0L)
-    stop(".cross_block: 'cross_design' expands to zero offspring.")
+    .hs_abort(".cross_block: 'cross_design' expands to zero offspring.")
 
   miss <- setdiff(unique(c(exp$Parent1, exp$Parent2)), samples)
   if (length(miss) > 0L)
-    stop(".cross_block: parent(s) not in the pool: ",
+    .hs_abort(".cross_block: parent(s) not in the pool: ",
          paste(miss, collapse = ", "))
 
   off_names <- make.unique(exp$CrossID, sep = "_")
@@ -147,25 +153,20 @@
     out_arr[i, , 2L] <- .block_gamete(arr_p2, unit_id, unique_units)
   }
 
-  meta_md <- geno_meta$metadata
-  meta_md$n_samples <- n_off
-  meta_md$n_markers <- n_mk
+  # One rebuild path (0.9.0): the map, blocks, effects and annotation carry to
+  # the offspring (blocks do not change across cycles, #033); the FAM is the
+  # dummy table until the driver names the parents; the founders' phenotype
+  # and family history are declared losses (X7).
+  off_meta <- .rebuild_geno_meta(geno_meta, geno_arrays = out_arr,
+                                 .drop = c("family_history", "phenotype"),
+                                 .caller = ".cross_block")
 
-  off_meta <- new_geno_meta(
-    geno_arrays           = out_arr,
-    map_info              = geno_meta$map_info,
-    block_info            = geno_meta$block_info,
-    block_marker_map_info = geno_meta$block_marker_map_info,
-    metadata              = meta_md,
-    marker_effects        = geno_meta$marker_effects)
-  # Blocks do not change across cycles — a stored block annotation carries to
-  # the offspring container (#033).
-  off_meta$annotation <- geno_meta$annotation
-
-  eff    <- .coerce_single_effect_df(effect_df %||% geno_meta$marker_effects)
-  f1mean <- .block_f1mean(off_meta, eff, off_names)
+  f1 <- if (isTRUE(f1mean)) {
+    eff <- .coerce_single_effect_df(effect_df %||% geno_meta$marker_effects)
+    .block_f1mean(off_meta, eff, off_names)
+  } else rep(NA_real_, n_off)
   plans  <- data.table(Parent1 = exp$Parent1, Parent2 = exp$Parent2,
-                       CrossID = off_names, F1mean = f1mean)
+                       CrossID = off_names, F1mean = f1)
 
   list(geno_meta = off_meta, plans = plans)
 }
@@ -184,18 +185,22 @@
 # `geno_meta`, the single founder write) or a live handle to reuse (later cycles
 # cross in-memory, no re-write / re-load). The returned `session` points at the
 # offspring group and is threaded to the next cross by .stk_advance()/.run_one().
+# A direct caller who lets this function open the session owns it: close it
+# with gs_close(res$session) (one session per R process, D1-6).
 .cross_backend_dispatch <- function(cross_backend = c("block", "genomicSimulation"),
                                     geno_meta, cross_design,
                                     effect_df        = NULL,
                                     offspring_prefix = "F",
                                     work_dir         = tempdir(),
                                     prefix           = "gs",
-                                    session          = NULL) {
+                                    session          = NULL,
+                                    offspring_fam    = TRUE,
+                                    f1mean           = TRUE) {
   cross_backend <- match.arg(cross_backend)
 
   if (cross_backend == "block") {
     res <- .cross_block(geno_meta, cross_design, offspring_prefix,
-                        effect_df = effect_df)
+                        effect_df = effect_df, f1mean = f1mean)
     return(list(geno_meta = res$geno_meta, plans = res$plans, session = NULL))
   }
 
@@ -205,9 +210,11 @@
                                            work_dir = work_dir, prefix = prefix)
   cp     <- gs_cross_plan(handle, cross_design,
                           offspring_prefix = offspring_prefix, advance = TRUE)
-  # Offspring FAM from the plan (real parents) — driver re-derives compact FAM in
-  # .stk_rename_generation(), but this keeps the bridge-level GenoMeta correct too.
-  off    <- gs_group_to_geno_meta(cp$handle, cross_plan = cp$plans)
+  # Offspring FAM from the plan (real parents) keeps the bridge-level GenoMeta
+  # correct for direct callers; the driver passes offspring_fam = FALSE because
+  # .stk_rename_generation() rebuilds the FAM anyway (io/F25).
+  off    <- gs_group_to_geno_meta(cp$handle,
+                                  cross_plan = if (isTRUE(offspring_fam)) cp$plans)
 
   cpd <- as.data.table(cp$plans)
   plans <- data.table(

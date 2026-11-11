@@ -45,8 +45,7 @@
 #'   \code{\link{run_stacking_simulation}}
 #' @export
 compute_parent_coancestry <- function(geno_meta, samples = NULL, blocks = NULL) {
-  if (!is_geno_meta(geno_meta))
-    stop("compute_parent_coancestry: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "compute_parent_coancestry", "geno_meta")
 
   arr         <- geno_meta$geno_arrays
   all_samples <- dimnames(arr)[[1L]]
@@ -56,7 +55,7 @@ compute_parent_coancestry <- function(geno_meta, samples = NULL, blocks = NULL) 
   samples <- intersect(as.character(samples), all_samples)
   P <- length(samples)
   if (P == 0L)
-    stop("compute_parent_coancestry: none of 'samples' are in the GenoMeta.")
+    .hs_abort("compute_parent_coancestry: none of 'samples' are in the GenoMeta.")
 
   # Marker indices per block (unblocked markers form singleton blocks so they
   # still contribute; restrict to 'blocks' when given).
@@ -72,10 +71,26 @@ compute_parent_coancestry <- function(geno_meta, samples = NULL, blocks = NULL) 
     mk_by_block <- mk_by_block[lengths(mk_by_block) > 0L]
   }
   if (length(mk_by_block) == 0L)
-    stop("compute_parent_coancestry: no markers remain for the requested blocks.")
+    .hs_abort("compute_parent_coancestry: no markers remain for the requested blocks.")
+
+  sub <- arr[samples, , , drop = FALSE]            # [P x M x 2]
+
+  # Compiled kernel (0.9.0): same numbers bit for bit, minus the R double loop
+  # that cost ~47 s per cycle under metrics = "all" (thread 013). Alleles become
+  # integer codes here (equal strings -> equal codes; NA or "" -> NA), which is
+  # exactly the comparability rule of compute_segment_ibs().
+  if (dim(sub)[3L] >= 2L && .hs_use_rcpp("block_ibs_coancestry_cpp")) {
+    v <- as.vector(sub)
+    v[!is.na(v) & !nzchar(v)] <- NA_character_
+    codes <- match(v, unique(v[!is.na(v)]))
+    K <- .hs_kernel("block_ibs_coancestry_cpp")(
+      as.integer(codes), as.integer(dim(sub)),
+      lapply(unname(mk_by_block), function(ix) as.integer(ix) - 1L))
+    dimnames(K) <- list(samples, samples)
+    return(K)
+  }
 
   K <- matrix(NA_real_, P, P, dimnames = list(samples, samples))
-  sub <- arr[samples, , , drop = FALSE]            # [P x M x 2]
 
   pair_ibs <- function(i, j) {
     bvals <- vapply(mk_by_block, function(ix) {
@@ -172,15 +187,14 @@ compute_parent_coancestry <- function(geno_meta, samples = NULL, blocks = NULL) 
 compute_gene_diversity <- function(geno_meta, level = c("marker", "haplotype"),
                                    samples = NULL, blocks = NULL) {
   level <- match.arg(level)
-  if (!is_geno_meta(geno_meta))
-    stop("compute_gene_diversity: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "compute_gene_diversity", "geno_meta")
 
   arr     <- geno_meta$geno_arrays
   all_s   <- dimnames(arr)[[1L]]
   if (!is.null(samples)) {
     samples <- intersect(as.character(samples), all_s)
     if (length(samples) == 0L)
-      stop("compute_gene_diversity: none of 'samples' are in the GenoMeta.")
+      .hs_abort("compute_gene_diversity: none of 'samples' are in the GenoMeta.")
     arr <- arr[samples, , , drop = FALSE]
   }
   markers <- dimnames(arr)[[2L]]
@@ -199,14 +213,14 @@ compute_gene_diversity <- function(geno_meta, level = c("marker", "haplotype"),
   }
 
   if (level == "marker") {
-    keep_mk <- if (!is.null(mk_by_block)) sort(unique(unlist(mk_by_block)))
+    keep_mk <- if (!is.null(mk_by_block)) .hs_sort(unique(unlist(mk_by_block)))
                else seq_along(markers)
     h <- vapply(keep_mk, function(m)
       .nei_locus_h(c(arr[, m, 1L], arr[, m, 2L])), numeric(1L))
     names(h) <- markers[keep_mk]
   } else {
     if (is.null(mk_by_block))
-      stop("compute_gene_diversity: level = 'haplotype' needs block assignments ",
+      .hs_abort("compute_gene_diversity: level = 'haplotype' needs block assignments ",
            "(attach_block_info() / block_marker_map_info).")
     hap_string <- function(layer_mat) {
       # one string per sample; NA if any marker in the block is missing
@@ -262,7 +276,7 @@ plot_simulation_trajectories <- function(trajectories,
   traj <- as.data.table(trajectories)
   req_cols <- c("Rep","Cycle","MeanGEBV")
   if (!all(req_cols %in% names(traj)))
-    stop("plot_simulation_trajectories: trajectories must have columns ",
+    .hs_abort("plot_simulation_trajectories: trajectories must have columns ",
          paste(req_cols, collapse = ", "))
 
   # Aggregate across reps for ribbon
@@ -280,7 +294,7 @@ plot_simulation_trajectories <- function(trajectories,
                              fill   = .data[[agg_col]])) +
     geom_line(linewidth = 1) +
     labs(
-      title  = paste0("GEBV Trajectories — ", trait_name),
+      title  = paste0("GEBV Trajectories \u2014 ", trait_name),
       x      = "Breeding Cycle",
       y      = "Mean Local GEBV",
       colour = agg_col, fill = agg_col
@@ -308,7 +322,7 @@ plot_simulation_trajectories <- function(trajectories,
     labs(
       title  = "Block Coverage",
       x      = "Breeding Cycle",
-      y      = "Proportion of Blocks with ≥1 Positive Carrier",
+      y      = "Proportion of Blocks with \u22651 Positive Carrier",
       colour = agg_col
     ) +
     theme_bw(base_size = 12) +
@@ -317,7 +331,7 @@ plot_simulation_trajectories <- function(trajectories,
   if (requireNamespace("cowplot", quietly = TRUE)) {
     cowplot::plot_grid(p_gebv, p_cov, nrow = 2L, align = "v")
   } else {
-    message("Install 'cowplot' for a combined two-panel plot. Returning GEBV plot only.")
+    .hs_inform("Install 'cowplot' for a combined two-panel plot. Returning GEBV plot only.")
     p_gebv
   }
 }
@@ -349,6 +363,13 @@ summarise_simulation <- function(trajectories,
   }
 
   metrics <- intersect(c("MeanGEBV","SDev","BlockCoverage"), names(traj))
+  # A metric with no value at all (BlockCoverage is all NA in the compat view)
+  # is skipped (0.9.0, sc/F23 / I02): up to 0.8.8 it gave +-Inf columns and
+  # two "no non-missing arguments" warnings per group.
+  metrics <- metrics[vapply(metrics, function(m) any(!is.na(traj[[m]])), logical(1L))]
+  if (!length(metrics))
+    .hs_abort("summarise_simulation: no metric column with a value ",
+              "(MeanGEBV, SDev, BlockCoverage are all missing or all NA).")
 
   result_list <- lapply(metrics, function(m) {
     traj[, .(
@@ -400,12 +421,12 @@ plot_simulation_metrics <- function(
 
   s <- as.data.table(summary)
   if (!all(c("cycle", "sel_scheme") %in% names(s)))
-    stop("plot_simulation_metrics: 'summary' needs columns 'cycle' and ",
+    .hs_abort("plot_simulation_metrics: 'summary' needs columns 'cycle' and ",
          "'sel_scheme' (pass run_stacking_simulation()$summary).")
 
   metrics <- intersect(metrics, names(s))
   if (length(metrics) == 0L)
-    stop("plot_simulation_metrics: none of the requested 'metrics' are in ",
+    .hs_abort("plot_simulation_metrics: none of the requested 'metrics' are in ",
          "'summary'.")
   if (!include_founder) s <- s[cycle > 0L]
 
@@ -437,55 +458,53 @@ plot_simulation_metrics <- function(
 #   live_summary.txt / live_plans.txt  — the partial FR5 tables
 #   live_metrics.png                    — plot_simulation_metrics()
 #   live_trajectories.png               — plot_simulation_trajectories()
-# Every write/render is guarded so a transient plotting/IO hiccup can degrade to
-# a skipped refresh rather than aborting the whole simulation.
+# Every write/render is guarded so a transient plotting/IO hiccup degrades to a
+# skipped refresh rather than aborting the whole simulation — and, since
+# 0.9.0, says so: each failure is a note (hs_warning_fallback, code
+# monitor_write_failed) that the driver's result carries. PNGs go through
+# hs_render_figure() (the one device opener) at the 0.8.8 sizes.
 .stk_render_live <- function(summary_acc, plans_acc, output_dir, tag = "sim") {
   if (is.null(output_dir)) return(invisible(NULL))
   summ <- as.data.table(summary_acc)
   plns <- as.data.table(plans_acc)
+  guard <- function(what, expr) tryCatch(expr, error = function(e) {
+    .hs_note("monitor", "monitor_write_failed",
+             paste0("live monitor: ", what, " not written (", conditionMessage(e), ")."))
+    NULL
+  })
 
-  tryCatch(
-    data.table::fwrite(summ, file.path(output_dir, "live_summary.txt"),
-                       sep = "\t"),
-    error = function(e) NULL)
-  tryCatch(
-    data.table::fwrite(plns, file.path(output_dir, "live_plans.txt"),
-                       sep = "\t"),
-    error = function(e) NULL)
+  guard("live_summary.txt",
+        data.table::fwrite(summ, file.path(output_dir, "live_summary.txt"), sep = "\t"))
+  guard("live_plans.txt",
+        data.table::fwrite(plns, file.path(output_dir, "live_plans.txt"), sep = "\t"))
 
   # Metrics panels straight off the origin summary contract. Only panel the
   # metrics that actually carry data this run (unrequested ones are all-NA), so
   # the live figure has no empty facets.
-  tryCatch({
+  guard("live_metrics.png", {
     cand <- c("mean_F1mean", "mean_D2Ideal", "mean_coancestry",
               "mean_gene_diversity")
     have <- cand[vapply(cand, function(cn)
       cn %in% names(summ) && any(is.finite(summ[[cn]])), logical(1L))]
     if (length(have)) {
       pm <- plot_simulation_metrics(summ, metrics = have, include_founder = FALSE)
-      suppressWarnings(suppressMessages(ggplot2::ggsave(
-        file.path(output_dir, "live_metrics.png"), pm,
-        width = 10, height = 6, dpi = 150)))
+      suppressWarnings(suppressMessages(hs_render_figure(
+        pm, file.path(output_dir, "live_metrics.png"),
+        width_mm = 254, height_mm = 152.4, dpi = 150, overwrite = TRUE)))
     }
-  }, error = function(e) NULL)
+  })
 
-  # GEBV trajectories via the back-compat view (same transform the final combine
-  # uses in run_stacking_simulation()).
-  tryCatch({
-    traj <- summ[cycle > 0L, .(
-      Rep           = rep,
-      Cycle         = cycle,
-      Method        = sel_scheme,
-      MeanGEBV      = mean_F1mean,
-      SDev          = sqrt(var_F1mean),
-      BlockCoverage = NA_real_)]
+  # GEBV trajectories via the back-compat view (the one transform the final
+  # combine uses too, .stk_trajectories_view()).
+  guard("live_trajectories.png", {
+    traj <- .stk_trajectories_view(summ)
     if (nrow(traj) > 0L) {
       pt <- plot_simulation_trajectories(traj, trait_name = tag)
-      suppressWarnings(suppressMessages(ggplot2::ggsave(
-        file.path(output_dir, "live_trajectories.png"), pt,
-        width = 10, height = 5, dpi = 150)))
+      suppressWarnings(suppressMessages(hs_render_figure(
+        pt, file.path(output_dir, "live_trajectories.png"),
+        width_mm = 254, height_mm = 127, dpi = 150, overwrite = TRUE)))
     }
-  }, error = function(e) NULL)
+  })
 
   invisible(NULL)
 }

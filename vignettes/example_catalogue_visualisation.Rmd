@@ -52,7 +52,7 @@ n_samples <- 16L; n_per_chrom <- 8L; n_chrom <- 3L; block_size <- 4L
 n_mk      <- n_per_chrom * n_chrom
 markers   <- paste0("M", seq_len(n_mk))
 chrom     <- rep(seq_len(n_chrom), each = n_per_chrom)
-alleles   <- c("1", "4")                       # SelectionTools encoding
+alleles   <- c("A", "T")                       # nucleotide encoding
 
 # 3-D genotype array: samples × markers × ploidy(2)
 arr <- array(sample(alleles, n_samples * n_mk * 2L, replace = TRUE),
@@ -85,9 +85,9 @@ meta <- new_geno_meta(
   geno_arrays           = arr,
   map_info              = map,
   block_marker_map_info = bmm,
-  metadata = list(ploidy = 2L, char_dict = c("1" = 1L, "4" = 2L),
+  metadata = list(ploidy = 2L, char_dict = c("A" = 1L, "T" = 2L),
                   n_samples = n_samples, n_markers = n_mk,
-                  source_format = "selectiontools", encoding = "selectiontools"),
+                  source_format = "simulated", encoding = "nucleotide"),
   marker_effects = effects)
 
 rds_path <- file.path(tempdir(), "catalogue_demo.rds")
@@ -110,11 +110,11 @@ cat("Samples:", meta$metadata$n_samples,
 
 `compute_profile_localgebv()` returns a wide **Block × Sample** `data.table`.
 With `level = "genotype"` the two haplotypes of each sample are summed;
-`center_by_freq = TRUE` expresses each value relative to the population mean.
+`center = "allele_freq"` expresses each value relative to the population mean.
 The marker effects stored on the object are used automatically.
 
 ```{r gebv}
-gebv <- compute_profile_localgebv(meta, level = "genotype", center_by_freq = TRUE)
+gebv <- compute_profile_localgebv(meta, level = "genotype", center = "allele_freq")
 
 dim(gebv)                              # n_blocks × (n_samples + 1 Block column)
 gebv[, 1:6]
@@ -401,8 +401,12 @@ plot_block_effect_genome(ana, value_source = "raw")   # white = zero effect
 ```
 
 ```{r xtrait-circos, eval=requireNamespace("circlize", quietly = TRUE), fig.height=6}
-# One ring per trait (requires the optional 'circlize' package).
-plot_block_effect_circos(ana, link_top = TRUE)
+# One block-effect ring per trait on the circos engine (requires the optional
+# 'circlize' package). plot_block_effect_circos() is deprecated since 0.9.0;
+# its chord links return as a "links" track of the engine in 0.9.x.
+rings <- lapply(unique(as.character(ana$S$Trait)),
+                function(tr) track_block_effect(ana, trait = tr))
+plot_meta_circos(rings, meta = meta)
 ```
 
 ---

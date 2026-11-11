@@ -10,6 +10,19 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
+// block_ibs_coancestry_cpp
+NumericMatrix block_ibs_coancestry_cpp(IntegerVector codes, IntegerVector dims, List blocks);
+RcppExport SEXP _haploStack_block_ibs_coancestry_cpp(SEXP codesSEXP, SEXP dimsSEXP, SEXP blocksSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< IntegerVector >::type codes(codesSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type dims(dimsSEXP);
+    Rcpp::traits::input_parameter< List >::type blocks(blocksSEXP);
+    rcpp_result_gen = Rcpp::wrap(block_ibs_coancestry_cpp(codes, dims, blocks));
+    return rcpp_result_gen;
+END_RCPP
+}
 // split_genotype_cpp
 CharacterVector split_genotype_cpp(CharacterMatrix geno, std::string sep, int ploidy);
 RcppExport SEXP _haploStack_split_genotype_cpp(SEXP genoSEXP, SEXP sepSEXP, SEXP ploidySEXP) {
@@ -92,6 +105,7 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
+    {"_haploStack_block_ibs_coancestry_cpp", (DL_FUNC) &_haploStack_block_ibs_coancestry_cpp, 3},
     {"_haploStack_split_genotype_cpp", (DL_FUNC) &_haploStack_split_genotype_cpp, 3},
     {"_haploStack_combine_haplotype_cpp", (DL_FUNC) &_haploStack_combine_haplotype_cpp, 4},
     {"_haploStack_collapse_genotype_sorted_cpp", (DL_FUNC) &_haploStack_collapse_genotype_sorted_cpp, 2},

@@ -33,7 +33,7 @@ library(data.table)
                                        Block = "B1", stringsAsFactors = FALSE),
     metadata = list(ploidy = 2L, char_dict = c("1" = 1L, "4" = 2L),
                     n_samples = 2L, n_markers = 3L,
-                    source_format = "selectiontools"))
+                    source_format = "toy", encoding = "nucleotide"))   # digits as labels (C-5)
 }
 
 # ── .expand_cross_plan ────────────────────────────────────────────────────────
@@ -89,7 +89,7 @@ test_that(".cross_block: each offspring haplotype's alleles come from its parent
 test_that(".cross_block computes F1mean from local GEBV when effects are given", {
   meta <- sim_geno_meta(n_samples = 6L, n_markers = 12L, n_chrom = 2L,
                         block_size = 3L, seed = 11L)
-  eff  <- sim_effect_df(dimnames(meta$geno_arrays)[[2L]], alleles = c("1", "4"))
+  eff  <- sim_effect_df(dimnames(meta$geno_arrays)[[2L]], alleles = c("A", "T"))
   cd   <- make_cross_design(c("S1", "S2", "S3"), method = "all_pairs",
                             n_offspring = 2L)
   set.seed(1L)
@@ -123,9 +123,19 @@ test_that(".cross_block rejects unknown parents and non-diploid ploidy", {
   bad  <- data.table(Parent1 = "S1", Parent2 = "GHOST", n_offspring = 1L)
   expect_error(haploStack:::.cross_block(meta, bad), "not in the pool")
 
-  meta3 <- meta; meta3$metadata$ploidy <- 3L
+  # ploidy is derived from the array (0.9.0): a hand-set metadata$ploidy fails
+  # validation instead, so the non-diploid case needs a third allele layer
+  a3 <- array(meta$geno_arrays[, , c(1L, 2L, 1L)], dim = c(4L, 8L, 3L),
+              dimnames = c(dimnames(meta$geno_arrays)[1:2], list(c("1", "2", "3"))))
+  meta3 <- suppressMessages(new_geno_meta(a3, meta$map_info,
+                                          block_marker_map_info = meta$block_marker_map_info,
+                                          metadata = meta$metadata))
+  expect_identical(meta3$metadata$ploidy, 3L)
   cd    <- make_cross_design(c("S1", "S2"), n_offspring = 1L)
   expect_error(haploStack:::.cross_block(meta3, cd), "diploid")
+  bad_md <- meta; bad_md$metadata$ploidy <- 3L
+  expect_error(haploStack:::.cross_block(bad_md, cd), "not a valid GenoMeta",
+               class = "hs_error_input")
 })
 
 # ── .cross_backend_dispatch ───────────────────────────────────────────────────
@@ -146,14 +156,15 @@ test_that("dispatch 'block' returns geno_meta + plans", {
 test_that("dispatch 'genomicSimulation' matches the block backend's shape", {
   skip_if_not_installed("genomicSimulation")
   meta <- sim_geno_meta(n_samples = 6L, n_markers = 12L, block_size = 3L, seed = 13L)
-  eff  <- sim_effect_df(dimnames(meta$geno_arrays)[[2L]], alleles = c("1", "4"))
+  eff  <- sim_effect_df(dimnames(meta$geno_arrays)[[2L]], alleles = c("A", "T"))
   cd   <- make_cross_design(c("S1", "S2", "S3"), method = "all_pairs",
                             n_offspring = 2L)
 
   set.seed(6L)
   rb <- haploStack:::.cross_backend_dispatch("block", meta, cd, effect_df = eff)
-  rg <- haploStack:::.cross_backend_dispatch("genomicSimulation", meta, cd,
-                                             effect_df = eff)
+  withr::defer(gs_close(rg$session))      # one session per process (0.9.0)
+  rg <- suppressWarnings(haploStack:::.cross_backend_dispatch("genomicSimulation", meta, cd,
+                                             effect_df = eff), classes = "hs_warning_fallback")
 
   # Same-shaped output: both are GenoMeta + identical plan columns over the same
   # marker set and offspring count.

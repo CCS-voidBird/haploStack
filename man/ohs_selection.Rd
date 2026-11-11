@@ -51,7 +51,7 @@ A character vector of selected sample names (length \code{n_parents}).
 Selects \code{n_parents} candidates that maximise expected next-cross gain,
 using one of two engines (\code{method}): \code{GA_pairwise} and
 \code{Greedy} optimise the set objective built on the block-value matrix
-\code{\link{.pairwise_block_value_matrix}} — by default
+\code{.pairwise_block_value_matrix()} — by default
 \code{sum(M[S, S])}, every family's stacking ceiling summed. (The former
 \code{"GA_coverage"} engine — binary block coverage via
 \code{\link{genetic_algorithm_selection}} — was removed in 0.7.4 for its

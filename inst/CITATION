@@ -1,0 +1,14 @@
+citHeader("To cite haploStack in publications use:")
+
+bibentry(
+  bibtype = "Manual",
+  title   = "haploStack: Haplotype Block Analysis and Stacking Simulation for Genomic Breeding",
+  author  = person("Chensong", "Chen"),
+  year    = "2026",
+  note    = "R package version 0.9.0",
+  url     = "https://github.com/CCS-voidBird/haploStack",
+  textVersion = paste(
+    "Chen C (2026). haploStack: Haplotype Block Analysis and Stacking Simulation",
+    "for Genomic Breeding. R package version 0.9.0.",
+    "https://github.com/CCS-voidBird/haploStack")
+)

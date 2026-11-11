@@ -1,4 +1,4 @@
-# Selection grid — what can be combined with what (haploStack 0.7.4)
+# Selection grid — what can be combined with what (haploStack 0.9.0)
 
 The stacking driver `run_stacking_simulation()` is a matrix of **scheme ×
 selection unit × budget × engine/options × crossing backend**. This sheet lists
@@ -107,14 +107,15 @@ per-family `plans$pair_score` (`NA` under parents-first).
   when the cap binds — audit `docs/haploStack_TAG_manuscript/05_ocs_audit.md`).
   Its rename to `KCT` with the audit fixes, and a true `OPT` scheme, are
   planned (`dev/UPGRADE_PLAN_opt_kemper.md`). It has no family form.
-- **Replicates in one multi-rep call — OHS GA engines and OCS.**
-  `.ga_pairwise()`, `genetic_algorithm_selection()` and `ocs_selection()` call
-  `set.seed(seed)` with the driver's fixed `seed` every cycle, so in a single
-  `run_stacking_simulation(replications = k)` call their `k` replicates are
-  identical (the crossing draws that follow are re-seeded). `TS`, `GBS`
-  (greedy; the GBS GA restores the RNG) and `ohs_method = "Greedy"` are
-  unaffected, and so are campaigns that run one replicate per call with its
-  own seed (the HaploSim driver does). Recorded as project-record discrepancy 28.
+- **Replicates in one multi-rep call differ since 0.9.0.** Up to 0.8.8
+  `ocs_selection()` called `set.seed(seed)` every cycle, so in a single
+  `run_stacking_simulation(replications = k)` call the `k` OCS replicates were
+  identical (project-record discrepancy 28; the OHS GA engines had already
+  restored the stream since 0.7.3). Since 0.9.0 (decision-form row 3 a) no
+  selector reseeds: each replicate runs under its own job stream
+  (`seed + rep`), the caller's random stream is left as it was, and OCS
+  trajectories differ between replicates from cycle 2. A fixed `seed` still
+  reproduces a run exactly.
 - **Pairs with one family per cycle** (`top_founders = 2`, `"families"`):
   the `"population"` and `"family"` GBS levels coincide, and TS-pairs equals
   parents-first TS (the top pair is the two best parents). Population-level

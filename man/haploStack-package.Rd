@@ -6,8 +6,20 @@
 \alias{haploStack-package}
 \title{haploStack: Haplotype Block Analysis and Stacking Simulation for Genomic Breeding}
 \description{
-A toolkit for haplotype block definition, catalogue construction, and breeding-cycle simulation (haplotype stacking) in diploid crop species. The workflow covers four main stages: (1) genotype format standardisation, (2) haplotype blocks, from a block map the user supplies (optionally built locally from LD with HapSelect or SelectionTools), (3) haplotype catalogue construction — per-sample local GEBVs, Manhattan plots, and alignment visualisations — and (4) crossing-design simulation using Genetic Algorithm (GA), Genomic Selection (GS), and Optimal Contribution Selection (OCS) strategies. Designed for the GRDC barley haplotype stacking project but applicable to any biparental or multiparental breeding programme.
+A toolkit for haplotype block definition, catalogue construction, and breeding-cycle simulation (haplotype stacking) in diploid crop species. The workflow covers four main stages: (1) genotype format standardisation, (2) haplotype blocks, from a block map the user supplies (optionally built locally from LD with HapSelect or SelectionTools), (3) haplotype catalogue construction — per-sample local GEBVs, Manhattan plots, and alignment visualisations — and (4) breeding-cycle simulation of haplotype stacking under truncation (TS), optimal haplotype (OHS) and genotype building (GBS) selection, with a step API for servers. Designed for the GRDC barley haplotype stacking project but applicable to any biparental or multiparental breeding programme. A usage guide for people and AI coding agents ships with the package (hs_agent_guide()).
 }
+\section{Getting started (people and AI agents)}{
+
+The package ships its own usage guide, written as an agent skill: run
+\code{hs_agent_guide()} to print it, and \code{hs_agent_guide("blocks")},
+\code{"genometa"}, \code{"simulation"} or \code{"troubleshooting"} for the
+reference pages. An AI coding agent that has only this package installed
+should read it before calling anything else. \code{hs_install_skill(path)}
+copies it into an agent's skills folder (for example
+\code{".claude/skills"}). The files are at
+\code{system.file("skills", "haplostack", package = "haploStack")}.
+}
+
 \seealso{
 Useful links:
 \itemize{

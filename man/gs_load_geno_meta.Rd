@@ -7,9 +7,12 @@
 gs_load_geno_meta(
   geno_meta,
   effect_df = NULL,
-  work_dir = tempdir(),
+  work_dir = NULL,
   prefix = "gs",
-  cM_per_mb = 1
+  cM_per_mb = 1,
+  replace = FALSE,
+  trait = NULL,
+  map_unit = c("auto", "bp", "cM")
 )
 }
 \arguments{
@@ -19,7 +22,10 @@ gs_load_geno_meta(
 values. Defaults to \code{geno_meta$marker_effects}; when that holds a
 named per-trait list, its first table is used.}
 
-\item{work_dir}{Directory for the temp files. Default a session tempdir.}
+\item{work_dir}{Directory for the genotype / map / effect files
+genomicSimulation loads. \code{NULL} (default since 0.9.0) creates a
+private directory under \code{tempdir()} that \code{\link{gs_close}}
+removes; a directory you pass is never deleted.}
 
 \item{prefix}{File-name prefix. Default \code{"gs"}.}
 
@@ -29,11 +35,26 @@ named per-trait list, its first table is used.}
 passed through unchanged. Passing a bp map unscaled makes gS meiosis both
 catastrophically slow and genetically meaningless, so this conversion is on
 by default.}
+
+\item{replace}{\code{FALSE} (default): a session already open is an error.
+\code{TRUE}: close it (all its groups and its private files) and open this
+one; handles of the old session become invalid.}
+
+\item{trait}{When the effects hold several traits (a named list, or one
+long table with a \code{Trait} column), the one to load; with several
+traits and \code{trait = NULL} the call stops (0.9.0; up to 0.8.8 the
+first trait was taken silently). Default \code{NULL}.}
+
+\item{map_unit}{The unit of \code{map_info$Pos}: \code{"auto"} (default,
+the 0.8.8 rule: positions above \code{1e4} are taken as bp and scaled,
+with a note \code{gs_map_scaled}), \code{"bp"} (always scaled at
+\code{cM_per_mb}) or \code{"cM"} (never scaled).}
 }
 \value{
 A \code{gs_handle} list: \code{group} (genomicSimulation group
 number), \code{template} (the input GenoMeta), \code{effect_df},
-\code{work_dir}, \code{files}.
+\code{work_dir}, \code{files}, \code{token} (the session), \code{own_dir}
+(whether \code{work_dir} is the private directory).
 }
 \description{
 Writes the GenoMeta (and effects) to a temporary geno/map/effect file trio
@@ -42,6 +63,20 @@ lightweight \emph{handle} that the other bridge functions consume. The
 GenoMeta is kept in the handle as a template so map/block/effect metadata can
 be reattached when offspring are read back.
 }
+\section{One session per R process (0.9.0)}{
+
+genomicSimulation keeps one simulation per R process, so haploStack keeps
+one session: a second call while a session is open stops with an
+\code{hs_error_state} error, unless \code{replace = TRUE} closes the open
+session first. Every handle carries the token of the session it was made
+under, and \code{\link{gs_cross_plan}}, \code{\link{gs_group_to_geno_meta}},
+\code{\link{gs_group_gebv}} and \code{\link{gs_sync_group_names}} refuse a
+handle whose session was closed or replaced. Close a session with
+\code{\link{gs_close}}. For concurrent genomicSimulation jobs run one R
+process per job (\code{run_stacking_simulation(n_cores > 1)} does).
+}
+
 \seealso{
-\code{\link{gs_cross_plan}}, \code{\link{gs_group_to_geno_meta}}
+\code{\link{gs_cross_plan}}, \code{\link{gs_group_to_geno_meta}},
+\code{\link{gs_close}}
 }

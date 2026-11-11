@@ -4,12 +4,16 @@
 \alias{sim_map_data}
 \title{Simulate a marker map}
 \usage{
-sim_map_data(marker_names, n_chrom = 3L)
+sim_map_data(marker_names, n_chrom = 3L, seed = NULL)
 }
 \arguments{
 \item{marker_names}{Character vector of marker IDs.}
 
 \item{n_chrom}{Number of chromosomes. Default 3.}
+
+\item{seed}{Random seed. \code{NULL} (default) draws the positions from
+the caller's random stream, as before; a seed makes the map reproducible
+on its own and leaves the caller's stream untouched.}
 }
 \value{
 A data frame with columns \code{Marker}, \code{Chrom}, \code{Pos}.

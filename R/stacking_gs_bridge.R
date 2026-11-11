@@ -34,65 +34,170 @@
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+# The installed genomicSimulation version (a function so a test can mock it).
+.gs_version <- function() utils::packageVersion("genomicSimulation")
+
+# genomicSimulation >= 0.3 (0.9.0, io/F21): the bridge writes the file layout
+# and calls the matrix-format helper of 0.3; the auto-detecting branch for
+# older versions is gone.
 .gs_require <- function() {
   if (!requireNamespace("genomicSimulation", quietly = TRUE))
-    stop("This function needs the 'genomicSimulation' package (Suggests). ",
+    .hs_abort(class = "hs_error_dependency",
+         data = list(hint = "remotes::install_github(\"vllrs/genomicSimulation\")"),
+         "This function needs the 'genomicSimulation' package (Suggests). ",
          "Install it, or use cross_backend = 'block'.", call. = FALSE)
+  v <- .gs_version()
+  if (v < "0.3")
+    .hs_abort(class = "hs_error_dependency",
+         data = list(hint = "remotes::install_github(\"vllrs/genomicSimulation\")"),
+         "haploStack needs genomicSimulation >= 0.3 (installed: ", as.character(v),
+         "): its file layout and matrix-format helper are what the bridge writes ",
+         "and calls. Update it, or use cross_backend = 'block'.", call. = FALSE)
+  invisible(TRUE)
 }
 
+# ---------------------------------------------------------------------------
+# The one-session guard (0.9.0, design D1 §3.6, form row 4 a)
+#
+# genomicSimulation keeps ONE simulation in the R process (its C library holds
+# the loaded data; delete.group() reshuffles indices for every handle). Up to
+# 0.8.8 a second gs_load_geno_meta() loaded on top of the first, and gs_close()
+# on a handle from an earlier session deleted a group of the current one.
+# The package now declares "one genomicSimulation job per R process":
+#   - a second load while a session is open stops with hs_error_state, unless
+#     replace = TRUE closes the open session first (for concurrent gS jobs run
+#     one R process per job; the driver's n_cores > 1 does exactly that);
+#   - every handle carries the session token it was made under; the four
+#     bridge functions that act on the live group check it, so a stale handle
+#     stops with hs_error_state instead of touching another job's groups;
+#   - gs_close() frees a handle only when it is the live session, and removes
+#     the private scratch directory the load created (work_dir = NULL).
+# ---------------------------------------------------------------------------
+.hs_gs <- new.env(parent = emptyenv())
+.hs_gs$token   <- 0L
+.hs_gs$open    <- FALSE
+.hs_gs$own_dir <- NULL
+
+# Close whatever session is open: every gS group and its data (clear.simdata,
+# gS >= 0.3), then the private scratch. Used by replace = TRUE and by the
+# session reset. Never errors.
+.gs_session_clear <- function() {
+  if (isTRUE(.hs_gs$open) && requireNamespace("genomicSimulation", quietly = TRUE))
+    try(genomicSimulation::clear.simdata(), silent = TRUE)
+  if (!is.null(.hs_gs$own_dir))
+    unlink(.hs_gs$own_dir, recursive = TRUE, force = TRUE)
+  .hs_gs$open    <- FALSE
+  .hs_gs$own_dir <- NULL
+  invisible(NULL)
+}
+
+# Is this handle the live session? (the check the four bridge functions run)
+.gs_check_handle <- function(handle, fn) {
+  if (!inherits(handle, "gs_handle"))
+    .hs_abort(fn, ": 'handle' must be a gs_handle from gs_load_geno_meta().",
+              call. = FALSE)
+  live <- isTRUE(.hs_gs$open) && identical(as.integer(handle$token), .hs_gs$token)
+  if (!live)
+    .hs_abort(class = "hs_error_state",
+              fn, ": this handle's genomicSimulation session was closed or ",
+              "replaced (one session per R process; see ?gs_load_geno_meta).",
+              call. = FALSE)
+  invisible(TRUE)
+}
+
+# Does a session hold the process right now? (tests, the session reset)
+.gs_session_open <- function() isTRUE(.hs_gs$open)
+
 # Convert map positions to the centimorgans genomicSimulation expects. gS reads
-# the map's Pos column as cM (recombination distance): the expected number of
-# crossovers per gamete on a chromosome is proportional to its length in Morgans.
-# A physical map (bp) passed through unscaled therefore becomes astronomically
-# long (e.g. 99 Mb -> 99,000 Morgans), which makes meiosis simulation
-# catastrophically slow AND genetically meaningless (every interval recombines).
-# Positions that look physical (max > 1e4, implausible for a cM map) are scaled
-# bp -> cM at `cM_per_mb` (default 1 cM/Mb, the common human/plant rule of thumb);
-# positions already in a cM range are passed through unchanged.
-.gs_positions_to_cM <- function(pos, cM_per_mb = 1) {
+# the map's position column as cM (recombination distance): the expected number
+# of crossovers per gamete on a chromosome is proportional to its length in
+# Morgans. A physical map (bp) passed through unscaled therefore becomes
+# astronomically long (e.g. 99 Mb -> 99,000 Morgans), which makes meiosis
+# simulation catastrophically slow AND genetically meaningless (every interval
+# recombines). Three rules (0.9.0, io/F11; `backend_opts$map_unit`):
+#   "auto"  (default, = 0.8.8) positions that look physical (max > 1e4,
+#           implausible for a cM map) are scaled bp -> cM at `cM_per_mb`
+#           (1 cM/Mb, the common plant rule of thumb), and the scaling is
+#           announced as a note (hs_warning_fallback, code gs_map_scaled);
+#           positions already in a cM range pass through unchanged;
+#   "bp"    always scaled;
+#   "cM"    never scaled.
+.gs_positions_to_cM <- function(pos, cM_per_mb = 1, map_unit = c("auto", "bp", "cM")) {
+  map_unit <- match.arg(map_unit)
   pos <- as.numeric(pos)
   if (length(pos) == 0L || all(is.na(pos))) return(pos)
-  if (max(pos, na.rm = TRUE) > 1e4) pos <- pos / 1e6 * cM_per_mb   # bp -> cM
+  scale <- switch(map_unit,
+                  auto = max(pos, na.rm = TRUE) > 1e4,
+                  bp   = TRUE,
+                  cM   = FALSE)
+  if (scale) {
+    if (map_unit == "auto")
+      .hs_note("gs_load", "gs_map_scaled",
+               paste0("map positions look physical (max ", format(max(pos, na.rm = TRUE)),
+                      "); scaled bp -> cM at ", format(cM_per_mb),
+                      " cM/Mb for genomicSimulation (backend_opts$map_unit = \"bp\" ",
+                      "or \"cM\" states the unit)."))
+    pos <- pos / 1e6 * cM_per_mb   # bp -> cM
+  }
   pos
 }
 
 # Write a GenoMeta (+ effects) as the genotype / map / effect file trio that
 # genomicSimulation::load.data() reads. Returns the three paths.
-#   geno : markers x samples, two-character alleles, row+col names (GS preset).
-#   map  : Marker  Chrom  Pos(cM)   (header).
-#   eff  : Marker  Allele Effect (header).
+#   geno : markers x samples, two-character alleles, row+col names; a missing
+#          call (either copy NA, the container's NA-any rule) is "--",
+#          genomicSimulation's own missing form (form row 22 a; up to 0.8.8 the
+#          text was "NA", which gS read as the alleles N and A — the A then
+#          segregated).
+#   map  : marker  chr  pos(cM)     with the header names gS 0.3 recognises
+#   eff  : marker  allele  eff      (0.9.0, I2: "Marker Chrom Pos" was read as
+#          data and logged "Failed to parse 1 line(s)" on every load).
 .gs_write_files <- function(geno_meta, effect_df = NULL,
                             work_dir = tempdir(), prefix = "gs",
-                            cM_per_mb = 1) {
-  if (!is_geno_meta(geno_meta))
-    stop(".gs_write_files: 'geno_meta' is not a valid GenoMeta.")
+                            cM_per_mb = 1, use_meta_effects = TRUE,
+                            map_unit = "auto") {
+  .hs_check_meta(geno_meta, ".gs_write_files", "geno_meta")
   dir.create(work_dir, showWarnings = FALSE, recursive = TRUE)
 
   geno_file <- file.path(work_dir, paste0(prefix, "_geno.txt"))
   map_file  <- file.path(work_dir, paste0(prefix, "_map.txt"))
   eff_file  <- file.path(work_dir, paste0(prefix, "_eff.txt"))
 
-  # Genotype matrix in genomicSimulation orientation (markers x samples, "AT").
-  mat <- geno_meta_to_matrix(geno_meta, preset = "GS")$matrix
+  # Genotype matrix in genomicSimulation orientation (markers x samples, "AT"),
+  # built from the two allele layers; a cell with either copy missing is "--"
+  # (see the missing-vs-unknown note above .gs_genes_to_array()).
+  arr <- geno_meta$geno_arrays
+  if (dim(arr)[3L] != 2L)
+    .hs_abort(".gs_write_files: genomicSimulation takes diploid genotypes (two ",
+              "alleles per cell); this container has ploidy ", dim(arr)[3L], ".",
+              call. = FALSE)
+  a1 <- arr[, , 1L]; a2 <- arr[, , 2L]
+  cell <- ifelse(is.na(a1) | is.na(a2), "--", paste0(a1, a2))
+  dim(cell) <- dim(arr)[1:2]
+  dimnames(cell) <- dimnames(arr)[1:2]
+  mat <- t(cell)                               # markers x samples
   utils::write.table(mat, geno_file, sep = "\t", quote = FALSE,
                      col.names = NA)          # leading blank header cell
 
-  # Map: Marker Chrom Pos(cM). Positions written non-scientific so gS parses them.
+  # Map: marker chr pos(cM). Positions written non-scientific so gS parses them.
   map_out <- data.frame(
-    Marker = as.character(geno_meta$map_info$Marker),
-    Chrom  = as.character(geno_meta$map_info$Chrom),
-    Pos    = format(.gs_positions_to_cM(geno_meta$map_info$Pos, cM_per_mb),
+    marker = as.character(geno_meta$map_info$Marker),
+    chr    = as.character(geno_meta$map_info$Chrom),
+    pos    = format(.gs_positions_to_cM(geno_meta$map_info$Pos, cM_per_mb, map_unit),
                     scientific = FALSE, trim = TRUE),
     stringsAsFactors = FALSE)
   utils::write.table(map_out, map_file, sep = "\t", quote = FALSE,
                      row.names = FALSE)
 
-  # Effects: Marker Allele Effect (NULL -> empty file, BV will be 0). The stored
-  # marker_effects may be a named per-trait list; collapse to a single table.
-  eff <- .coerce_single_effect_df(effect_df %||% geno_meta$marker_effects)
+  # Effects: marker allele eff (NULL -> no effect file, F1mean is NA). The
+  # stored marker_effects may be a named per-trait list; collapse to a single
+  # table. gs_load_geno_meta() resolves the trait itself and passes
+  # use_meta_effects = FALSE, so a NULL there means "no effects".
+  eff <- .coerce_single_effect_df(
+    if (isTRUE(use_meta_effects)) effect_df %||% geno_meta$marker_effects else effect_df)
   if (!is.null(eff)) {
     eff <- as.data.frame(eff[, 1:3, drop = FALSE], stringsAsFactors = FALSE)
-    names(eff) <- c("Marker", "Allele", "Effect")
+    names(eff) <- c("marker", "allele", "eff")
     utils::write.table(eff, eff_file, sep = "\t", quote = FALSE,
                        row.names = FALSE)
   } else {
@@ -100,6 +205,39 @@
   }
 
   c(geno = geno_file, map = map_file, eff = if (is.null(eff_file)) NA else eff_file)
+}
+
+# ---------------------------------------------------------------------------
+# Missing vs unknown at the genomicSimulation boundary (owner, 2026-10-27)
+#
+#   haploStack "missing"   a GenoMeta cell that is NA. It crosses into gS as the
+#                          PLACEHOLDER allele pair "--" written by
+#                          .gs_write_files() (form row 22 a, D4-7: gS's own
+#                          missing form, for a cell with either copy missing).
+#                          gS treats the placeholder as a literal allele: it
+#                          propagates through crosses and carries no effect, so
+#                          it behaves as a missing call and reads back as the
+#                          same character.
+#   gS "missing" (true)    an allele gS itself could not load (stored as '\0').
+#                          It also propagates and carries no effect, but it is
+#                          gS's, not ours: the package has no definition for it
+#                          yet. On read-back it is requested under the sentinel
+#                          .GS_TRUE_MISSING so it cannot be confused with the
+#                          placeholder, it is mapped to NA, and the run gets a
+#                          note (hs_warning_fallback, code "gs_true_missing").
+#                          PLACEHOLDER: real-missing handling (what a gS missing
+#                          should mean for the container) is not designed; the
+#                          warning marks the risk until it is.
+#
+# Never read gene data with gS's default unknown.allele = "-": a true missing
+# and the "-" placeholder would then be indistinguishable.
+# ---------------------------------------------------------------------------
+.GS_TRUE_MISSING <- "?"
+
+# The one gene-data reader: every read-back goes through it so the sentinel is
+# always in force.
+.gs_group_genes <- function(group) {
+  genomicSimulation::see.group.gene.data(group, unknown.allele = .GS_TRUE_MISSING)
 }
 
 # Convert a genomicSimulation gene-data matrix (markers x individuals, each cell
@@ -116,11 +254,24 @@
                dimnames = list(samples, markers, c("1", "2")))
   arr[, , 1L] <- t(h1)   # markers x samples -> samples x markers
   arr[, , 2L] <- t(h2)
-  # A missing founder allele goes out to genomicSimulation as the nucleotide
-  # missing token ("N") and is inherited by offspring as a literal allele; inside
-  # a GenoMeta a missing allele is NA and nothing else (0.6.0 contract), so
-  # restore it here — otherwise the offspring container carries "N" as an
+  # gS's own missing alleles (see the definitions above): count, warn, map to NA.
+  n_true <- sum(arr == .GS_TRUE_MISSING, na.rm = TRUE)
+  if (n_true > 0L) {
+    .hs_note("gs_read_back", "gs_true_missing",
+             paste0("genomicSimulation reported ", n_true, " allele(s) it holds as ",
+                    "missing (its own missing, not haploStack's placeholder); they ",
+                    "are read as NA. Real-missing handling is not implemented: ",
+                    "check the input the session was loaded from."),
+             n = n_true)
+    arr[arr == .GS_TRUE_MISSING] <- NA_character_
+  }
+  # A missing founder allele goes out to genomicSimulation as a placeholder
+  # allele pair and is inherited by offspring as a literal allele; inside a
+  # GenoMeta a missing allele is NA and nothing else (0.6.0 contract), so restore
+  # it here — otherwise the offspring container carries the placeholder as an
   # allele and is_geno_meta() warns on every cycle of a gS-backend run (0.7.5).
+  # The placeholder ("-" from D4-7, "N" from earlier builds) is in the nucleotide
+  # missing set.
   arr[arr %in% .missing_tokens("nucleotide")] <- NA_character_
   arr
 }
@@ -138,11 +289,25 @@
 #' GenoMeta is kept in the handle as a template so map/block/effect metadata can
 #' be reattached when offspring are read back.
 #'
+#' @section One session per R process (0.9.0):
+#' genomicSimulation keeps one simulation per R process, so haploStack keeps
+#' one session: a second call while a session is open stops with an
+#' \code{hs_error_state} error, unless \code{replace = TRUE} closes the open
+#' session first. Every handle carries the token of the session it was made
+#' under, and \code{\link{gs_cross_plan}}, \code{\link{gs_group_to_geno_meta}},
+#' \code{\link{gs_group_gebv}} and \code{\link{gs_sync_group_names}} refuse a
+#' handle whose session was closed or replaced. Close a session with
+#' \code{\link{gs_close}}. For concurrent genomicSimulation jobs run one R
+#' process per job (\code{run_stacking_simulation(n_cores > 1)} does).
+#'
 #' @param geno_meta A valid \code{GenoMeta} list (the founder / parent pool).
 #' @param effect_df Optional \code{(Marker, Allele, Effect)} table for breeding
 #'   values. Defaults to \code{geno_meta$marker_effects}; when that holds a
 #'   named per-trait list, its first table is used.
-#' @param work_dir  Directory for the temp files. Default a session tempdir.
+#' @param work_dir  Directory for the genotype / map / effect files
+#'   genomicSimulation loads. \code{NULL} (default since 0.9.0) creates a
+#'   private directory under \code{tempdir()} that \code{\link{gs_close}}
+#'   removes; a directory you pass is never deleted.
 #' @param prefix    File-name prefix. Default \code{"gs"}.
 #' @param cM_per_mb Recombination rate used to convert physical map positions
 #'   (bp) to the centimorgans genomicSimulation expects. Default \code{1}
@@ -150,43 +315,79 @@
 #'   passed through unchanged. Passing a bp map unscaled makes gS meiosis both
 #'   catastrophically slow and genetically meaningless, so this conversion is on
 #'   by default.
+#' @param replace   \code{FALSE} (default): a session already open is an error.
+#'   \code{TRUE}: close it (all its groups and its private files) and open this
+#'   one; handles of the old session become invalid.
+#' @param trait     When the effects hold several traits (a named list, or one
+#'   long table with a \code{Trait} column), the one to load; with several
+#'   traits and \code{trait = NULL} the call stops (0.9.0; up to 0.8.8 the
+#'   first trait was taken silently). Default \code{NULL}.
+#' @param map_unit  The unit of \code{map_info$Pos}: \code{"auto"} (default,
+#'   the 0.8.8 rule: positions above \code{1e4} are taken as bp and scaled,
+#'   with a note \code{gs_map_scaled}), \code{"bp"} (always scaled at
+#'   \code{cM_per_mb}) or \code{"cM"} (never scaled).
 #'
 #' @return A \code{gs_handle} list: \code{group} (genomicSimulation group
 #'   number), \code{template} (the input GenoMeta), \code{effect_df},
-#'   \code{work_dir}, \code{files}.
+#'   \code{work_dir}, \code{files}, \code{token} (the session), \code{own_dir}
+#'   (whether \code{work_dir} is the private directory).
 #'
-#' @seealso \code{\link{gs_cross_plan}}, \code{\link{gs_group_to_geno_meta}}
+#' @seealso \code{\link{gs_cross_plan}}, \code{\link{gs_group_to_geno_meta}},
+#'   \code{\link{gs_close}}
 #' @export
 gs_load_geno_meta <- function(geno_meta, effect_df = NULL,
-                              work_dir = tempdir(), prefix = "gs",
-                              cM_per_mb = 1) {
+                              work_dir = NULL, prefix = "gs",
+                              cM_per_mb = 1, replace = FALSE, trait = NULL,
+                              map_unit = c("auto", "bp", "cM")) {
   .gs_require()
-  if (!is_geno_meta(geno_meta))
-    stop("gs_load_geno_meta: 'geno_meta' is not a valid GenoMeta.")
+  map_unit <- match.arg(map_unit)
+  .hs_check_meta(geno_meta, "gs_load_geno_meta", "geno_meta")
+  if (.gs_session_open()) {
+    if (!isTRUE(replace))
+      .hs_abort(class = "hs_error_state",
+                "gs_load_geno_meta: genomicSimulation holds one session per R ",
+                "process and one is open; close it with gs_close() first, or ",
+                "pass replace = TRUE. For concurrent genomicSimulation jobs run ",
+                "one R process per job.", call. = FALSE)
+    .gs_session_clear()
+  }
+  own_dir <- is.null(work_dir)
+  if (own_dir) work_dir <- tempfile("hs_gs_")
 
-  eff   <- .coerce_single_effect_df(effect_df %||% geno_meta$marker_effects)
-  files <- .gs_write_files(geno_meta, eff, work_dir, prefix, cM_per_mb = cM_per_mb)
+  # One trait's table, or none (row 19 a: several traits need `trait`).
+  eff   <- .stk_resolve_effects(effect_df, geno_meta, trait, "gs_load_geno_meta",
+                                allow_none = TRUE)
+  files <- .gs_write_files(geno_meta, eff, work_dir, prefix, cM_per_mb = cM_per_mb,
+                           use_meta_effects = FALSE, map_unit = map_unit)
 
   # Specify the genotype-matrix layout explicitly rather than trusting
   # genomicSimulation's auto-detection: in gS 0.3 the auto-detector mis-reads the
   # header .gs_write_files() writes (col.names = NA) as "no header row" and drops
   # the genotype names (all NA), which then breaks the name->index lookup in
   # gs_cross_plan(). Our file is always: header row, markers as rows, phased
-  # 2-char allele pairs. The format helper (and load.data's `format` argument)
-  # were added together, so pass `format` only when the helper is available —
-  # older gS versions keep the original auto-detecting call.
+  # 2-char allele pairs. gS >= 0.3 is required (.gs_require()), so the format
+  # helper is always there.
   args <- list(files[["geno"]], files[["map"]],
-               if (is.na(files[["eff"]])) NULL else files[["eff"]])
-  if (exists("define.matrix.format.details", where = asNamespace("genomicSimulation")))
-    args$format <- genomicSimulation::define.matrix.format.details(
-      has.header = TRUE, markers.as.rows = TRUE, cell.style = "P")
+               if (is.na(files[["eff"]])) NULL else files[["eff"]],
+               format = genomicSimulation::define.matrix.format.details(
+                 has.header = TRUE, markers.as.rows = TRUE, cell.style = "P"))
 
-  loaded <- do.call(genomicSimulation::load.data, args)
+  loaded <- tryCatch(do.call(genomicSimulation::load.data, args),
+                     error = function(e) {
+                       if (own_dir) unlink(work_dir, recursive = TRUE, force = TRUE)
+                       stop(e)
+                     })
   group <- if (is.list(loaded)) loaded$groupNum else loaded
+
+  # The session is open from here: next token, private dir on record.
+  .hs_gs$token   <- .hs_gs$token + 1L
+  .hs_gs$open    <- TRUE
+  .hs_gs$own_dir <- if (own_dir) work_dir else NULL
 
   structure(
     list(group = group, template = geno_meta, effect_df = eff,
-         work_dir = work_dir, files = files),
+         work_dir = work_dir, files = files,
+         token = .hs_gs$token, own_dir = own_dir),
     class = "gs_handle")
 }
 
@@ -216,24 +417,15 @@ gs_load_geno_meta <- function(geno_meta, effect_df = NULL,
 gs_cross_plan <- function(handle, plans, offspring_prefix = "F",
                           advance = TRUE) {
   .gs_require()
-  if (!inherits(handle, "gs_handle"))
-    stop("gs_cross_plan: 'handle' must be a gs_handle from gs_load_geno_meta().")
+  .gs_check_handle(handle, "gs_cross_plan")
   plans <- as.data.frame(plans, stringsAsFactors = FALSE)
   if (!all(c("Parent1", "Parent2") %in% names(plans)))
-    stop("gs_cross_plan: 'plans' needs 'Parent1' and 'Parent2' columns.")
+    .hs_abort("gs_cross_plan: 'plans' needs 'Parent1' and 'Parent2' columns.")
 
-  # Resolve CrossID (accept CrossID or Cross_ID; else synthesise)
-  cross_id <- if ("CrossID" %in% names(plans)) plans$CrossID
-              else if ("Cross_ID" %in% names(plans)) plans$Cross_ID
-              else paste0(offspring_prefix, sprintf("%04i", seq_len(nrow(plans))))
-
-  # Expand by n_offspring (one offspring per resulting row)
-  reps <- if ("n_offspring" %in% names(plans)) as.integer(plans$n_offspring)
-          else rep(1L, nrow(plans))
-  idx  <- rep(seq_len(nrow(plans)), times = reps)
-  exp_plans <- plans[idx, , drop = FALSE]
-  exp_plans$CrossID <- paste0(cross_id[idx], "n",
-                              sprintf("%02i", sequence(reps)))
+  # One expansion per offspring with the block backend's naming (CrossID /
+  # Cross_ID accepted, else synthesised; replicated by n_offspring) — the shared
+  # .expand_cross_plan() (io/F19), keeping the plan's own columns.
+  exp_plans <- .expand_cross_plan(plans, offspring_prefix, keep_cols = TRUE)
 
   # Map parent names -> current genomicSimulation X indices (recompute: indexes
   # shift after delete.group, so never cache across cycles).
@@ -242,12 +434,14 @@ gs_cross_plan <- function(handle, plans, offspring_prefix = "F",
   p1x <- cur_x[match(exp_plans$Parent1, cur_names)]
   p2x <- cur_x[match(exp_plans$Parent2, cur_names)]
   if (anyNA(p1x) || anyNA(p2x))
-    stop("gs_cross_plan: some plan parents are not in the current group.")
+    .hs_abort("gs_cross_plan: some plan parents are not in the current group.")
 
   off_group <- genomicSimulation::make.targeted.crosses(
     first.parents = p1x, second.parents = p2x)
   genomicSimulation::change.names.to.values(exp_plans$CrossID, off_group)
-  exp_plans$F1mean <- genomicSimulation::see.group.data(off_group, "B")
+  # No effect file loaded -> no breeding value: NA, not 0 (io/F10).
+  exp_plans$F1mean <- if (is.na(handle$files[["eff"]])) NA_real_
+                      else genomicSimulation::see.group.data(off_group, "B")
 
   if (isTRUE(advance))
     genomicSimulation::delete.group(handle$group)
@@ -269,16 +463,16 @@ gs_cross_plan <- function(handle, plans, offspring_prefix = "F",
 .offspring_fam_from_plan <- function(samples, cross_plan) {
   cp <- as.data.frame(cross_plan, stringsAsFactors = FALSE)
   if (!all(c("Parent1", "Parent2") %in% names(cp)))
-    stop("update_geno_meta_from_matrix: 'cross_plan' needs 'Parent1' and ",
+    .hs_abort("update_geno_meta_from_matrix: 'cross_plan' needs 'Parent1' and ",
          "'Parent2' columns.")
   off_id <- if ("CrossID" %in% names(cp)) as.character(cp$CrossID)
             else if ("Cross_ID" %in% names(cp)) as.character(cp$Cross_ID)
-            else stop("update_geno_meta_from_matrix: 'cross_plan' needs a ",
+            else .hs_abort("update_geno_meta_from_matrix: 'cross_plan' needs a ",
                       "'CrossID' (or 'Cross_ID') column to match offspring.")
 
   idx <- match(samples, off_id)
   if (anyNA(idx))
-    stop("update_geno_meta_from_matrix: offspring not found in 'cross_plan' ",
+    .hs_abort("update_geno_meta_from_matrix: offspring not found in 'cross_plan' ",
          "(by CrossID): ", paste(samples[is.na(idx)], collapse = ", "))
 
   p1 <- as.character(cp$Parent1[idx])
@@ -333,44 +527,31 @@ gs_cross_plan <- function(handle, plans, offspring_prefix = "F",
 #' @export
 update_geno_meta_from_matrix <- function(template, gene_matrix,
                                          cross_plan = NULL) {
-  if (!is_geno_meta(template))
-    stop("update_geno_meta_from_matrix: 'template' is not a valid GenoMeta.")
+  .hs_check_meta(template, "update_geno_meta_from_matrix", "template")
   if (!is.matrix(gene_matrix) || is.null(rownames(gene_matrix)) ||
       is.null(colnames(gene_matrix)))
-    stop("update_geno_meta_from_matrix: 'gene_matrix' must be a markers x ",
+    .hs_abort("update_geno_meta_from_matrix: 'gene_matrix' must be a markers x ",
          "samples matrix with row (marker) and column (sample) names.")
 
   arr     <- .gs_genes_to_array(gene_matrix)
   markers <- dimnames(arr)[[2L]]
   samples <- dimnames(arr)[[1L]]
 
-  map_info <- as.data.frame(template$map_info, stringsAsFactors = FALSE)
-  map_info <- map_info[match(markers, map_info$Marker), , drop = FALSE]
-
-  bmm <- template$block_marker_map_info
-  if (!is.null(bmm))
-    bmm <- as.data.frame(bmm)[as.character(bmm$Marker) %in% markers, , drop = FALSE]
+  if (!all(markers %in% as.character(template$map_info$Marker)))
+    .hs_abort("update_geno_meta_from_matrix: ", sum(!markers %in% template$map_info$Marker),
+         " marker(s) of 'gene_matrix' are not in the template's map.")
 
   # Offspring FAM from the plan (real parents); NULL -> dummy founder FAM.
   sample_info <- if (!is.null(cross_plan))
     .offspring_fam_from_plan(samples, cross_plan) else NULL
 
-  meta_md <- template$metadata
-  meta_md$n_samples <- dim(arr)[1L]
-  meta_md$n_markers <- dim(arr)[2L]
-
-  out <- new_geno_meta(
-    geno_arrays           = arr,
-    map_info              = map_info,
-    block_info            = template$block_info,
-    block_marker_map_info = bmm,
-    sample_info           = sample_info,
-    metadata              = meta_md,
-    marker_effects        = template$marker_effects)
-  # Blocks carry over from the template, so a stored block annotation does too
-  # (#033) — same rule as the block-backend offspring builder.
-  out$annotation <- template$annotation
-  out
+  # One rebuild path (0.9.0): the template's map, blocks, effects and
+  # annotation carry over (blocks do not change across cycles, #033); the
+  # founders' phenotype and family history are declared losses (X7) — same
+  # rule as the block-backend offspring builder.
+  .rebuild_geno_meta(template, geno_arrays = arr, sample_info = sample_info,
+                     .drop = c("family_history", "phenotype"),
+                     .caller = "update_geno_meta_from_matrix")
 }
 
 
@@ -393,12 +574,11 @@ update_geno_meta_from_matrix <- function(template, gene_matrix,
 #' @export
 gs_group_to_geno_meta <- function(handle, cross_plan = NULL) {
   .gs_require()
-  if (!inherits(handle, "gs_handle"))
-    stop("gs_group_to_geno_meta: 'handle' must be a gs_handle.")
+  .gs_check_handle(handle, "gs_group_to_geno_meta")
 
   update_geno_meta_from_matrix(
     handle$template,
-    genomicSimulation::see.group.gene.data(handle$group),
+    .gs_group_genes(handle$group),
     cross_plan = cross_plan)
 }
 
@@ -411,8 +591,7 @@ gs_group_to_geno_meta <- function(handle, cross_plan = NULL) {
 #' @export
 gs_group_gebv <- function(handle) {
   .gs_require()
-  if (!inherits(handle, "gs_handle"))
-    stop("gs_group_gebv: 'handle' must be a gs_handle.")
+  .gs_check_handle(handle, "gs_group_gebv")
   stats::setNames(
     genomicSimulation::see.group.data(handle$group, "B"),
     genomicSimulation::see.group.data(handle$group, "N"))
@@ -438,8 +617,7 @@ gs_group_gebv <- function(handle) {
 #' @export
 gs_sync_group_names <- function(handle, old_ids, new_ids) {
   .gs_require()
-  if (!inherits(handle, "gs_handle"))
-    stop("gs_sync_group_names: 'handle' must be a gs_handle.")
+  .gs_check_handle(handle, "gs_sync_group_names")
 
   cur    <- genomicSimulation::see.group.data(handle$group, "N")
   mapped <- new_ids[match(cur, old_ids)]
@@ -452,8 +630,11 @@ gs_sync_group_names <- function(handle, old_ids, new_ids) {
 #' Close a persistent genomicSimulation session
 #'
 #' Frees the handle's live group so a \code{(rep, scheme)} job leaves no groups
-#' behind (matters for long / parallel runs). Safe to call on \code{NULL} or a
-#' non-handle (no-op), so it can guard \code{on.exit()} unconditionally.
+#' behind (matters for long / parallel runs), marks the session closed and
+#' removes the private scratch directory \code{\link{gs_load_geno_meta}}
+#' created (a \code{work_dir} you passed is kept). Safe to call on \code{NULL},
+#' a non-handle or a handle of a session already closed or replaced (no-op),
+#' so it can guard \code{on.exit()} unconditionally. Idempotent.
 #'
 #' @param handle A \code{gs_handle}, or \code{NULL}.
 #' @return \code{NULL}, invisibly.
@@ -462,8 +643,16 @@ gs_sync_group_names <- function(handle, old_ids, new_ids) {
 gs_close <- function(handle) {
   if (is.null(handle) || !inherits(handle, "gs_handle"))
     return(invisible(NULL))
+  # Only the live session's handle acts (0.9.0): a stale handle must not
+  # delete a group of the session that replaced it.
+  live <- isTRUE(.hs_gs$open) && identical(as.integer(handle$token), .hs_gs$token)
+  if (!live) return(invisible(NULL))
   if (requireNamespace("genomicSimulation", quietly = TRUE) &&
       !is.null(handle$group))
     try(genomicSimulation::delete.group(handle$group), silent = TRUE)
+  if (!is.null(.hs_gs$own_dir))
+    unlink(.hs_gs$own_dir, recursive = TRUE, force = TRUE)
+  .hs_gs$open    <- FALSE
+  .hs_gs$own_dir <- NULL
   invisible(NULL)
 }

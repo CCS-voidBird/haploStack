@@ -13,7 +13,8 @@ sim_dataset(n_samples = 10L, n_markers = 20L, block_size = 4L, seed = 42L)
 
 \item{block_size}{Markers per block. Default 4.}
 
-\item{seed}{Random seed for reproducibility. Default 42.}
+\item{seed}{Random seed for reproducibility. Default 42. The caller's
+own random stream is left untouched.}
 }
 \value{
 A named list with elements \code{geno_st}, \code{geno_nuc}, \code{map},
@@ -21,8 +22,20 @@ A named list with elements \code{geno_st}, \code{geno_nuc}, \code{map},
 }
 \description{
 Produce every component needed to exercise the haploStack workflow end to
-end: genotype matrices (both encodings), a marker map, an LD block map,
-marker effect tables, and an assembled \code{\link[=new_geno_meta]{GenoMeta}}.
+end: genotype matrices, a marker map, an LD block map, marker effect
+tables, and an assembled \code{\link[=new_geno_meta]{GenoMeta}}.
+}
+\details{
+The returned \code{map} is the map inside \code{geno_meta} (\code{geno_meta$map_info}
+holds the same positions), and \code{block_map} is the block map attached to
+it. Up to 0.8.8 \code{map} was drawn separately, so its positions differed from
+the container's.
+
+\code{geno_st} and \code{eff_st} are the draw in SelectionTools codes (\code{1/4}), kept
+for scripts that still read them; since 0.9.0 the container is built from
+the same draw in nucleotides (\code{1} is \code{A}, \code{4} is \code{T}), because a \code{GenoMeta}
+stores nucleotide alleles only. \code{geno_nuc} is a second, independent draw
+(seed + 1), as before.
 }
 \examples{
 ds <- sim_dataset(n_samples = 6, n_markers = 8, block_size = 4)

@@ -46,6 +46,15 @@ currently selected set.
 \item Repeat until \code{n_parents} candidates are selected.
 }
 }
+\section{Deprecated}{
+
+Since 0.9.0 (warns on every call; removed in 0.10). The driver runs the
+coverage selection as the \code{OHS} scheme: \code{\link{ohs_selection}(method
+= "Greedy")} on the haplotype-level table, or
+\code{run_stacking_simulation(scheme = "OHS", ohs_method = "Greedy")}.
+See \link{haploStack-deprecated}.
+}
+
 \examples{
 \dontrun{
 selected <- greedy_selection(gebv_matrix, n_parents = 8)

@@ -14,7 +14,8 @@ circos_track(
   label_top_n = 10L,
   min_gap_rad = 0.14,
   window_bp = NULL,
-  window_name = "search window"
+  window_name = "search window",
+  limits = NULL
 )
 }
 \arguments{
@@ -60,7 +61,8 @@ optionally followed by the search-window colour (defaults
 \code{"grey20"} and Okabe–Ito sky blue \code{"#56B4E9"}).}
 
 \item{height_mm}{Ring height in mm at the declared figure width (defaults
-per type: rect 3.5, line 4.5, points 5.5, needles 5.5, labels 8).}
+per type: rect 3.5, line 4.5, points 5.5, needles 5.5, labels 8). Must be
+a single number \code{> 0}.}
 
 \item{label_top_n}{\code{"labels"} only: at most this many labels, highest
 \code{value_col} first, after angular deconfliction. Default 10.}
@@ -75,6 +77,12 @@ those columns give windows; with neither, no window is drawn.}
 
 \item{window_name}{\code{"labels"} only: the search window's legend name
 (default \code{"search window"}). The window has no text of its own.}
+
+\item{limits}{\code{"rect"} rings only: two numbers \code{c(low, high)}
+fixing the colour scale instead of the ring's own data range, so several
+rings (or several figures) share one scale; the legend bar runs over
+\code{limits} and values outside it take the end colours. Default
+\code{NULL}: the data range (symmetric about zero for a diverging ramp).}
 }
 \value{
 An \code{hs_circos_track} spec.

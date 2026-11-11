@@ -13,10 +13,14 @@ list returned by \code{\link{compute_block_annotation}}.}
 \item{output_dir}{Directory for the TSVs (created when missing).}
 
 \item{prefix}{Optional filename prefix (default \code{NULL} writes the
-Python filenames exactly).}
+Python filenames exactly). The files are written by the package's one
+table writer, so an existing file is replaced.}
 }
 \value{
-Invisibly, the written paths (named character vector).
+Invisibly, the written paths (named character vector, absolute
+since 0.9.0), with the manifest \code{data.frame(path, kind, object,
+  bytes)} as \code{attr(, "hs_files")} and any caveat (the flank note) as
+\code{attr(, "hs_notes")}.
 }
 \description{
 Writes the \code{block_annotation} pipeline's step files from an R-side

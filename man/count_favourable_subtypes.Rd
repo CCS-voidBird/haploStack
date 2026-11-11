@@ -49,11 +49,14 @@ sample; \code{"genotype"} counts each sample once per target carried. See
 \code{\link{count_subtype_carriage}}.}
 
 \item{center}{Centring mode applied to the allele effects:
-�\code{"none"}, �\code{"locus_mean"} or �\code{"allele_freq"}. See
-�\code{\link{compute_profile_localgebv}} for what each preserves.}
+\code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
+\code{\link{compute_profile_localgebv}} for what each preserves.}
 
-\item{center_by_freq}{Passed to \code{\link{compute_block_catalogue}} when the
-catalogue is computed here. Default \code{TRUE}.}
+\item{center_by_freq}{\strong{Deprecated} logical form of \code{center}
+(\code{TRUE} = \code{"allele_freq"}, \code{FALSE} = \code{"none"}); warns on
+every call. Used when the catalogue is computed here. The default centring
+is \code{"none"} since 0.9.0 (it was \code{"allele_freq"} up to 0.8.8; pass
+\code{center = "allele_freq"} to reproduce those numbers).}
 
 \item{fill_na}{Placeholder for an unobserved allele. Default \code{NULL} (the
 \code{haploStack.fill_na} option).}

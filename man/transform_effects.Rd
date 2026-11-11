@@ -30,8 +30,8 @@ preserved.}
 
 \item{char_dict}{Encoding dictionary.}
 
-\item{extend}{When \code{TRUE} (default) adds zero-effect rows for
-missing (Marker, Allele) combinations.}
+\item{extend}{Deprecated since 0.9.0 and ignored (see
+\code{\link{read_effect_file}}); supplying it warns.}
 }
 \value{
 data.frame with columns \code{Marker}, \code{Allele},

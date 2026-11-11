@@ -106,12 +106,16 @@
 #' and \code{nNegative} are reported either way, so one call describes both
 #' directions and \code{nPreferred} simply names the one being selected for.
 #'
-#' \strong{Centering matters to the sign.} \code{center_by_freq = TRUE} (the
-#' default here, as in \code{\link{run_haplotype_catalogue}}) mean-centres allele
-#' effects by their population frequency, so a positive local GEBV means
-#' \dQuote{above the panel mean for this block}. Without centering the sign
-#' mostly reflects which allele the effect file called the reference, and
-#' counting positive blocks stops being a breeding statement.
+#' \strong{Centering matters to the sign.} The default since 0.9.0 is
+#' \code{center = "locus_mean"} (decision-form row 15 c): each marker's allele
+#' effects are shifted by their frequency-weighted mean, so a positive local GEBV
+#' means \dQuote{above the panel mean for this block} while every haplotype of a
+#' block moves by the same amount and the block's subtype ranking is untouched.
+#' Without centering (\code{"none"}) the sign mostly reflects which allele the
+#' effect file called the reference, and counting positive blocks stops being a
+#' breeding statement. Up to 0.8.8 the default was \code{"allele_freq"}
+#' (\code{center_by_freq = TRUE}); pass \code{center = "allele_freq"} to
+#' reproduce those counts. A value within \code{tol} of zero is neither sign.
 #'
 #' @param geno_meta A valid \code{GenoMeta} with block assignments (see
 #'   \code{\link{attach_block_info}}).
@@ -125,10 +129,15 @@
 #' @param samples,blocks,chromosomes Optional subsets, passed to
 #'   \code{\link{compute_profile_localgebv}}.
 #' @param center        Centring mode applied to the allele effects:
-#'   \code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
-#'   \code{\link{compute_profile_localgebv}} for what each preserves.
-#' @param center_by_freq Logical; mean-centre allele effects by population
-#'   frequency before summing per block. Default \code{TRUE} (see above).
+#'   \code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
+#'   \code{\link{compute_profile_localgebv}} for what each preserves.
+#' @param center_by_freq \strong{Deprecated} logical form of \code{center}
+#'   (\code{TRUE} = \code{"allele_freq"}, \code{FALSE} = \code{"none"}); warns
+#'   on every call. The default centring here is \code{"locus_mean"} since 0.9.0
+#'   (see above).
+#' @param tol Non-negative number. A local GEBV with \code{|value| <= tol} counts
+#'   as \code{Zero} rather than \code{Positive} / \code{Negative}. Default
+#'   \code{0}: the strict sign rule of 0.8.8.
 #' @param fill_na Value for (block, copy) cells with no effect information.
 #'   Default \code{0}, matching \code{\link{compute_profile_localgebv}} — every
 #'   block then holds a value and \code{nBlock} is the same for every sample.
@@ -188,16 +197,16 @@ count_favourable_blocks <- function(geno_meta,
                                     chromosomes    = NULL,
                                     center         = NULL,
                                     center_by_freq = NULL,
+                                    tol            = 0,
                                     fill_na        = 0,
                                     plot           = TRUE,
                                     output_file    = NULL) {
 
-  center <- .resolve_center(center, center_by_freq,
-                            "count_favourable_blocks",
-                            default = "allele_freq")
+  center <- .resolve_center(center, center_by_freq, "count_favourable_blocks")
+  if (!is.numeric(tol) || length(tol) != 1L || is.na(tol) || tol < 0)
+    .hs_abort("count_favourable_blocks: 'tol' must be a single non-negative number.")
   prefer <- match.arg(prefer)
-  if (!is_geno_meta(geno_meta))
-    stop("count_favourable_blocks: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "count_favourable_blocks", "geno_meta")
 
   # 1. Haplotype-level local GEBVs (request 1e: never genotype level) ----------
   lg <- compute_profile_localgebv(
@@ -208,7 +217,7 @@ count_favourable_blocks <- function(geno_meta,
 
   hap_cols <- setdiff(names(lg), "Block")
   if (nrow(lg) == 0L || length(hap_cols) == 0L)
-    stop("count_favourable_blocks: no block x haplotype local GEBVs to count ",
+    .hs_abort("count_favourable_blocks: no block x haplotype local GEBVs to count ",
          "(empty genotype data after filtering, or no markers with block ",
          "assignments).")
 
@@ -217,13 +226,16 @@ count_favourable_blocks <- function(geno_meta,
   long <- data.table::melt(lg, id.vars = "Block", measure.vars = hap_cols,
                            variable.name = "SampleHap", value.name = "GEBV",
                            variable.factor = FALSE)
-  long[, Sample := sub("\\.[0-9]+$", "", SampleHap)]
+  hc <- .hap_cols(hap_cols)                            # one parser (sc/F24)
+  long[, Sample := hc$base[match(SampleHap, hc$cols)]]
   long[, GEBV   := as.numeric(GEBV)]
 
   # 3. Sign classification — run_haplotype_catalogue()'s idiom (request 1d) ----
+  # C-prefer (0.9.0): a value within `tol` of zero is Zero (default tol = 0 is
+  # the 0.8.8 rule: strict sign).
   long[, Sign := data.table::fcase(
-    GEBV > 0, "Positive",
-    GEBV < 0, "Negative",
+    GEBV >  tol, "Positive",
+    GEBV < -tol, "Negative",
     default  = "Zero")]                     # NA (no information) falls here too
   long[is.na(GEBV), Sign := NA_character_]
   long[, Preferred := Sign == if (prefer == "positive") "Positive" else "Negative"]
@@ -263,14 +275,15 @@ count_favourable_blocks <- function(geno_meta,
 
   if (!is.null(output_file)) {
     data.table::fwrite(tab, output_file, sep = "\t")
-    message("Favourable-block counts written to: ", output_file)
+    .hs_inform("Favourable-block counts written to: ", output_file)
   }
 
+  structure(hs_center = center,                     # D3.5: the centre travels with the result
   list(table  = tab[],
        plots  = plots,
        dummy  = dummy,
        prefer = prefer,
-       level  = "haplotype")
+       level  = "haplotype"))
 }
 
 
@@ -340,17 +353,17 @@ plot_favourable_blocks <- function(x, family = NULL,
   prefer <- match.arg(prefer)
 
   if (!is.data.frame(dummy) && !inherits(dummy, "data.table"))
-    stop("plot_favourable_blocks: 'x' must be a count_favourable_blocks() ",
+    .hs_abort("plot_favourable_blocks: 'x' must be a count_favourable_blocks() ",
          "result or a wide dummy table with 'Block' as its first column.")
 
   if (is.null(family))
-    stop("plot_favourable_blocks: 'family' is required — pass the GenoMeta the ",
+    .hs_abort("plot_favourable_blocks: 'family' is required \u2014 pass the GenoMeta the ",
          "counts were computed from, or a trace_family_history() list.")
 
   has_history <- if (is_geno_meta(family))
     !is.null(family$metadata$family_history) else TRUE
   if (!has_history) {
-    warning("plot_favourable_blocks: the GenoMeta carries no family history, ",
+    .hs_warn("plot_favourable_blocks: the GenoMeta carries no family history, ",
             "so the per-family dummy alignment cannot be drawn. Run ",
             "attach_family_history() first; returning NULL.")
     return(NULL)

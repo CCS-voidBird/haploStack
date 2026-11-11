@@ -12,30 +12,30 @@ genotype call strings. Either orientation (markers × samples or samples ×
 markers) is accepted.}
 }
 \value{
-A character scalar: \code{"selectiontools"}, \code{"nucleotide"}, or
-\code{"numeric"}.
+A character scalar: \code{"nucleotide"} or \code{"numeric"}.
 }
 \description{
 Samples up to 100 non-NA values from a genotype matrix and classifies the
-encoding as one of \code{"selectiontools"} (slash-separated numeric, e.g.
-\code{"1/4"}), \code{"nucleotide"} (e.g. \code{"A/T"} or \code{"AT"}), or
-\code{"numeric"} (dosage counts 0/1/2).
+encoding as \code{"nucleotide"} (allele labels, e.g. \code{"A/T"} or
+\code{"AT"}) or \code{"numeric"} (dosage counts 0/1/2). Slash-separated
+integer codes (\code{"1/4"}, \code{"1/-1"}) are SelectionTools' allele
+encoding, which a \code{GenoMeta} no longer stores (0.9.0): they are
+refused with an \code{hs_error_format} that names
+\code{\link{st_convert}} and the two declarations that resolve the
+ambiguity (\code{encoding = "selectiontools"} to translate the codes,
+\code{encoding = "nucleotide"} to keep digits as labels).
 }
 \details{
 Detection priority:
 \enumerate{
 \item If >50 \% of sampled values contain \code{"/"} and the allele parts are
-all numeric → \code{"selectiontools"}.
+all numeric → SelectionTools codes: refused (see above).
 \item If >50 \% contain \code{"/"} and allele parts are alphabetic → \code{"nucleotide"}.
 \item If no slash but >50 \% contain A/G/C/T characters → \code{"nucleotide"}.
 \item If values are simple integers 0/1/2 → \code{"numeric"}.
 }
 }
 \examples{
-# SelectionTools format
-detect_genotype_encoding(matrix(c("1/1", "1/4", "4/4", "-1/-1"), 2))
-# => "selectiontools"
-
 # Nucleotide format
 detect_genotype_encoding(matrix(c("A/A", "A/T", "T/T"), 1))
 # => "nucleotide"
@@ -43,5 +43,8 @@ detect_genotype_encoding(matrix(c("A/A", "A/T", "T/T"), 1))
 # Dosage numeric
 detect_genotype_encoding(matrix(c(0, 1, 2, 1), 2))
 # => "numeric"
+
+# SelectionTools codes are refused, naming st_convert()
+try(detect_genotype_encoding(matrix(c("1/1", "1/4", "4/4", "-1/-1"), 2)))
 
 }

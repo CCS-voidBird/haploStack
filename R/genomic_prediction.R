@@ -51,21 +51,22 @@
 #' @param geno_meta A valid \code{GenoMeta} list with a diploid allele encoding
 #'   (\code{"selectiontools"} or \code{"nucleotide"}).
 #' @param impute    \code{"mean"} (default) mean-imputes missing dosages per
-#'   marker; \co\code{"none"} leaves them as \code{NA}.
+#'   marker; \code{"none"} leaves them as \code{NA}.
 #' @return A list with elements \code{M} (numeric matrix, rows = samples and
 #'   cols = markers in \code{geno_arrays} order, names preserved verbatim),
 #'   \code{allele_map} (data.frame: \code{Marker}, \code{Ref}, \code{Alt}) and
 #'   \code{samples}.
 #' @keywords internal
+#' @noRd
 .gp_allele_dosage <- function(geno_meta, impute = c("mean", "none")) {
   impute <- match.arg(impute)
 
   enc <- geno_meta$metadata$encoding
   if (is.null(enc))
     enc <- detect_genotype_encoding(.meta_to_allele_matrix(geno_meta))
-  if (!enc %in% c("selectiontools", "nucleotide"))
-    stop(".gp_allele_dosage: marker-effect estimation requires a diploid ",
-         "allele encoding ('selectiontools' or 'nucleotide'); got '",
+  if (!identical(enc, "nucleotide"))
+    .hs_abort(".gp_allele_dosage: marker-effect estimation requires the ",
+         "diploid allele encoding ('nucleotide'); got '",
          enc, "'. Recode with recode_geno_meta() first.")
 
   # Operate on the 3-D array directly: dimnames carry the canonical marker names
@@ -87,7 +88,7 @@
   # portal — a pre-0.6.0 .rds, or a hand-assembled list — where without it the
   # missing code ranks as an allele and the marker's effect is estimated for
   # missingness itself (INDEX discrepancy 23).
-  miss   <- .missing_tokens(enc)
+  miss   <- .missing_tokens(enc, .meta_extra_missing(geno_meta))
   counts <- .marker_allele_counts(arr, na_vals = miss, strip_blank = TRUE)
   levs    <- colnames(counts)
   ref     <- character(n_mark)
@@ -118,7 +119,7 @@
   if (any(empty_mark)) M[, empty_mark] <- NA_real_
 
   if (n_multi > 0L)
-    warning(".gp_allele_dosage: ", n_multi, " marker(s) have >2 alleles; ",
+    .hs_warn(".gp_allele_dosage: ", n_multi, " marker(s) have >2 alleles; ",
             "keeping the two most frequent and treating the rest as reference.")
 
   if (impute == "mean" && anyNA(M)) {
@@ -157,15 +158,16 @@
 #' @return A list with \code{y} (named numeric vector) and \code{trait} (the
 #'   resolved trait name).
 #' @keywords internal
+#' @noRd
 .gp_resolve_pheno <- function(geno_meta, phenotype, trait, sample_ids) {
   if (is.null(phenotype)) phenotype <- geno_meta$phenotype
   if (is.null(phenotype))
-    stop(".gp_resolve_pheno: no phenotype supplied — pass 'phenotype' or ",
+    .hs_abort(".gp_resolve_pheno: no phenotype supplied \u2014 pass 'phenotype' or ",
          "attach one to the GenoMeta with attach_phenotype().")
   if (is.character(phenotype) && length(phenotype) == 1L)
     phenotype <- read_phenotype(phenotype)
   if (!is.data.frame(phenotype))
-    stop(".gp_resolve_pheno: 'phenotype' must be a data.frame or a file path.")
+    .hs_abort(".gp_resolve_pheno: 'phenotype' must be a data.frame or a file path.")
   phenotype <- as.data.frame(phenotype, stringsAsFactors = FALSE)
 
   sample_col <- if ("Sample" %in% names(phenotype)) "Sample" else names(phenotype)[1L]
@@ -176,17 +178,17 @@
     is_num <- vapply(phenotype[trait_cols], function(x)
       is.numeric(x) || all(!is.na(suppressWarnings(as.numeric(x)))), logical(1L))
     if (!any(is_num))
-      stop(".gp_resolve_pheno: no numeric trait column found in the phenotype.")
+      .hs_abort(".gp_resolve_pheno: no numeric trait column found in the phenotype.")
     trait <- trait_cols[is_num][1L]
   } else if (!trait %in% trait_cols) {
-    stop(".gp_resolve_pheno: trait '", trait, "' not found. Available: ",
+    .hs_abort(".gp_resolve_pheno: trait '", trait, "' not found. Available: ",
          paste(trait_cols, collapse = ", "), ".")
   }
 
   vals <- suppressWarnings(as.numeric(phenotype[[trait]]))
   y    <- stats::setNames(vals[match(sample_ids, ids)], sample_ids)
   if (all(is.na(y)))
-    stop(".gp_resolve_pheno: trait '", trait, "' has no values for any ",
+    .hs_abort(".gp_resolve_pheno: trait '", trait, "' has no values for any ",
          "genotype sample.")
   list(y = y, trait = trait)
 }
@@ -210,6 +212,7 @@
 #' @param g Named numeric vector of genomic values, aligned to \code{rownames(Z)}.
 #' @return A numeric vector of marker effects, one per column of \code{Z}.
 #' @keywords internal
+#' @noRd
 .gp_gblup_marker_effects <- function(Z, g) {
   g   <- as.numeric(g[rownames(Z)])
   ZZt <- tcrossprod(Z)
@@ -268,9 +271,18 @@
 #' @param gebv_colname Name for the GEBV column in the returned phenotype table.
 #'   \code{NULL} (default) uses \code{paste0("GEBV_", trait)}.
 #' @param impute       Missing-dosage handling passed to the dosage transform:
-#'   \code{"mean"} (default) or \co\code{"none"}.
+#'   \code{"mean"} (default) or \code{"none"}.
 #' @param nIter,burnIn BGLR sampler length and burn-in (\code{"bayesc"} only).
+#'   BGLR's chain files go to a private temporary directory that is removed
+#'   when the call returns (0.9.0); pass \code{saveAt =} through \code{...}
+#'   to keep them.
 #' @param verbose      Logical; print backend progress. Default \code{FALSE}.
+#' @param seed         Optional seed for the BGLR sampler (\code{"bayesc"}),
+#'   drawn under a local seed; with \code{NULL} the sampler draws from the
+#'   session stream, which is restored when the call returns (0.9.0),
+#'   applied locally so the caller's random stream is left untouched.
+#'   \code{NULL} (default) samples on the current stream. rrBLUP models are
+#'   deterministic and ignore it.
 #' @param ...          Extra arguments forwarded to the backend
 #'   (\code{mixed.solve} / \code{kin.blup} / \code{BGLR}).
 #'
@@ -317,15 +329,17 @@ fit_genomic_prediction <- function(geno_meta,
                                    nIter        = 12000L,
                                    burnIn       = 2000L,
                                    verbose      = FALSE,
+                                   seed         = NULL,
                                    ...) {
   model  <- match.arg(model)
   impute <- match.arg(impute)
-  if (!is_geno_meta(geno_meta))
-    stop("fit_genomic_prediction: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "fit_genomic_prediction", "geno_meta")
 
   backend <- if (model == "bayesc") "BGLR" else "rrBLUP"
   if (!requireNamespace(backend, quietly = TRUE))
-    stop("fit_genomic_prediction: model '", model, "' requires the '", backend,
+    .hs_abort(class = "hs_error_dependency",
+         data = list(hint = paste0("install.packages(\"", backend, "\")")),
+         "fit_genomic_prediction: model '", model, "' requires the '", backend,
          "' package. Install it with install.packages(\"", backend, "\").")
 
   # Genotype -> dosage matrix; phenotype -> aligned trait vector.
@@ -339,7 +353,7 @@ fit_genomic_prediction <- function(geno_meta,
 
   train <- !is.na(y)
   if (sum(train) < 2L)
-    stop("fit_genomic_prediction: need >= 2 phenotyped samples to train; got ",
+    .hs_abort("fit_genomic_prediction: need >= 2 phenotyped samples to train; got ",
          sum(train), ".")
 
   # ---- Fit ----------------------------------------------------------------
@@ -359,9 +373,28 @@ fit_genomic_prediction <- function(geno_meta,
     u    <- .gp_gblup_marker_effects(Zc, stats::setNames(gebv, d$samples))
 
   } else {                                        # bayesc
+    # BGLR writes its chain files next to `saveAt`, by default the working
+    # directory. Unless the caller names one, they go to a private directory
+    # that is removed on exit (D1 §3.8), and the fit's file name is NA.
+    dots <- list(...)
+    private <- !"saveAt" %in% names(dots)
+    if (private) {
+      bglr_dir <- tempfile("hs_bglr_")
+      dir.create(bglr_dir)
+      on.exit(unlink(bglr_dir, recursive = TRUE, force = TRUE), add = TRUE)
+      dots$saveAt <- paste0(normalizePath(bglr_dir, winslash = "/"), "/")
+    }
     eta <- list(list(X = M[train, , drop = FALSE], model = "BayesC"))
-    fit <- BGLR::BGLR(y = unname(y[train]), ETA = eta, nIter = nIter,
-                      burnIn = burnIn, verbose = verbose, ...)
+    # seed = NULL: the sampler draws from the session stream, which is put
+    # back afterwards (G1); a seed gives a reproducible chain the same way.
+    fit <- .hs_keep_rng(.with_seed(seed, do.call(BGLR::BGLR,
+                                    c(list(y = unname(y[train]), ETA = eta,
+                                           nIter = nIter, burnIn = burnIn,
+                                           verbose = verbose), dots))))
+    if (private) {
+      for (j in seq_along(fit$ETA))
+        if (!is.null(fit$ETA[[j]]$NamefileOut)) fit$ETA[[j]]$NamefileOut <- NA_character_
+    }
     u    <- as.numeric(fit$ETA[[1L]]$b)
     gebv <- as.numeric(M %*% u)
   }
@@ -378,7 +411,7 @@ fit_genomic_prediction <- function(geno_meta,
   ref_rows <- data.frame(Marker = amap$Marker, Allele = amap$Ref,
                          Effect = 0, stringsAsFactors = FALSE)
   effect_tbl <- rbind(alt_rows, ref_rows)
-  effect_tbl <- effect_tbl[order(effect_tbl$Marker, effect_tbl$Allele), ,
+  effect_tbl <- effect_tbl[.hs_order(effect_tbl$Marker, effect_tbl$Allele), ,
                            drop = FALSE]
   rownames(effect_tbl) <- NULL
   marker_effects <- stats::setNames(list(effect_tbl), trait)
@@ -412,7 +445,26 @@ fit_genomic_prediction <- function(geno_meta,
     as.data.frame(base_ph, stringsAsFactors = FALSE, check.names = FALSE)
   base_ph[[gebv_colname]] <- gebv[as.character(base_ph$Sample)]
   gm <- attach_phenotype(gm, base_ph)
-  stopifnot(is_geno_meta(gm))
+  if (!is_geno_meta(gm))
+    .hs_abort(class = "hs_error_internal",
+         "fit_genomic_prediction: the returned GenoMeta failed validation.")
+
+  # A plain summary beside the backend's own object (0.9.0, io/F14): the
+  # variance components under one pair of names, and what made the fit.
+  vc <- switch(model,
+               rrblup = list(var_u = as.numeric(fit$Vu), var_e = as.numeric(fit$Ve)),
+               gblup  = list(var_u = as.numeric(fit$Vg), var_e = as.numeric(fit$Ve)),
+               bayesc = list(var_u = as.numeric(fit$ETA[[1L]]$varB),
+                             var_e = as.numeric(fit$varE)))
+  gp_summary <- c(
+    list(model = model, n_train = sum(train)),
+    vc,
+    list(h2 = if (model == "gblup") vc$var_u / (vc$var_u + vc$var_e) else NA_real_,
+         seed = seed,
+         nIter = if (model == "bayesc") as.integer(nIter) else NA_integer_,
+         burnIn = if (model == "bayesc") as.integer(burnIn) else NA_integer_,
+         backend = backend,
+         backend_version = as.character(utils::packageVersion(backend))))
 
   list(
     marker_effects = marker_effects,
@@ -420,7 +472,8 @@ fit_genomic_prediction <- function(geno_meta,
     model          = fit,
     geno_meta      = gm,
     allele_map     = amap,
-    trait          = trait
+    trait          = trait,
+    summary        = gp_summary
   )
 }
 
@@ -474,8 +527,8 @@ fit_genomic_prediction <- function(geno_meta,
 #' @param chromosomes    Optional list of chromosome region specs (see
 #'   \code{\link{filter_geno_meta}}).
 #' @param center        Centring mode applied to the allele effects:
-#'   \code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
-#'   \code{\link{compute_profile_localgebv}} for what each preserves.
+#'   \code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
+#'   \code{\link{compute_profile_localgebv}} for what each preserves.
 #' @param center_by_freq Logical; mean-centre each allele effect by its
 #'   population frequency before summing (forwarded to
 #'   \code{\link{compute_profile_localgebv}}). Default \code{FALSE}.
@@ -516,37 +569,35 @@ predict_gebv <- function(geno_meta,
                          chromosomes    = NULL,
                          center         = NULL,
                          center_by_freq = NULL) {
-  center <- .resolve_center(center, center_by_freq, "predict_gebv",
-                            default = "none")
-  if (!is_geno_meta(geno_meta))
-    stop("predict_gebv: 'geno_meta' is not a valid GenoMeta.")
+  center <- .resolve_center(center, center_by_freq, "predict_gebv")
+  .hs_check_meta(geno_meta, "predict_gebv", "geno_meta")
 
   # ---- Resolve the effect source (external overrides the stored effects) ----
   # Both routes go through .as_effect_list() so external input and stored
   # effects are normalised to the SAME canonical named list of per-trait tables.
   if (!is.null(marker_effects)) {
     eff_list <- .as_effect_list(marker_effects)
-    message("predict_gebv: using externally supplied marker effects.")
+    .hs_inform("predict_gebv: using externally supplied marker effects.")
   } else {
     eff_list <- .as_effect_list(geno_meta$marker_effects)
     if (is.null(eff_list))
-      stop("predict_gebv: no marker effects supplied and none attached to the ",
+      .hs_abort("predict_gebv: no marker effects supplied and none attached to the ",
            "GenoMeta. Pass 'marker_effects' or run fit_genomic_prediction() ",
            "first.")
-    message("predict_gebv: using marker effects stored on the GenoMeta.")
+    .hs_inform("predict_gebv: using marker effects stored on the GenoMeta.")
   }
   if (length(eff_list) == 0L)
-    stop("predict_gebv: the marker-effect source is empty.")
+    .hs_abort("predict_gebv: the marker-effect source is empty.")
 
   # ---- Select one trait's effect table (and name the output column) --------
   if (is.null(trait)) {
     if (length(eff_list) > 1L)
-      stop("predict_gebv: marker effects hold multiple traits (",
+      .hs_abort("predict_gebv: marker effects hold multiple traits (",
            paste(names(eff_list), collapse = ", "),
            "); set 'trait' to choose one.")
     trait <- names(eff_list)[1L]
   } else if (!trait %in% names(eff_list)) {
-    stop("predict_gebv: trait '", trait, "' not found. Available: ",
+    .hs_abort("predict_gebv: trait '", trait, "' not found. Available: ",
          paste(names(eff_list), collapse = ", "), ".")
   }
   effect_df <- eff_list[[trait]]
@@ -567,7 +618,7 @@ predict_gebv <- function(geno_meta,
 
   sample_cols <- setdiff(names(block_gebv), "Block")
   if (length(sample_cols) == 0L)
-    stop("predict_gebv: no GEBV could be computed — no block-assigned markers ",
+    .hs_abort("predict_gebv: no GEBV could be computed \u2014 no block-assigned markers ",
          "remain after filtering. Attach block info with attach_block_info() ",
          "or widen the marker/block filter.")
   gebv <- colSums(as.matrix(block_gebv[, sample_cols, with = FALSE]),

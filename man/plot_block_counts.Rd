@@ -4,7 +4,12 @@
 \alias{plot_block_counts}
 \title{Stacked bar chart of positive / zero / negative block counts per sample}
 \usage{
-plot_block_counts(haplotype_counts, trait_name = "Trait", x_text_size = 6)
+plot_block_counts(
+  haplotype_counts,
+  trait_name = "Trait",
+  x_text_size = 6,
+  sample_order = NULL
+)
 }
 \arguments{
 \item{haplotype_counts}{data.frame with columns \code{Sample},
@@ -14,6 +19,12 @@ plot_block_counts(haplotype_counts, trait_name = "Trait", x_text_size = 6)
 \item{trait_name}{Character label for the plot title.}
 
 \item{x_text_size}{Font size for X-axis sample labels (default \code{6}).}
+
+\item{sample_order}{Optional character vector giving the bar order. Default
+\code{NULL}: samples by their positive-block count (ascending), those with
+no positive block first — the 0.8.8 order, now decided here rather than by
+factor levels in the table. A factor \code{Sample} column keeps its levels.
+The order drawn is tagged on the plot (\code{attr(p, "sample_order")}).}
 }
 \value{
 A \code{ggplot} object.

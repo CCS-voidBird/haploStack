@@ -7,7 +7,7 @@
 sim_geno_meta(
   n_samples = 10L,
   n_markers = 20L,
-  encoding = "selectiontools",
+  encoding = c("nucleotide", "selectiontools"),
   n_chrom = 2L,
   block_size = NULL,
   seed = 42L
@@ -18,24 +18,27 @@ sim_geno_meta(
 
 \item{n_markers}{Number of markers. Default 20.}
 
-\item{encoding}{\code{"selectiontools"} (default) or \code{"nucleotide"}.}
+\item{encoding}{\code{"nucleotide"} (default since 0.9.0). \code{"selectiontools"}
+is deprecated: a \code{GenoMeta} stores nucleotide alleles only, so the
+container is built with the same draws in \code{A/T}, with a warning.}
 
 \item{n_chrom}{Number of chromosomes. Default 2.}
 
 \item{block_size}{Markers per block. \code{NULL} (default) leaves the block fields
 empty in the returned GenoMeta.}
 
-\item{seed}{Random seed for reproducibility. Default 42.}
+\item{seed}{Random seed for reproducibility. Default 42. The caller's
+own random stream is left untouched.}
 }
 \value{
 A valid \code{GenoMeta} list.
 }
 \description{
 Assemble a valid \code{\link[=new_geno_meta]{GenoMeta}} from simulated genotype and map
-data. Wraps \code{\link[=sim_geno_matrix]{sim_geno_matrix()}}, \code{\link[=sim_map_data]{sim_map_data()}}, and \code{\link[=sim_block_map]{sim_block_map()}},
-splits the 2-D genotype matrix into the 3-D allele array expected by
-\code{\link[=new_geno_meta]{new_geno_meta()}}, and optionally attaches a block map with
-\code{\link[=attach_block_info]{attach_block_info()}}.
+data. Draws the genotype matrix and the map on one seeded stream (the same
+draws as \code{\link[=sim_geno_matrix]{sim_geno_matrix()}} followed by \code{\link[=sim_map_data]{sim_map_data()}}), splits the 2-D
+genotype matrix into the 3-D allele array expected by \code{\link[=new_geno_meta]{new_geno_meta()}},
+and optionally attaches a block map with \code{\link[=attach_block_info]{attach_block_info()}}.
 }
 \examples{
 meta <- sim_geno_meta(n_samples = 6, n_markers = 8, block_size = 4)

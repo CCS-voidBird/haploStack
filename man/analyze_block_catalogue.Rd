@@ -20,6 +20,8 @@ analyze_block_catalogue(
   output_dir = NULL,
   write_outputs = TRUE,
   plots = c("rectangular", "manhattan", "density", "heatmap", "circos"),
+  candidates = c("all", "complete"),
+  gebv_matrices = TRUE,
   ...
 )
 }
@@ -54,7 +56,7 @@ the cross-trait selection sum (it no longer does the cross-trait combine):
 Default \code{1}.}
 
 \item{normalize}{Per-trait scale transform applied \strong{within each trait}:
-\co\code{"none"} (default — no rescaling; \code{N == S} in raw units),
+\code{"none"} (default — no rescaling; \code{N == S} in raw units),
 \code{"zscore"}, \code{"minmax"}, \code{"rank"}, or a function
 \code{function(numeric) -> numeric}. \code{"zscore"} is a \strong{true
 standard score} \code{(x - mean)/sd} — it centres and scales, so a normalised
@@ -83,31 +85,62 @@ lower-is-better trait so its subtypes are summed in the intended direction.
 When supplied it must be named and cover every trait.}
 
 \item{center}{Centring mode applied to the allele effects:
-�\code{"none"}, �\code{"locus_mean"} or �\code{"allele_freq"}. See
-�\code{\link{compute_profile_localgebv}} for what each preserves.}
+\code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
+\code{\link{compute_profile_localgebv}} for what each preserves.}
 
-\item{center_by_freq}{Passed to \code{\link{compute_block_catalogue}} on the
-compute path. Default \code{TRUE}.}
+\item{center_by_freq}{\strong{Deprecated} logical form of \code{center}
+(\code{TRUE} = \code{"allele_freq"}, \code{FALSE} = \code{"none"}); warns
+on every call. The default centring is \code{"none"} since 0.9.0 (it was
+\code{"allele_freq"} up to 0.8.8; pass \code{center = "allele_freq"} to
+reproduce those numbers).}
 
-\item{output_dir}{Directory for output \code{*.txt} tables. \code{NULL}
-(default) writes nothing and emits a \code{warning()}; the full result is
-still returned.}
+\item{output_dir}{Directory for the output tables and figures
+(\code{block_subtypes.txt}, \code{block_selected.txt}, \code{block_S.txt},
+\code{block_N.txt}, \code{block_top.txt}, \code{block_<plot>.png}).
+\code{NULL} (default) writes nothing — the result is returned and
+\code{\link{write_outputs}} can write the same files later.}
 
-\item{write_outputs}{Logical. When \code{FALSE}, suppress disk writes even if
-\code{output_dir} is set (no warning). Default \code{TRUE}.}
+\item{write_outputs}{\strong{Deprecated} (0.9.0): \code{output_dir} alone
+decides whether files are written. A supplied \code{FALSE} is still
+honoured this release, with a deprecation warning.}
 
-\item{plots}{Character vector naming the figures to build into \code{$plots}:
-any of \code{"rectangular"} (\code{\link{plot_block_effect_genome}}),
-\code{"manhattan"} (\code{\link{plot_block_effect_manhattan}}),
-\code{"density"} (\code{\link{plot_block_effect_density}}), and
-\code{"heatmap"} (\code{\link{plot_top_block_heatmap}}). \code{"circos"} is
-reserved for a later phase and currently falls back with a message. Pass
+\item{plots}{Character vector naming the figures to build into \code{$plots}
+(and as recipes into \code{$figures}): any of \code{"rectangular"}
+(\code{\link{plot_block_effect_genome}}), \code{"manhattan"}
+(\code{\link{plot_block_effect_manhattan}}), \code{"density"}
+(\code{\link{plot_block_effect_density}}), \code{"heatmap"}
+(\code{\link{plot_top_block_heatmap}}; needs \code{gebv_matrices = TRUE})
+and \code{"circos"} — built on the circos engine as
+\code{\link{plot_meta_circos}(lapply(traits, track_block_effect, analysis
+  = res))}, never drawn here; it needs \pkg{circlize}. A figure that cannot
+be built is skipped with a note (\code{plot_skipped}), not an error. Pass
 \code{character(0)} to skip plotting.}
 
-\item{...}{Reserved for forward compatibility.}
+\item{candidates}{Which subtypes may represent a block: \code{"all"}
+(default) or \code{"complete"} — only fully observed subtypes (signatures
+with no missing-allele token) are candidates; a missing call contributes 0
+to the local GEBV, so a gapped signature can outscore every observed one
+where the population carries only the unfavourable allele. A block with no
+complete subtype falls back to all. The reported \code{subtypes} table is
+not filtered. Applied before \code{fitness_fn}.}
+
+\item{gebv_matrices}{Logical. Build the per-trait genotype-level local-GEBV
+matrices (\code{$gebv}, used by the top-block heatmap). Default
+\code{TRUE}; \code{FALSE} skips them — large on big panels — and the
+\code{"heatmap"} plot with a note.}
+
+\item{...}{Unused; a supplied argument warns (\code{hs_warning_input}).}
 }
 \value{
-Invisibly, a named list:
+Invisibly, an \code{hs_block_analysis} (see \code{\link{hs_result}}):
+the named list below plus \code{figures} (data-only recipes of the built
+plots, rendered by \code{\link{write_outputs}}), \code{notes} and
+\code{provenance} (centre, traits, value source, transform, fitness rule,
+candidate rule, and the catalogue's centre when one was passed). With
+\code{catalogue =}, an explicit \code{center} that differs from the
+catalogue's is an error; the default adopts the catalogue's with a note
+(\code{center_adopted}); a pre-0.9.0 catalogue leaves a note
+(\code{center_unknown}).
 \describe{
 \item{\code{subtypes}}{All block subtypes, long, with a \code{Trait} column
 and per-(subtype, trait) raw \code{S} and normalized \code{N}.}
@@ -127,7 +160,7 @@ local-GEBV matrices (used by the top-block heatmap).}
 \item{\code{value_source}}{The \code{value_source} used, so the plot layer
 fills by the same value.}
 \item{\code{normalize}}{The transform actually applied
-(\co\code{"none"} by default, or \code{"custom"} for a function), so the plot
+(\code{"none"} by default, or \code{"custom"} for a function), so the plot
 layer can label \code{N} honestly rather than assuming a standard score.}
 }
 }
@@ -178,7 +211,7 @@ combination, not a population average.
 \item \strong{Rescale within each trait}, if asked: transform every subtype's
 effect \code{S(subtype,t)} with \code{normalize} to \code{N(subtype,t)}
 (\code{"zscore"} = a true standard score). Under the default
-\co\code{"none"} this is the identity, so \code{N == S} and the analysis runs
+\code{"none"} this is the identity, so \code{N == S} and the analysis runs
 entirely on raw effects.
 \item \strong{Select one subtype per block} shared across traits:
 \code{selected(b) = argmax_subtype Σ_t w_t · value(subtype, t)}, where

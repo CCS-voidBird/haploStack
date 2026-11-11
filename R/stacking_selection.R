@@ -45,6 +45,13 @@
 #' selected <- greedy_selection(gebv_matrix, n_parents = 8)
 #' }
 #'
+#' @section Deprecated:
+#' Since 0.9.0 (warns on every call; removed in 0.10). The driver runs the
+#' coverage selection as the \code{OHS} scheme: \code{\link{ohs_selection}(method
+#' = "Greedy")} on the haplotype-level table, or
+#' \code{run_stacking_simulation(scheme = "OHS", ohs_method = "Greedy")}.
+#' See \link{haploStack-deprecated}.
+#'
 #' @seealso \code{\link{genetic_algorithm_selection}},
 #'   \code{\link{make_cross_design}}
 #'
@@ -53,16 +60,30 @@ greedy_selection <- function(gebv_matrix,
                               n_parents  = 8L,
                               ideal_freq = NULL,
                               min_effect = 0) {
+  # Deprecated since 0.9.0 (row 27 a): a second implementation of the coverage
+  # selection the driver runs as OHS. Removed in 0.10.
+  .hs_deprecated("greedy_selection()",
+                 "ohs_selection(method = \"Greedy\") or run_stacking_simulation(scheme = \"OHS\", ohs_method = \"Greedy\")",
+                 "0.9.0")
+  .greedy_selection(gebv_matrix, n_parents = n_parents, ideal_freq = ideal_freq,
+                    min_effect = min_effect)
+}
+
+# The non-warning twin: the GA's own fallback calls it (D5 §3.2).
+.greedy_selection <- function(gebv_matrix,
+                              n_parents  = 8L,
+                              ideal_freq = NULL,
+                              min_effect = 0) {
 
   mat <- as.data.table(gebv_matrix)
   if (!"Block" %in% names(mat))
-    stop("greedy_selection: 'gebv_matrix' must have a 'Block' column.")
+    .hs_abort("greedy_selection: 'gebv_matrix' must have a 'Block' column.")
 
   sample_cols <- setdiff(names(mat), "Block")
   n_cand      <- length(sample_cols)
 
   if (n_parents > n_cand) {
-    warning("greedy_selection: n_parents (", n_parents, ") > available candidates (",
+    .hs_warn("greedy_selection: n_parents (", n_parents, ") > available candidates (",
             n_cand, "). Returning all candidates.")
     return(sample_cols)
   }
@@ -126,6 +147,12 @@ greedy_selection <- function(gebv_matrix,
 #'                                         n_generations = 100)
 #' }
 #'
+#' @section Deprecated:
+#' Since 0.9.0 (warns on every call; removed in 0.10). Use
+#' \code{\link{ohs_selection}()} (its \code{"GA_pairwise"} engine) or
+#' \code{run_stacking_simulation(scheme = "OHS")}. See
+#' \link{haploStack-deprecated}.
+#'
 #' @seealso \code{\link{greedy_selection}}, \code{\link{make_cross_design}}
 #'
 #' @export
@@ -138,29 +165,25 @@ genetic_algorithm_selection <- function(gebv_matrix,
                                          crossover_rate = 0.8,
                                          seed           = 42L,
                                          verbose        = FALSE) {
+  # Deprecated since 0.9.0 (row 27 a); removed in 0.10.
+  .hs_deprecated("genetic_algorithm_selection()",
+                 "ohs_selection() or run_stacking_simulation(scheme = \"OHS\")",
+                 "0.9.0")
 
   # The global RNG stream is restored on exit (0.7.3; discrepancy 28) so a
   # driver's crossing step is not reseeded by the selection call.
-  old_seed <- if (exists(".Random.seed", envir = globalenv(), inherits = FALSE))
-    get(".Random.seed", envir = globalenv()) else NULL
-  on.exit({
-    if (is.null(old_seed)) {
-      if (exists(".Random.seed", envir = globalenv(), inherits = FALSE))
-        rm(list = ".Random.seed", envir = globalenv())
-    } else assign(".Random.seed", old_seed, envir = globalenv())
-  }, add = TRUE)
-  set.seed(seed)
+  .local_seed(seed)
   mat <- as.data.table(gebv_matrix)
   if (!"Block" %in% names(mat))
-    stop("genetic_algorithm_selection: 'gebv_matrix' must have a 'Block' column.")
+    .hs_abort("genetic_algorithm_selection: 'gebv_matrix' must have a 'Block' column.")
 
   sample_cols <- setdiff(names(mat), "Block")
   n_cand      <- length(sample_cols)
   n_blocks    <- nrow(mat)
 
   if (n_parents >= n_cand) {
-    warning("genetic_algorithm_selection: n_parents >= n_candidates; returning greedy solution.")
-    return(greedy_selection(gebv_matrix, n_parents))
+    .hs_warn("genetic_algorithm_selection: n_parents >= n_candidates; returning greedy solution.")
+    return(.greedy_selection(gebv_matrix, n_parents))
   }
 
   # Positive-effect indicator matrix (n_blocks × n_candidates)
@@ -225,7 +248,7 @@ genetic_algorithm_selection <- function(gebv_matrix,
     fitness_scores <- vapply(population, .fitness, numeric(1L))
 
     if (verbose && gen %% 50L == 0L)
-      message("  GA gen ", gen, " — best fitness: ",
+      .hs_inform("  GA gen ", gen, " \u2014 best fitness: ",
               round(max(fitness_scores), 4L))
   }
 
@@ -258,7 +281,14 @@ genetic_algorithm_selection <- function(gebv_matrix,
 #' @param freq_penalty_weight Numeric weight \eqn{\lambda} for the
 #'   frequency-deviation penalty when \code{ideal_genotype_df} is supplied.
 #'   Default \code{1}.
-#' @param seed              Random seed. Default \code{42L}.
+#' @param seed              Ignored since 0.9.0 and kept for compatibility:
+#'   the greedy draws no random number, so the selection is the same for any
+#'   seed. Up to 0.8.8 the function reseeded the caller's random stream
+#'   (\code{set.seed(seed)}) on every call, which made the crossing draws
+#'   after every OCS cycle of \code{\link{run_stacking_simulation}} restart
+#'   from the same point, so OCS replicates within a run coincided and the
+#'   caller's stream was reset. Both are gone; OCS numbers from 0.8.8 cannot be
+#'   reproduced (form row 3).
 #'
 #' @return A character vector of selected sample names.
 #'
@@ -282,9 +312,10 @@ ocs_selection <- function(gebv_vector,
                            freq_penalty_weight = 1,
                            seed                = 42L) {
 
-  set.seed(seed)
+  # No reseed (0.9.0, row 3 a): the greedy below is deterministic, and the
+  # set.seed(seed) that stood here reset the caller's stream every cycle.
   if (is.null(names(gebv_vector)))
-    stop("ocs_selection: 'gebv_vector' must be named.")
+    .hs_abort("ocs_selection: 'gebv_vector' must be named.")
 
   samples <- names(gebv_vector)
 
@@ -307,7 +338,7 @@ ocs_selection <- function(gebv_vector,
 
   # Validate kinship matrix
   if (!all(samples %in% rownames(kinship_matrix)))
-    stop("ocs_selection: all samples in 'gebv_vector' must be in 'kinship_matrix'.")
+    .hs_abort("ocs_selection: all samples in 'gebv_vector' must be in 'kinship_matrix'.")
 
   K <- kinship_matrix[samples, samples]
 
@@ -332,8 +363,12 @@ ocs_selection <- function(gebv_vector,
       sel_K       <- K[selected, selected]
       mean_pair_k <- mean(sel_K[upper.tri(sel_K)])
       if (mean_pair_k > max_kinship) {
-        message("ocs_selection: kinship constraint violated; stopping at ",
-                length(selected) - 1L, " parents.")
+        # A silent fallback up to 0.8.8 (a message): the set is short. It now
+        # leaves a trace (hs_warning_fallback, a note in the driver's result).
+        .hs_note("ocs", "ocs_kinship_cap",
+                 paste0("ocs_selection: kinship constraint violated; stopping at ",
+                        length(selected) - 1L, " parents (max_kinship = ",
+                        format(max_kinship), ")."))
         selected <- selected[-length(selected)]
         break
       }
@@ -358,6 +393,7 @@ ocs_selection <- function(gebv_vector,
 #' @param freq_penalty_weight Numeric weight \eqn{\lambda}.
 #' @return Scalar numeric penalty.
 #' @keywords internal
+#' @noRd
 .compute_freq_penalty <- function(ideal_df, freq_penalty_weight = 1) {
   df <- as.data.frame(ideal_df, stringsAsFactors = FALSE)
 
@@ -368,7 +404,7 @@ ocs_selection <- function(gebv_vector,
   required <- c("Chrom", "Block", "Effect", "Hap", "TargetFreq", "CurrentFreq")
   missing  <- setdiff(required, names(df))
   if (length(missing) > 0L)
-    stop("ocs_selection: ideal_genotype_df is missing required column(s): ",
+    .hs_abort("ocs_selection: ideal_genotype_df is missing required column(s): ",
          paste(missing, collapse = ", "))
 
   df$TargetFreq  <- as.numeric(df$TargetFreq)
@@ -427,7 +463,7 @@ make_cross_design <- function(selected_parents,
     setnames(pairs, c("Parent1", "Parent2"))
 
   } else if (method == "sequential") {
-    if (n < 2L) stop("make_cross_design: need >= 2 parents for sequential design.")
+    if (n < 2L) .hs_abort("make_cross_design: need >= 2 parents for sequential design.")
     idx   <- seq(1L, n - 1L, by = 2L)
     pairs <- data.table(
       Parent1 = selected_parents[idx],
@@ -436,8 +472,11 @@ make_cross_design <- function(selected_parents,
 
   } else {  # custom
     if (is.null(cross_table))
-      stop("make_cross_design: 'cross_table' required for method = 'custom'.")
-    pairs <- as.data.table(cross_table)
+      .hs_abort("make_cross_design: 'cross_table' required for method = 'custom'.")
+    # A copy: the columns added below by reference must not land on the
+    # caller's table (0.9.0, sc/F28). A `n_offspring` column already in the
+    # table keeps winning over the argument (unequal family sizes need it).
+    pairs <- data.table::copy(as.data.table(cross_table))
     if (!all(c("Parent1","Parent2") %in% names(pairs)))
       setnames(pairs, names(pairs)[1:2], c("Parent1","Parent2"))
   }
@@ -447,6 +486,8 @@ make_cross_design <- function(selected_parents,
   }
 
   pairs[, Cross_ID    := paste0(Parent1, "x", Parent2)]
+  # Inside the data.table call a `n_offspring` column of a custom table shadows
+  # the argument: the column wins (documented; unequal family sizes need it).
   pairs[, n_offspring := as.integer(n_offspring)]
 
   pairs
@@ -517,7 +558,7 @@ pair_selection_budget <- function(top_founders,
   pair_budget <- match.arg(pair_budget)
   n <- as.integer(top_founders)
   if (length(n) != 1L || is.na(n) || n < 2L)
-    stop("pair_selection_budget: 'top_founders' must be a single integer >= 2.")
+    .hs_abort("pair_selection_budget: 'top_founders' must be a single integer >= 2.")
   full <- .stk_n_families(n, allow_selfing)
   if (pair_budget == "families")
     list(pair_budget = "families", n_parents_ref = n,
@@ -581,19 +622,18 @@ pair_selection_budget <- function(top_founders,
 #' @export
 compute_grm <- function(geno_meta, min_maf = 0.01) {
 
-  if (!is_geno_meta(geno_meta))
-    stop("compute_grm: 'geno_meta' must be a valid GenoMeta. ",
-         "Use filter_geno_meta() to subset markers before calling if needed.")
+  .hs_check_meta(geno_meta, "compute_grm", "geno_meta",
+                 hint = "Use filter_geno_meta() to subset markers before calling if needed.")
 
   # Extract minor-allele dosage matrix [n_samples × n_markers]
   M <- .meta_to_dosage_matrix(geno_meta)   # target_alleles = NULL → minor allele
 
   if (!is.numeric(M))
-    stop("compute_grm: dosage matrix is not numeric; check geno_meta encoding.")
+    .hs_abort("compute_grm: dosage matrix is not numeric; check geno_meta encoding.")
   if (nrow(M) < 2L)
-    stop("compute_grm: need at least 2 samples.")
+    .hs_abort("compute_grm: need at least 2 samples.")
   if (ncol(M) < 1L)
-    stop("compute_grm: need at least 1 marker.")
+    .hs_abort("compute_grm: need at least 1 marker.")
 
   m <- ncol(M)
 
@@ -606,10 +646,10 @@ compute_grm <- function(geno_meta, min_maf = 0.01) {
   maf  <- pmin(p, 1 - p)
   keep <- maf >= min_maf
   if (sum(keep) == 0L)
-    stop("compute_grm: no markers remain after MAF filter (min_maf = ",
+    .hs_abort("compute_grm: no markers remain after MAF filter (min_maf = ",
          min_maf, ").")
   if (sum(keep) < m)
-    message("compute_grm: ", m - sum(keep),
+    .hs_inform("compute_grm: ", m - sum(keep),
             " markers removed by MAF filter (", sum(keep), " retained).")
 
   M <- M[, keep, drop = FALSE]
@@ -619,7 +659,7 @@ compute_grm <- function(geno_meta, min_maf = 0.01) {
   na_idx <- which(is.na(M), arr.ind = TRUE)
   if (nrow(na_idx) > 0L) {
     M[na_idx] <- ploidy * p[na_idx[, 2L]]
-    message("compute_grm: imputed ", nrow(na_idx),
+    .hs_inform("compute_grm: imputed ", nrow(na_idx),
             " missing genotype(s) to ploidy * p.")
   }
 
@@ -629,7 +669,7 @@ compute_grm <- function(geno_meta, min_maf = 0.01) {
   # Scale factor: ploidy * sum(p_j * (1 - p_j))
   scale_factor <- ploidy * sum(p * (1 - p))
   if (scale_factor <= 0)
-    stop("compute_grm: scale factor is zero; all markers may be monomorphic.")
+    .hs_abort("compute_grm: scale factor is zero; all markers may be monomorphic.")
 
   G <- (Z %*% t(Z)) / scale_factor
 

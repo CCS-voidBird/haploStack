@@ -28,12 +28,15 @@
 #'   \item{\code{array}}{3D character array \code{(n_samples, n_markers, ploidy)}.}
 #'   \item{\code{samples}}{Character vector of sample names.}
 #'   \item{\code{markers}}{Character vector of marker names.}
-#'   \item{\code{encode}}{Detected encoding (\code{"selectiontools"},
-#'     \code{"nucleotide"}, or \code{"numeric"}).}
+#'   \item{\code{encode}}{Detected vocabulary of the cells
+#'     (\code{"nucleotide"}, \code{"numeric"}, \code{"selectiontools"} for
+#'     slash-separated integer codes, or \code{"unknown"}). This is a report
+#'     on the input, not a container encoding: a \code{GenoMeta} stores
+#'     nucleotide alleles only (0.9.0).}
 #' }
 #'
 #' @examples
-#' geno <- matrix(c("1/1","1/4","4/4","1/1"), nrow = 2,
+#' geno <- matrix(c("A/A","A/T","T/T","A/A"), nrow = 2,
 #'                dimnames = list(c("Mkr1","Mkr2"), c("S1","S2")))
 #' res <- split_haplotypes(geno, orientation = 2)
 #' dim(res$array)  # 2 x 2 x 2
@@ -86,7 +89,7 @@ split_haplotypes <- function(geno_data,
     hap_array <- .split_genotype_r(geno_mat, split_char, ploidy, hap_dimnames)
   }
 
-  encoding <- tryCatch(detect_genotype_encoding(geno_mat), error = function(e) "unknown")
+  encoding <- tryCatch(.detect_encoding(geno_mat), error = function(e) "unknown")
 
   list(array   = hap_array,
        samples = sample_names,
@@ -137,10 +140,11 @@ split_haplotypes <- function(geno_data,
   ploidy    <- as.integer(ploidy)
   n_samples <- nrow(mat)
 
-  probe <- as.vector(mat[seq_len(min(3L, n_samples)), , drop = FALSE])
-  probe <- probe[!is.na(probe) & nzchar(probe)]
-  if (length(probe) && any(nchar(probe) > 1L))
-    stop(".reshape_wide_alleles: cells contain multi-character values. ",
+  # Every cell is probed (up to 0.8.8 only the first three rows were, so an
+  # indel allele further down was silently cut to its first character).
+  if (any(nchar(mat) > 1L, na.rm = TRUE))
+    .hs_abort(class = c("hs_error_format", "hs_error_input"),
+         ".reshape_wide_alleles: cells contain multi-character values. ",
          "Wide format requires exactly one character per cell.")
 
   out <- matrix(NA_character_, nrow = n_samples, ncol = n_markers)
@@ -223,7 +227,7 @@ split_haplotypes <- function(geno_data,
   for (j in seq_len(n_mark)) {
     for (i in seq_len(n_samp)) {
       a <- arr[i, j, ]
-      g[i, j] <- paste0(sort(a[!is.na(a)]), collapse = "")
+      g[i, j] <- paste0(.hs_sort(a[!is.na(a)]), collapse = "")
     }
   }
   g
@@ -298,13 +302,16 @@ combine_haplotypes <- function(hap_array,
 #'
 #' Converts all allele values in a \code{(n_samples, n_markers, ploidy)} array
 #' from one encoding to another using \code{DEFAULT_ENCODING_DICT} or a custom
-#' \code{char_dict}.
+#' \code{char_dict}. Part of the legacy \code{\link{process_genotype}} layer:
+#' a translation to or from \code{"selectiontools"} is deprecated since 0.9.0
+#' (a \code{GenoMeta} stores nucleotide alleles only; SelectionTools' own
+#' formats go through \code{\link{st_convert}}).
 #'
 #' @param geno_array  3D character array.
 #' @param from_encode Source encoding: \code{"nucleotide"} (A/C/G/T),
-#'   \code{"selectiontools"} (numeric allele codes), or \code{"allele"} (dosage;
-#'   requires \code{minor_alleles}). The legacy names \code{"char"} and
-#'   \code{"number"} were removed in 0.5.1.
+#'   \code{"selectiontools"} (numeric allele codes; deprecated), or
+#'   \code{"allele"} (dosage; requires \code{minor_alleles}). The legacy names
+#'   \code{"char"} and \code{"number"} were removed in 0.5.1.
 #' @param to_encode   Target encoding: same options.
 #' @param char_dict   Encoding dictionary.
 #' @param minor_alleles Optional named character vector (marker → minor allele),
@@ -322,16 +329,21 @@ translate_alleles <- function(geno_array,
   from_encode <- .encode_arg(from_encode, "translate_alleles")
   to_encode   <- .encode_arg(to_encode,   "translate_alleles")
   if (identical(from_encode, to_encode)) return(geno_array)
+  if ("selectiontools" %in% c(from_encode, to_encode)) {
+    .st_gate("translate_alleles", per_call = FALSE)       # C-6
+    .st_encoding_deprecated("translate_alleles",
+                            what = paste0(from_encode, " -> ", to_encode),
+                            then = "this translation is kept only for the legacy process_genotype() layer")
+  }
 
-  # Build lookup vector
+  # Build lookup vector (the SelectionTools tables are the adapter's, C-6)
   if (from_encode == "nucleotide" && to_encode == "selectiontools") {
-    lut <- setNames(as.character(unlist(DEFAULT_ENCODING_DICT)),
-                    names(DEFAULT_ENCODING_DICT))
+    lut <- .ST_FROM_NUCLEOTIDE
   } else if (from_encode == "selectiontools" && to_encode == "nucleotide") {
-    lut <- REVERSED_ENCODING_DICT
+    lut <- .ST_TO_NUCLEOTIDE
   } else if (to_encode == "allele") {
     if (is.null(minor_alleles)) {
-      stop("translate_alleles: minor_alleles required for dosage encoding.")
+      .hs_abort("translate_alleles: minor_alleles required for dosage encoding.")
     }
     # Convert to dosage (count of minor allele) per marker
     n_samp <- dim(geno_array)[1L]
@@ -350,8 +362,8 @@ translate_alleles <- function(geno_array,
     }
     return(out)
   } else {
-    stop("translate_alleles: unsupported encoding '", from_encode,
-         "' → '", to_encode, "'.")
+    .hs_abort("translate_alleles: unsupported encoding '", from_encode,
+         "' \u2192 '", to_encode, "'.")
   }
 
   # Vectorised LUT translation

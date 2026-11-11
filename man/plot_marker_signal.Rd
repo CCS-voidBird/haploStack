@@ -75,11 +75,11 @@ map is available, the strip is skipped with a message. Default \code{TRUE}.}
 overrides \code{geno_meta$block_marker_map_info} (e.g. from
 \code{\link{attach_block_info}}).}
 
-\item{table_file}{Optional path; when given, the marker × block metrics table
-backing the plot is written there with \code{fwrite()}. The table is always
-available as \code{attr(p, "signal_table")}, and
-\code{\link{save_marker_signal}} writes it beside the image under a matching
-name.}
+\item{table_file}{\strong{Deprecated} (0.9.0): a plotter does not write
+files. The marker × block table is always on the plot
+(\code{\link{marker_signal_table}(p)}, i.e. \code{attr(p, "signal_table")})
+and \code{\link{save_marker_signal}} writes it beside the image under a
+matching name. A supplied path still writes this release, with a warning.}
 
 \item{title}{Optional plot title (implies \code{show_title = TRUE}).}
 }

@@ -440,16 +440,25 @@ test_that("a registered character is honoured by the primitive", {
   expect_true(all(is.na(res$array[, "M2", ])))
 })
 
-test_that("is_geno_meta warns on a registered character and repair clears it", {
+test_that("a registered character reaches a container through repair, not through the check", {
   withr::local_options(list(haploStack.missing_chars = NULL))
   m <- token_container(encoding = "nucleotide", token = "#")
 
   expect_silent(is_geno_meta(m))                 # not missing until declared
 
+  # 0.9.0 (form row 2): the registry is read where a container is built or
+  # repaired, never by a consumer. is_geno_meta() goes by the built-in set and
+  # the container's own stamp, so a later registration does not change what
+  # it says; repair_geno_meta() does read the registry.
   suppressMessages(use_missing_chars("#", mode = "nucleotide"))
-  expect_warning(is_geno_meta(m), "missing token")
+  expect_silent(is_geno_meta(m))
   expect_message(m2 <- repair_geno_meta(m), "normalised 2")
   expect_true(all(is.na(m2$geno_arrays["S2", "M1", ])))
+  expect_true("#" %in% m2$metadata$missing_tokens)
+  # and once stamped, a full scan sees "#" in a session with nothing registered
+  reset_missing_chars()
+  m3 <- m2; m3$geno_arrays["S1", "M2", ] <- "#"
+  expect_warning(is_geno_meta(m3, strict = TRUE), "missing token")
 })
 
 test_that("multiple characters can be registered, and registration is unique", {
@@ -460,9 +469,10 @@ test_that("multiple characters can be registered, and registration is unique", {
 })
 
 test_that("reset_missing_chars clears one mode or all of them", {
-  withr::local_options(list(haploStack.missing_chars = NULL))
+  withr::local_options(list(haploStack.missing_chars = NULL,
+                            haploStack.st_formats = TRUE))      # the ST mode is gated (0.9.0, C-6)
   suppressMessages(use_missing_chars("#", mode = "nucleotide"))
-  suppressMessages(use_missing_chars("#", mode = "selectiontools"))
+  suppressWarnings(suppressMessages(use_missing_chars("#", mode = "selectiontools")))
 
   reset_missing_chars("nucleotide")
   expect_equal(missing_chars("nucleotide", chars_only = TRUE), character(0))
@@ -508,11 +518,15 @@ test_that("mode is required and validated", {
 })
 
 test_that("a malformed option cannot change what is missing", {
+  # missing_chars() reads the registry the way the build portal does; the
+  # built-in set itself (.missing_tokens()) reads no option at all (0.9.0).
   withr::local_options(list(haploStack.missing_chars = "nonsense"))
-  expect_setequal(haploStack:::.missing_tokens("nucleotide"),
+  expect_setequal(missing_chars("nucleotide"),
                   c("", "NA", "N", "n", ".", "-", "0"))
   withr::local_options(
     list(haploStack.missing_chars = list(nucleotide = c("##", NA))))
+  expect_setequal(missing_chars("nucleotide"),
+                  c("", "NA", "N", "n", ".", "-", "0"))
   expect_setequal(haploStack:::.missing_tokens("nucleotide"),
                   c("", "NA", "N", "n", ".", "-", "0"))
 })
@@ -533,8 +547,11 @@ test_that("the stamp keeps detection working with nothing registered", {
   m <- token_container(token = "#")
   m$metadata$missing_tokens <- c("", "NA", "N", "n", ".", "-", "0", "#")
 
-  # "#" is not registered here; the container's own record supplies it.
-  expect_warning(is_geno_meta(m), "missing token")
+  # "#" is not registered here; the container's own record supplies it. The
+  # stamp is trusted by default (0.9.0), so a hand-edited array needs the
+  # full scan to be seen.
+  expect_silent(is_geno_meta(m))
+  expect_warning(is_geno_meta(m, strict = TRUE), "missing token")
   expect_message(m2 <- repair_geno_meta(m), "normalised 2")
   expect_true(all(is.na(m2$geno_arrays["S2", "M1", ])))
 })
@@ -612,7 +629,7 @@ test_that("read_plink_ped declares its format, so a 1/2-coded PED is not dosage"
     mf, quote = FALSE, sep = " ", row.names = FALSE, col.names = FALSE)
 
   meta <- suppressMessages(read_plink_ped(pf, mf))
-  expect_equal(meta$metadata$encoding, "selectiontools")
+  expect_equal(meta$metadata$encoding, "nucleotide")   # labels, since 0.9.0 (C-5)
   expect_false(any(meta$geno_arrays %in% "0"))
   expect_equal(sum(is.na(meta$geno_arrays)), 20L)
 })
@@ -700,9 +717,9 @@ test_that("V3: a token source and an NA source now build the same container", {
                     Effect = c(1, -1, 0.5, -0.5, 2, -2, 0.25, -0.25),
                     stringsAsFactors = FALSE)
   g_tok <- suppressMessages(suppressWarnings(compute_profile_localgebv(
-    m_tok, effect_df = eff, center_by_freq = TRUE)))
+    m_tok, effect_df = eff, center = "allele_freq")))
   g_na <- suppressMessages(suppressWarnings(compute_profile_localgebv(
-    m_na, effect_df = eff, center_by_freq = TRUE)))
+    m_na, effect_df = eff, center = "allele_freq")))
   expect_equal(g_tok, g_na)
 })
 
@@ -749,7 +766,7 @@ test_that("V11: a declared from_type is validated against the data", {
   meta <- suppressMessages(build_geno_meta(geno, map, split_char = "/",
                                            encoding = "nucleotide"))
   expect_error(
-    recode_geno_meta(meta, to_type = "selectiontools",
+    recode_geno_meta(meta, to_type = "nucleotide",
                      from_type = "selectiontools"),
     "alphabetic")
 })
@@ -761,12 +778,14 @@ test_that("V11: recode follows from_type over a wrong recorded encoding", {
                      Pos = c(1e6, 2e6), stringsAsFactors = FALSE)
   meta <- suppressMessages(build_geno_meta(geno, map, split_char = "/",
                                            encoding = "nucleotide"))
-  meta$metadata$encoding <- "numeric"          # a stale, wrong record
+  # a container still holding SelectionTools codes, with a stale, wrong record
+  meta$geno_arrays[] <- chartr("AT", "14", meta$geno_arrays)
+  meta$metadata$encoding <- "numeric"
 
-  out <- suppressMessages(recode_geno_meta(meta, to_type = "selectiontools",
-                                           from_type = "nucleotide"))
-  expect_equal(unname(out$geno_arrays["S1", "M1", 1L]), "1")
-  expect_equal(out$metadata$encoding, "selectiontools")
+  out <- suppressMessages(recode_geno_meta(meta, to_type = "nucleotide",
+                                           from_type = "selectiontools"))
+  expect_equal(unname(out$geno_arrays["S1", "M1", 1L]), "A")
+  expect_equal(out$metadata$encoding, "nucleotide")
 })
 
 test_that("na_as renders missing back out, one way only", {

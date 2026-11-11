@@ -57,7 +57,7 @@
     return(subtypes[, {
       row <- as.data.table(fitness_fn(.SD))
       if (nrow(row) != 1L)
-        stop("analyze_block_catalogue: a custom 'fitness_fn' must return exactly ",
+        .hs_abort("analyze_block_catalogue: a custom 'fitness_fn' must return exactly ",
              "one subtype row (got ", nrow(row), ").")
       .(Subtype = as.character(row$Subtype[1L]))
     }, by = Block])
@@ -76,7 +76,7 @@
     st[, keep := keep | !any(keep), by = Block]      # fallback: all if none qualify
     st  <- st[keep == TRUE]
   } else if (!fitness_fn %in% c("max_effect", "min_effect")) {
-    stop("analyze_block_catalogue: unknown fitness_fn '", fitness_fn, "'.")
+    .hs_abort("analyze_block_catalogue: unknown fitness_fn '", fitness_fn, "'.")
   }
 
   # Cross-trait summed value per (Block, Subtype), then one subtype per block.
@@ -138,7 +138,7 @@
       v <- if (n > 1L) sign(x) * (r / n) else x * 0
       list(values = as.numeric(v), apply = NULL, label = "rank")
     },
-    stop("analyze_block_catalogue: unknown normalize '", method, "'.")
+    .hs_abort("analyze_block_catalogue: unknown normalize '", method, "'.")
   )
 }
 
@@ -153,30 +153,30 @@
 # Accepts a pre-computed `catalogue` (run_haplotype_catalogue result) or computes
 # from geno_meta + effect_list with signature-based subtypes.
 .resolve_subtype_tables <- function(geno_meta, effect_list, catalogue,
-                                    trait_names, center) {
+                                    trait_names, center, gebv_matrices = TRUE) {
   if (!is.null(catalogue)) {
     if (is.null(trait_names)) trait_names <- names(catalogue)
     tabs <- lapply(trait_names, function(tr) {
       el <- catalogue[[tr]]
       if (is.null(el) || is.null(el$hap_catalogue))
-        stop("analyze_block_catalogue: catalogue['", tr,
+        .hs_abort("analyze_block_catalogue: catalogue['", tr,
              "'] has no 'hap_catalogue'.")
       as.data.table(el$hap_catalogue)
     })
-    gebv <- lapply(trait_names, function(tr) {
+    gebv <- if (isTRUE(gebv_matrices)) lapply(trait_names, function(tr) {
       gm <- catalogue[[tr]]$gebv_matrix
       if (is.null(gm)) NULL else as.data.table(gm)
-    })
+    }) else vector("list", length(trait_names))
     names(tabs) <- names(gebv) <- trait_names
     return(list(tabs = tabs, gebv = gebv))
   }
 
   if (is.null(geno_meta) || is.null(effect_list))
-    stop("analyze_block_catalogue: supply either 'catalogue', or 'geno_meta' + ",
+    .hs_abort("analyze_block_catalogue: supply either 'catalogue', or 'geno_meta' + ",
          "'effect_list'.")
   if (is.data.frame(effect_list)) effect_list <- list(Trait1 = effect_list)
   if (is.null(names(effect_list)) || any(names(effect_list) == ""))
-    stop("analyze_block_catalogue: 'effect_list' must be a named list ",
+    .hs_abort("analyze_block_catalogue: 'effect_list' must be a named list ",
          "(one element per trait).")
   if (is.null(trait_names)) trait_names <- names(effect_list)
 
@@ -192,17 +192,19 @@
   tabs <- lapply(trait_names, function(tr) {
     eff <- effect_list[[tr]]
     if (is.null(eff))
-      stop("analyze_block_catalogue: no effects for trait '", tr, "'.")
+      .hs_abort("analyze_block_catalogue: no effects for trait '", tr, "'.")
     compute_block_catalogue(geno_meta, effect_df = eff, block_info = bloc,
                             center   = center,
                             group_by = "signature",
                             .core = core, .signatures = sigs)
   })
-  gebv <- lapply(trait_names, function(tr) {
+  # gebv_matrices = FALSE (intake 12): skip the genotype-level matrices — about
+  # 250 MB on the barley panel — when no heatmap is wanted.
+  gebv <- if (isTRUE(gebv_matrices)) lapply(trait_names, function(tr) {
     compute_profile_localgebv(geno_meta, effect_df = effect_list[[tr]],
                               level = "genotype", center = center,
                               .core = core)
-  })
+  }) else vector("list", length(trait_names))
   names(tabs) <- names(gebv) <- trait_names
   list(tabs = tabs, gebv = gebv)
 }
@@ -255,7 +257,7 @@
 #'   \item \strong{Rescale within each trait}, if asked: transform every subtype's
 #'     effect \code{S(subtype,t)} with \code{normalize} to \code{N(subtype,t)}
 #'     (\code{"zscore"} = a true standard score). Under the default
-#'     \co\code{"none"} this is the identity, so \code{N == S} and the analysis runs
+#'     \code{"none"} this is the identity, so \code{N == S} and the analysis runs
 #'     entirely on raw effects.
 #'   \item \strong{Select one subtype per block} shared across traits:
 #'     \code{selected(b) = argmax_subtype Σ_t w_t · value(subtype, t)}, where
@@ -297,7 +299,7 @@
 #'   \code{value_source} so the plot layer fills by the same value without the
 #'   caller re-specifying it.
 #' @param normalize Per-trait scale transform applied \strong{within each trait}:
-#'   \co\code{"none"} (default — no rescaling; \code{N == S} in raw units),
+#'   \code{"none"} (default — no rescaling; \code{N == S} in raw units),
 #'   \code{"zscore"}, \code{"minmax"}, \code{"rank"}, or a function
 #'   \code{function(numeric) -> numeric}. \code{"zscore"} is a \strong{true
 #'   standard score} \code{(x - mean)/sd} — it centres and scales, so a normalised
@@ -314,25 +316,54 @@
 #'   lower-is-better trait so its subtypes are summed in the intended direction.
 #'   When supplied it must be named and cover every trait.
 #' @param center        Centring mode applied to the allele effects:
-#'   \code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
-#'   \code{\link{compute_profile_localgebv}} for what each preserves.
-#' @param center_by_freq Passed to \code{\link{compute_block_catalogue}} on the
-#'   compute path. Default \code{TRUE}.
-#' @param output_dir Directory for output \code{*.txt} tables. \code{NULL}
-#'   (default) writes nothing and emits a \code{warning()}; the full result is
-#'   still returned.
-#' @param write_outputs Logical. When \code{FALSE}, suppress disk writes even if
-#'   \code{output_dir} is set (no warning). Default \code{TRUE}.
-#' @param plots Character vector naming the figures to build into \code{$plots}:
-#'   any of \code{"rectangular"} (\code{\link{plot_block_effect_genome}}),
-#'   \code{"manhattan"} (\code{\link{plot_block_effect_manhattan}}),
-#'   \code{"density"} (\code{\link{plot_block_effect_density}}), and
-#'   \code{"heatmap"} (\code{\link{plot_top_block_heatmap}}). \code{"circos"} is
-#'   reserved for a later phase and currently falls back with a message. Pass
+#'   \code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
+#'   \code{\link{compute_profile_localgebv}} for what each preserves.
+#' @param center_by_freq \strong{Deprecated} logical form of \code{center}
+#'   (\code{TRUE} = \code{"allele_freq"}, \code{FALSE} = \code{"none"}); warns
+#'   on every call. The default centring is \code{"none"} since 0.9.0 (it was
+#'   \code{"allele_freq"} up to 0.8.8; pass \code{center = "allele_freq"} to
+#'   reproduce those numbers).
+#' @param output_dir Directory for the output tables and figures
+#'   (\code{block_subtypes.txt}, \code{block_selected.txt}, \code{block_S.txt},
+#'   \code{block_N.txt}, \code{block_top.txt}, \code{block_<plot>.png}).
+#'   \code{NULL} (default) writes nothing — the result is returned and
+#'   \code{\link{write_outputs}} can write the same files later.
+#' @param write_outputs \strong{Deprecated} (0.9.0): \code{output_dir} alone
+#'   decides whether files are written. A supplied \code{FALSE} is still
+#'   honoured this release, with a deprecation warning.
+#' @param plots Character vector naming the figures to build into \code{$plots}
+#'   (and as recipes into \code{$figures}): any of \code{"rectangular"}
+#'   (\code{\link{plot_block_effect_genome}}), \code{"manhattan"}
+#'   (\code{\link{plot_block_effect_manhattan}}), \code{"density"}
+#'   (\code{\link{plot_block_effect_density}}), \code{"heatmap"}
+#'   (\code{\link{plot_top_block_heatmap}}; needs \code{gebv_matrices = TRUE})
+#'   and \code{"circos"} — built on the circos engine as
+#'   \code{\link{plot_meta_circos}(lapply(traits, track_block_effect, analysis
+#'   = res))}, never drawn here; it needs \pkg{circlize}. A figure that cannot
+#'   be built is skipped with a note (\code{plot_skipped}), not an error. Pass
 #'   \code{character(0)} to skip plotting.
-#' @param ... Reserved for forward compatibility.
+#' @param candidates Which subtypes may represent a block: \code{"all"}
+#'   (default) or \code{"complete"} — only fully observed subtypes (signatures
+#'   with no missing-allele token) are candidates; a missing call contributes 0
+#'   to the local GEBV, so a gapped signature can outscore every observed one
+#'   where the population carries only the unfavourable allele. A block with no
+#'   complete subtype falls back to all. The reported \code{subtypes} table is
+#'   not filtered. Applied before \code{fitness_fn}.
+#' @param gebv_matrices Logical. Build the per-trait genotype-level local-GEBV
+#'   matrices (\code{$gebv}, used by the top-block heatmap). Default
+#'   \code{TRUE}; \code{FALSE} skips them — large on big panels — and the
+#'   \code{"heatmap"} plot with a note.
+#' @param ... Unused; a supplied argument warns (\code{hs_warning_input}).
 #'
-#' @return Invisibly, a named list:
+#' @return Invisibly, an \code{hs_block_analysis} (see \code{\link{hs_result}}):
+#'   the named list below plus \code{figures} (data-only recipes of the built
+#'   plots, rendered by \code{\link{write_outputs}}), \code{notes} and
+#'   \code{provenance} (centre, traits, value source, transform, fitness rule,
+#'   candidate rule, and the catalogue's centre when one was passed). With
+#'   \code{catalogue =}, an explicit \code{center} that differs from the
+#'   catalogue's is an error; the default adopts the catalogue's with a note
+#'   (\code{center_adopted}); a pre-0.9.0 catalogue leaves a note
+#'   (\code{center_unknown}).
 #' \describe{
 #'   \item{\code{subtypes}}{All block subtypes, long, with a \code{Trait} column
 #'     and per-(subtype, trait) raw \code{S} and normalized \code{N}.}
@@ -352,7 +383,7 @@
 #'   \item{\code{value_source}}{The \code{value_source} used, so the plot layer
 #'     fills by the same value.}
 #'   \item{\code{normalize}}{The transform actually applied
-#'     (\co\code{"none"} by default, or \code{"custom"} for a function), so the plot
+#'     (\code{"none"} by default, or \code{"custom"} for a function), so the plot
 #'     layer can label \code{N} honestly rather than assuming a standard score.}
 #' }
 #'
@@ -380,9 +411,25 @@ analyze_block_catalogue <- function(geno_meta       = NULL,
                                     plots           = c("rectangular", "manhattan",
                                                         "density", "heatmap",
                                                         "circos"),
+                                    candidates      = c("all", "complete"),
+                                    gebv_matrices   = TRUE,
                                     ...) {
 
   if (!is.function(fitness_fn)) fitness_fn <- match.arg(fitness_fn)
+  candidates <- match.arg(candidates)
+  if (...length() > 0L)
+    .hs_warn("analyze_block_catalogue: unused argument(s) ",
+             paste(sQuote(names(list(...)) %||% "", FALSE), collapse = ", "),
+             " ignored.", class = "hs_warning_input", call. = FALSE)
+  # D5 ladder: `write_outputs` is deprecated (0.9.0); `output_dir` alone decides.
+  # A supplied FALSE is still honoured for this release.
+  write_given <- !missing(write_outputs)
+  if (write_given)
+    .hs_deprecated("write_outputs", "output_dir", "0.9.0", what = "argument",
+                   fn = "analyze_block_catalogue")
+  if (!is.null(output_dir) &&
+      (!is.character(output_dir) || length(output_dir) != 1L || !nzchar(output_dir)))
+    .hs_abort("analyze_block_catalogue: 'output_dir' must be NULL or a single directory path.")
   normalize_given <- !missing(normalize)
   if (!is.function(normalize))  normalize  <- match.arg(normalize)
   value_source <- match.arg(value_source)
@@ -394,29 +441,51 @@ analyze_block_catalogue <- function(geno_meta       = NULL,
   if (identical(value_source, "normalized") && !is.function(normalize) &&
       identical(normalize, "none")) {
     if (normalize_given)
-      stop("analyze_block_catalogue: value_source = \"normalized\" with ",
-           "normalize = \"none\" has no meaning — the normalized value N would ",
+      .hs_abort("analyze_block_catalogue: value_source = \"normalized\" with ",
+           "normalize = \"none\" has no meaning \u2014 the normalized value N would ",
            "be the raw value S. Name a transform (\"zscore\", \"minmax\", ",
            "\"rank\", or a function), or use value_source = \"raw\".")
     normalize <- "zscore"
-    message("analyze_block_catalogue: value_source = \"normalized\" requested, ",
+    .hs_inform("analyze_block_catalogue: value_source = \"normalized\" requested, ",
             "so normalize = \"zscore\" is used (raw is the default otherwise). ",
             "Pass 'normalize' to choose another transform.")
   }
   norm_label <- if (is.function(normalize)) "custom" else normalize
 
   # ── FR1: resolve per-trait subtype tables (+ GEBV matrices for heatmap) ────
-  center      <- .resolve_center(center, center_by_freq,
-                                 "analyze_block_catalogue",
-                                 default = "allele_freq")
+  # Everything from here to the result runs under the notes collector, so a
+  # skipped plot, an adopted centre or an unknown one reaches hs_notes().
+  center_given <- !is.null(center) || !is.null(center_by_freq)
+  center      <- .resolve_center(center, center_by_freq, "analyze_block_catalogue")
+  cat_center  <- NULL
+  run <- .hs_with_notes({
+  if (!is.null(catalogue)) {
+    # Centre consistency with a passed catalogue (D3 §3.3): its tables were
+    # computed under one centring mode; the analysis must not claim another.
+    cat_center <- if (inherits(catalogue, "hs_result")) hs_provenance(catalogue)$center
+    if (is.null(cat_center)) {
+      .hs_note("analyze_block_catalogue", "center_unknown",
+               "the catalogue carries no provenance (built before 0.9.0); its centring mode is unknown")
+    } else if (center_given && !identical(center, cat_center)) {
+      .hs_abort("analyze_block_catalogue: center = \"", center, "\" but the catalogue was ",
+                "computed with center = \"", cat_center, "\". Pass the same centre, or ",
+                "leave 'center' unset to adopt the catalogue's.", call. = FALSE)
+    } else if (!center_given && !identical(center, cat_center)) {
+      .hs_note("analyze_block_catalogue", "center_adopted",
+               paste0("centre '", cat_center, "' adopted from the catalogue (the analysis ",
+                      "default is '", center, "')"))
+      center <- cat_center
+    }
+  }
   resolved    <- .resolve_subtype_tables(geno_meta, effect_list, catalogue,
-                                         trait_names, center)
+                                         trait_names, center,
+                                         gebv_matrices = gebv_matrices)
   tabs        <- resolved$tabs
   gebv_mats   <- resolved$gebv
   trait_names <- names(tabs)
   n_traits    <- length(trait_names)
   if (n_traits == 0L)
-    stop("analyze_block_catalogue: no traits to analyse.")
+    .hs_abort("analyze_block_catalogue: no traits to analyse.")
   multi <- n_traits > 1L
 
   # ── FR2: stack into one long subtype table with a Trait column ─────────────
@@ -434,7 +503,7 @@ analyze_block_catalogue <- function(geno_meta       = NULL,
   if (!is.null(selected_blocks))
     subtypes <- subtypes[Block %in% selected_blocks]
   if (nrow(subtypes) == 0L)
-    stop("analyze_block_catalogue: no subtypes after filtering.")
+    .hs_abort("analyze_block_catalogue: no subtypes after filtering.")
 
   data.table::setorder(subtypes, Block, Trait, -Count)
 
@@ -454,16 +523,23 @@ analyze_block_catalogue <- function(geno_meta       = NULL,
     w <- stats::setNames(rep(1, n_traits), trait_names)
   } else {
     if (is.null(names(trait_weights)))
-      stop("analyze_block_catalogue: 'trait_weights' must be named.")
+      .hs_abort("analyze_block_catalogue: 'trait_weights' must be named.")
     miss <- setdiff(trait_names, names(trait_weights))
     if (length(miss) > 0L)
-      stop("analyze_block_catalogue: 'trait_weights' missing trait(s): ",
+      .hs_abort("analyze_block_catalogue: 'trait_weights' missing trait(s): ",
            paste(miss, collapse = ", "), ".")
     w <- trait_weights[trait_names]
   }
 
   # ── Step 1: one representative subtype per block, shared across traits ──────
-  chosen <- .select_block_subtype(subtypes, fitness_fn, min_count, w)
+  # candidates = "complete" (intake 12, 2026-11-08): choose among fully observed
+  # subtypes only — a missing call contributes 0, so a gapped signature can
+  # outscore every observed one where the population carries only the
+  # unfavourable allele. Blocks with no complete subtype fall back to all. The
+  # reported `subtypes` table is not filtered.
+  cand <- if (identical(candidates, "complete"))
+    .filter_complete_candidates(subtypes, .hs_fill_na(NULL)) else subtypes
+  chosen <- .select_block_subtype(cand, fitness_fn, min_count, w)
 
   bl <- unique(subtypes[, c("Block", loc_cols), with = FALSE], by = "Block")
 
@@ -509,32 +585,123 @@ analyze_block_catalogue <- function(geno_meta       = NULL,
                  normalize    = norm_label)
 
   # ── FR3/FR4: build the requested plots over the analysis result ────────────
-  result$plots <- .build_analysis_plots(result, plots, multi)
+  # `$plots` keeps built objects for compatibility (ggplots; the circos as an
+  # hs_meta_circos built on the engine, never drawn here). `$figures` holds the
+  # matching data-only recipes write_outputs() renders at the 0.8.8 sizes.
+  result$plots   <- .build_analysis_plots(result, plots, multi, geno_meta)
+  result$figures <- .analysis_figure_recipes(names(result$plots), value_source)
+  result
+  })
 
-  # ── FR5: gated disk writes ─────────────────────────────────────────────────
-  if (is.null(output_dir)) {
-    warning("analyze_block_catalogue: no 'output_dir' given; results returned ",
-            "in-session only, nothing written.")
-  } else if (isTRUE(write_outputs)) {
-    if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
-    data.table::fwrite(subtypes,   file.path(output_dir, "block_subtypes.txt"), sep = "\t")
-    data.table::fwrite(selected,   file.path(output_dir, "block_selected.txt"), sep = "\t")
-    data.table::fwrite(S_tab,      file.path(output_dir, "block_S.txt"),        sep = "\t")
-    data.table::fwrite(N_tab,      file.path(output_dir, "block_N.txt"),        sep = "\t")
-    data.table::fwrite(top_blocks, file.path(output_dir, "block_top.txt"),      sep = "\t")
-    for (nm in names(result$plots)) {
-      p   <- result$plots[[nm]]
-      png <- file.path(output_dir, paste0("block_", nm, ".png"))
-      if (inherits(p, "ggplot")) {
-        suppressMessages(ggplot2::ggsave(png, p, width = 11, height = 6,
-                                         dpi = 150))
-      } else if (inherits(p, "recordedplot")) {
-        grDevices::png(png, width = 1100, height = 1100, res = 150)
-        grDevices::replayPlot(p)
-        grDevices::dev.off()
-      }
+  res <- .hs_result(run$value, "hs_block_analysis", notes = run$notes,
+                    provenance = .hs_provenance(
+                      "analyze_block_catalogue",
+                      center = center, traits = trait_names,
+                      value_source = value_source, normalize = norm_label,
+                      fitness_fn = if (is.function(fitness_fn)) "custom" else fitness_fn,
+                      candidates = candidates, gebv_matrices = isTRUE(gebv_matrices),
+                      catalogue_center = cat_center))
+
+  # ── FR5: writes, only when a directory is named ────────────────────────────
+  if (!is.null(output_dir) && !(write_given && isFALSE(write_outputs))) {
+    w <- .hs_with_notes(write_outputs(res, output_dir, overwrite = TRUE, create_dir = TRUE))
+    if (NROW(w$notes)) {
+      all_notes <- data.table::rbindlist(list(res$notes, w$notes), fill = TRUE)
+      res$notes <- .hs_collapse_notes(as.data.frame(all_notes))
     }
   }
+  invisible(res)
+}
 
-  invisible(result)
+# Candidate filter for candidates = "complete": per block keep the subtypes whose
+# signature holds no missing-allele token; a block with none keeps all of them.
+.filter_complete_candidates <- function(subtypes, fill) {
+  st <- data.table::copy(subtypes)
+  st[, ok := nzchar(Subtype) & !grepl(fill, Subtype, fixed = TRUE)]
+  st[, ok := ok | !any(ok), by = Block]
+  st <- st[ok == TRUE]
+  st[, ok := NULL]
+  st[]
+}
+
+# The analysis figure recipes (one per built plot), at the 0.8.8 render sizes
+# (ggplots 11 x 6 in at 150 dpi; the circos 1100 px square at 150 dpi).
+.analysis_figure_recipes <- function(built, value_source) {
+  gg <- function(nm, plotter)
+    .hs_figure(paste0("block_", nm), plotter,
+               list(analysis = .hs_ref(NULL, derive = "self"), value_source = value_source),
+               width_mm = 11 * 25.4, height_mm = 6 * 25.4, dpi = 150,
+               file = paste0("block_", nm, ".png"))
+  out <- list()
+  for (nm in built) {
+    out[[nm]] <- switch(nm,
+      rectangular = gg(nm, "plot_block_effect_genome"),
+      manhattan   = gg(nm, "plot_block_effect_manhattan"),
+      density     = gg(nm, "plot_block_effect_density"),
+      heatmap     = .hs_figure("block_heatmap", "plot_top_block_heatmap",
+                               list(analysis = .hs_ref(NULL, derive = "self")),
+                               width_mm = 11 * 25.4, height_mm = 6 * 25.4, dpi = 150,
+                               file = "block_heatmap.png"),
+      circos      = .hs_figure("block_circos", "plot_meta_circos",
+                               list(tracks = .hs_ref(NULL, derive = "block_effect_tracks")),
+                               width_mm = 1100 / 150 * 25.4, height_mm = 1100 / 150 * 25.4,
+                               dpi = 150, file = "block_circos.png"),
+      NULL)
+  }
+  out[!vapply(out, is.null, TRUE)]
+}
+
+# ---- the writer --------------------------------------------------------------
+
+#' @rdname write_outputs
+#' @export
+write_outputs.hs_block_analysis <- function(x, dir, what = c("tables", "figures"),
+                                            overwrite = FALSE, create_dir = TRUE, ...) {
+  what <- match.arg(what, several.ok = TRUE)
+  dir  <- .hs_dir_ready(dir, create_dir = create_dir)
+  tabs <- c(subtypes = "block_subtypes.txt", selected = "block_selected.txt",
+            S = "block_S.txt", N = "block_N.txt", top_blocks = "block_top.txt")
+  plan <- list()
+  if ("tables" %in% what)
+    for (nm in names(tabs)) if (!is.null(x[[nm]]))
+      plan[[length(plan) + 1L]] <- list(kind = "table", name = nm, path = file.path(dir, tabs[[nm]]))
+  if ("figures" %in% what && length(x$figures)) {
+    fig_names <- names(x$figures) %||% as.character(seq_along(x$figures))
+    for (k in seq_along(x$figures)) {
+      fig <- x$figures[[k]]
+      fname <- if (inherits(fig, "hs_figure") && length(fig$file) == 1L &&
+                   !is.na(fig$file) && nzchar(fig$file)) fig$file
+               else paste0("block_", .hs_file_stem(fig_names[k], what = "figure"), ".png")
+      plan[[length(plan) + 1L]] <- list(kind = "figure", name = fig_names[k],
+                                        path = file.path(dir, fname))
+    }
+  }
+  if (!length(plan)) return(invisible(.hs_manifest()))
+  .hs_check_overwrite(vapply(plan, `[[`, character(1L), "path"), overwrite)
+
+  rows <- vector("list", length(plan))
+  for (k in seq_along(plan)) {
+    p <- plan[[k]]
+    rows[[k]] <- if (p$kind == "table") {
+      .hs_write_table(x[[p$name]], p$path, overwrite = TRUE, object = p$name)
+    } else {
+      fig <- x$figures[[p$name]]
+      bytes <- tryCatch({
+        obj <- if (inherits(fig, "hs_figure")) hs_build_figure(fig, result = x) else fig
+        if (inherits(fig, "hs_figure"))
+          hs_render_figure(obj, p$path, width_mm = fig$size$width_mm,
+                           height_mm = fig$size$height_mm, dpi = fig$size$dpi,
+                           overwrite = TRUE)
+        else hs_render_figure(obj, p$path, overwrite = TRUE)
+        as.numeric(file.info(p$path)$size)
+      }, error = function(e) {
+        .hs_note("write_outputs", "figure_failed",
+                 paste0("figure ", p$name, " not written: ", conditionMessage(e)))
+        NA_real_
+      })
+      .hs_manifest(normalizePath(p$path, winslash = "/", mustWork = FALSE), "figure",
+                   p$name, bytes)
+    }
+  }
+  invisible(do.call(rbind, rows))
 }

@@ -1,7 +1,7 @@
 Package: haploStack
 Title: Haplotype Block Analysis and Stacking Simulation for Genomic
         Breeding
-Version: 0.8.8
+Version: 0.9.0
 Authors@R: 
     person("Chensong", "Chen",
            email = "chensong.chen@uq.edu.au", role = c("aut", "cre"))
@@ -11,29 +11,31 @@ Description: A toolkit for haplotype block definition, catalogue construction,
     (2) haplotype blocks, from a block map the user supplies (optionally built
     locally from LD with HapSelect or SelectionTools), (3) haplotype
     catalogue construction — per-sample local GEBVs, Manhattan plots, and
-    alignment visualisations — and (4) crossing-design simulation using Genetic
-    Algorithm (GA), Genomic Selection (GS), and Optimal Contribution Selection
-    (OCS) strategies. Designed for the GRDC barley haplotype stacking project
-    but applicable to any biparental or multiparental breeding programme.
+    alignment visualisations — and (4) breeding-cycle simulation of haplotype
+    stacking under truncation (TS), optimal haplotype (OHS) and genotype
+    building (GBS) selection, with a step API for servers. Designed for the
+    GRDC barley haplotype stacking project but applicable to any biparental or
+    multiparental breeding programme.
+    A usage guide for people and AI coding agents ships with the package
+    (hs_agent_guide()).
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 Depends: R (>= 4.1.0)
-Imports: data.table (>= 1.14.0), dplyr (>= 1.0.0), ggplot2 (>= 3.4.0),
-        tidyr, reshape2, stringr, magrittr, methods, stats, utils, Rcpp
+Imports: data.table (>= 1.14.0), ggplot2 (>= 3.4.0), Rcpp, graphics,
+        grDevices, grid, stats, tools, utils
 LinkingTo: Rcpp
 Suggests: HapSelect, SelectionTools, genomicSimulation, rrBLUP, BGLR,
-        circlize, testthat (>= 3.0.0), knitr, rmarkdown, scico,
-        cowplot, gridExtra, LDheatmap, praise, shiny (>= 1.7.0), zip,
-        vcfR, future, future.apply
-Remotes: wrshf7/HapSelect
+        circlize, testthat (>= 3.0.0), knitr, rmarkdown, cowplot, shiny
+        (>= 1.7.0), zip, vcfR, future, future.apply, withr, pdftools,
+        ragg
+Remotes: wrshf7/HapSelect, vllrs/genomicSimulation
 Config/testthat/edition: 3
 VignetteBuilder: knitr
 URL: https://github.com/CCS-voidBird/haploStack
 BugReports: https://github.com/CCS-voidBird/haploStack/issues
-Config/roxygen2/version: 8.0.0
 RoxygenNote: 7.3.3
 NeedsCompilation: yes
-Packaged: 2026-10-22 07:23:07 UTC; uqcche32
+Packaged: 2026-11-10 09:05:02 UTC; 70651
 Author: Chensong Chen [aut, cre]
 Maintainer: Chensong Chen <chensong.chen@uq.edu.au>

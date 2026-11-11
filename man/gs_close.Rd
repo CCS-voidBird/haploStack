@@ -14,8 +14,11 @@ gs_close(handle)
 }
 \description{
 Frees the handle's live group so a \code{(rep, scheme)} job leaves no groups
-behind (matters for long / parallel runs). Safe to call on \code{NULL} or a
-non-handle (no-op), so it can guard \code{on.exit()} unconditionally.
+behind (matters for long / parallel runs), marks the session closed and
+removes the private scratch directory \code{\link{gs_load_geno_meta}}
+created (a \code{work_dir} you passed is kept). Safe to call on \code{NULL},
+a non-handle or a handle of a session already closed or replaced (no-op),
+so it can guard \code{on.exit()} unconditionally. Idempotent.
 }
 \seealso{
 \code{\link{gs_load_geno_meta}}

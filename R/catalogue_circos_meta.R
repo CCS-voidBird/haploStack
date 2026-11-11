@@ -32,7 +32,10 @@
 # --- journal sizing helpers --------------------------------------------------
 
 # cex that renders `pt` points on the CURRENT device (device pointsize-aware).
-.pt_cex <- function(pt) pt / par("ps")
+# Point size -> cex on the current device. viz/F18 (0.9.0): divide by the
+# device's cex too, so a caller's par(cex = ) does not scale every label twice;
+# under hs_render_figure() (cex = 1) nothing changes.
+.pt_cex <- function(pt) pt / (par("ps") * par("cex"))
 
 # lwd that renders `pt` points (R lwd 1 = 1/96 in = 0.75 pt).
 .lwd_pt <- function(pt) pt / 0.75
@@ -54,12 +57,46 @@
 .hs_diverging <- function() c("#2166AC", "grey92", "#B2182B")
 .hs_sequential <- function() c("grey96", "#08519C")
 
-# Natural chromosome order: numeric where possible, then string.
-.hs_chr_order <- function(x) {
-  u <- unique(as.character(x))
-  n <- suppressWarnings(as.integer(u))
-  u[order(!is.na(n), n, u, na.last = TRUE)]
+# One rect ring's colour ramp and legend labels. The ramp is chosen on the
+# DATA's sign (viz/F06, 0.9.0): mixed signs -> diverging about 0; all >= 0 ->
+# sequential from 0; all <= 0 -> the sequential ramp reversed over the range
+# (0.8.8 collapsed an all-negative ring to invisible grey96). An explicit
+# `limits` on the track (intake 12) replaces the data range, so several rings
+# share one scale and the legend bar runs over the limits.
+.hs_ring_fill <- function(tr) {
+  v <- tr$data$.val
+  pal <- tr$palette
+  if (tr$type != "rect" || !is.null(tr$categories))
+    return(list(fun = NULL, col = pal[1L]))
+  rng <- if (!is.null(tr$limits)) as.numeric(tr$limits) else range(v, na.rm = TRUE)
+  if (!all(is.finite(rng))) rng <- c(0, 1)
+  diverging <- rng[1L] < 0 && rng[2L] > 0
+  if (is.null(pal)) pal <- if (diverging) .hs_diverging() else .hs_sequential()
+  if (length(pal) >= 3L) {
+    if (!is.null(tr$limits)) {
+      mid <- if (diverging) 0 else mean(rng)
+      list(fun = circlize::colorRamp2(c(rng[1L], mid, rng[2L]), pal[c(1L, 2L, 3L)]),
+           lab = c(rng[1L], mid, rng[2L]))
+    } else {
+      a <- max(abs(rng)); if (!is.finite(a) || a == 0) a <- 1
+      list(fun = circlize::colorRamp2(c(-a, 0, a), pal[c(1L, 2L, 3L)]),
+           lab = c(-a, 0, a))
+    }
+  } else if (rng[2L] <= 0 && rng[1L] < 0) {
+    # all-negative: reversed sequential over the range, strongest at the most
+    # negative value
+    list(fun = circlize::colorRamp2(c(rng[1L], rng[2L]), pal[c(2L, 1L)]),
+         lab = c(rng[1L], rng[2L]))
+  } else {
+    lo <- if (!is.null(tr$limits)) rng[1L] else 0
+    hi <- max(rng[2L], lo + 1e-12)
+    list(fun = circlize::colorRamp2(c(lo, hi), pal[c(1L, 2L)]),
+         lab = c(lo, hi))
+  }
 }
+
+# Natural chromosome order: the one package rule since 0.9.0 (row 29 a).
+.hs_chr_order <- function(x) hs_chrom_levels(x)
 
 
 # --- track specs -------------------------------------------------------------
@@ -109,7 +146,13 @@
 #'   optionally followed by the search-window colour (defaults
 #'   \code{"grey20"} and Okabe–Ito sky blue \code{"#56B4E9"}).
 #' @param height_mm Ring height in mm at the declared figure width (defaults
-#'   per type: rect 3.5, line 4.5, points 5.5, needles 5.5, labels 8).
+#'   per type: rect 3.5, line 4.5, points 5.5, needles 5.5, labels 8). Must be
+#'   a single number \code{> 0}.
+#' @param limits \code{"rect"} rings only: two numbers \code{c(low, high)}
+#'   fixing the colour scale instead of the ring's own data range, so several
+#'   rings (or several figures) share one scale; the legend bar runs over
+#'   \code{limits} and values outside it take the end colours. Default
+#'   \code{NULL}: the data range (symmetric about zero for a diverging ramp).
 #' @param label_top_n \code{"labels"} only: at most this many labels, highest
 #'   \code{value_col} first, after angular deconfliction. Default 10.
 #' @param min_gap_rad \code{"labels"} only: minimum angular gap between kept
@@ -130,47 +173,67 @@ circos_track <- function(data,
                          value_col = NULL, name = NULL, palette = NULL,
                          height_mm = NULL, label_top_n = 10L,
                          min_gap_rad = 0.14, window_bp = NULL,
-                         window_name = "search window") {
+                         window_name = "search window", limits = NULL) {
   type <- match.arg(type)
   dt <- as.data.table(data)
   if (!"Chrom" %in% names(dt))
-    stop("circos_track: 'data' needs a Chrom column.")
+    .hs_abort("circos_track: 'data' needs a Chrom column.")
+  # viz/F21 (0.9.0): the ring geometry arguments are validated here, not at
+  # draw time.
+  if (!is.null(height_mm) && (!is.numeric(height_mm) || length(height_mm) != 1L ||
+                              !is.finite(height_mm) || height_mm <= 0))
+    .hs_abort("circos_track: 'height_mm' must be a single number > 0.")
+  if (!is.numeric(min_gap_rad) || length(min_gap_rad) != 1L || !is.finite(min_gap_rad) ||
+      min_gap_rad < 0)
+    .hs_abort("circos_track: 'min_gap_rad' must be a single finite number >= 0.")
+  if (!is.numeric(label_top_n) || length(label_top_n) != 1L || is.na(label_top_n) ||
+      label_top_n < 0 || label_top_n != round(label_top_n))
+    .hs_abort("circos_track: 'label_top_n' must be a single integer >= 0.")
+  # intake 12 (owner 2026-11-08): a shared colour scale for several rings.
+  if (!is.null(limits)) {
+    if (type != "rect")
+      .hs_abort("circos_track: 'limits' applies to 'rect' tracks only.")
+    if (!is.numeric(limits) || length(limits) != 2L || any(!is.finite(limits)) ||
+        limits[1L] >= limits[2L])
+      .hs_abort("circos_track: 'limits' must be two finite numbers, low < high.")
+    limits <- as.numeric(limits)
+  }
   dt[, Chrom := as.character(Chrom)]
   if (!is.null(window_bp)) {
     if (type != "labels")
-      stop("circos_track: 'window_bp' applies to 'labels' tracks only.")
+      .hs_abort("circos_track: 'window_bp' applies to 'labels' tracks only.")
     if (!is.numeric(window_bp) || length(window_bp) != 1L ||
         !is.finite(window_bp) || window_bp < 0)
-      stop("circos_track: 'window_bp' must be a single number >= 0.")
+      .hs_abort("circos_track: 'window_bp' must be a single number >= 0.")
   }
 
   has_int <- all(c("Start", "End") %in% names(dt))
   has_pos <- "Pos" %in% names(dt)
   if (type == "labels") {
     if (!any(c("Start", "End", "Pos") %in% names(dt)))
-      stop("circos_track: a 'labels' track needs Start/End (a region) or ",
+      .hs_abort("circos_track: a 'labels' track needs Start/End (a region) or ",
            "Pos (a single position) columns.")
     dt <- .hs_label_regions(dt, window_bp)
   } else if (type == "rect") {
     if (!has_int && !has_pos)
-      stop("circos_track: a 'rect' track needs Start/End (or Pos) columns.")
+      .hs_abort("circos_track: a 'rect' track needs Start/End (or Pos) columns.")
     if (!has_int) dt[, `:=`(Start = as.numeric(Pos), End = as.numeric(Pos))]
     dt[, `:=`(Start = as.numeric(Start), End = as.numeric(End))]
   } else {
     if (!has_pos) {
       if (!has_int)
-        stop("circos_track: a '", type, "' track needs a Pos column ",
+        .hs_abort("circos_track: a '", type, "' track needs a Pos column ",
              "(or Start/End to take midpoints from).")
       dt[, Pos := (as.numeric(Start) + as.numeric(End)) / 2]
     }
     dt[, Pos := as.numeric(Pos)]
   }
   if (type == "labels" && !"Name" %in% names(dt))
-    stop("circos_track: a 'labels' track needs a Name column.")
+    .hs_abort("circos_track: a 'labels' track needs a Name column.")
   categories <- NULL
   if (!is.null(value_col)) {
     if (!value_col %in% names(dt))
-      stop("circos_track: value_col '", value_col, "' not in 'data'.")
+      .hs_abort("circos_track: value_col '", value_col, "' not in 'data'.")
     v <- dt[[value_col]]
     if (type == "rect" && (is.character(v) || is.factor(v))) {
       ct <- .hs_categories(v, palette)
@@ -181,7 +244,7 @@ circos_track <- function(data,
       dt[, .val := as.numeric(get(value_col))]
     }
   } else if (type %in% c("points", "line", "needles")) {
-    stop("circos_track: '", type, "' tracks need a value_col.")
+    .hs_abort("circos_track: '", type, "' tracks need a value_col.")
   } else {
     dt[, .val := NA_real_]
   }
@@ -196,7 +259,8 @@ circos_track <- function(data,
                  height_mm = as.numeric(height_mm),
                  label_top_n = as.integer(label_top_n),
                  min_gap_rad = as.numeric(min_gap_rad),
-                 window_name = as.character(window_name)),
+                 window_name = as.character(window_name),
+                 limits = limits),
             class = "hs_circos_track")
 }
 
@@ -272,12 +336,12 @@ circos_track <- function(data,
   lev <- if (is.factor(v)) intersect(levels(v), present)
          else if (!is.null(names(palette)))
            c(intersect(names(palette), present),
-             sort(setdiff(present, names(palette))))
-         else sort(present)
+             .hs_sort(setdiff(present, names(palette))))
+         else .hs_sort(present)
   if (!is.null(names(palette))) {
     miss <- setdiff(lev, names(palette))
     if (length(miss) > 0L)
-      stop("circos_track: the named 'palette' has no colour for ",
+      .hs_abort("circos_track: the named 'palette' has no colour for ",
            paste0("'", miss, "'", collapse = ", "), ".")
     pal <- palette[lev]
   } else {
@@ -310,11 +374,11 @@ track_annotation <- function(x, value = "gene_count", name = value,
   bl <- if (is.data.frame(x)) x
         else if (.hs_is_annotation(x)) x$blocks
         else if (is.list(x) && !is.null(x$annotation)) x$annotation$blocks
-        else stop("track_annotation: 'x' must be a blocks-format data.frame, ",
+        else .hs_abort("track_annotation: 'x' must be a blocks-format data.frame, ",
                   "a compute_block_annotation() result, or a GenoMeta ",
                   "carrying $annotation.")
   if (!value %in% names(bl))
-    stop("track_annotation: no '", value, "' column on the blocks table.")
+    .hs_abort("track_annotation: no '", value, "' column on the blocks table.")
   circos_track(bl, type = "rect", value_col = value, name = name,
                palette = palette %||% .hs_sequential(), height_mm = height_mm)
 }
@@ -342,7 +406,7 @@ track_block_effect <- function(analysis, trait, value_source = NULL,
   vs <- .resolve_value_source(analysis, value_source)
   dt <- as.data.table(vs$table)
   if (!trait %in% unique(as.character(dt$Trait)))
-    stop("track_block_effect: trait '", trait, "' not in the analysis (has: ",
+    .hs_abort("track_block_effect: trait '", trait, "' not in the analysis (has: ",
          paste(unique(dt$Trait), collapse = ", "), ").")
   dt <- dt[Trait == trait]
   dt[, .plotval := get(vs$col)]
@@ -379,13 +443,13 @@ track_block_variance <- function(x, value_col = "Block_Var", trait = NULL,
   dt <- as.data.table(x)
   if (!is.null(trait)) {
     if (!"Trait" %in% names(dt))
-      stop("track_block_variance: 'trait' given but 'x' has no Trait column.")
+      .hs_abort("track_block_variance: 'trait' given but 'x' has no Trait column.")
     dt <- dt[as.character(Trait) == trait]
   }
   if ("Start_Pos" %in% names(dt) && !"Start" %in% names(dt))
     setnames(dt, c("Start_Pos", "End_Pos"), c("Start", "End"))
   if (!value_col %in% names(dt))
-    stop("track_block_variance: no '", value_col, "' column.")
+    .hs_abort("track_block_variance: no '", value_col, "' column.")
   circos_track(dt, type = type, value_col = value_col, name = name,
                palette = palette %||%
                  (if (type == "rect") .hs_sequential() else "#009E73"),
@@ -420,22 +484,22 @@ track_marker_stat <- function(x, stat, name = stat, palette = NULL,
   if (is.data.frame(x)) {
     dt <- as.data.table(x)
     if (!all(c("Chrom", "Pos", stat) %in% names(dt)))
-      stop("track_marker_stat: 'x' needs Chrom, Pos and '", stat,
+      .hs_abort("track_marker_stat: 'x' needs Chrom, Pos and '", stat,
            "' columns.")
     dt <- dt[, .(Chrom, Pos, value = as.numeric(get(stat)))]
   } else if (is.list(x) && !is.null(x$map_info)) {
     eff <- .coerce_single_effect_df(x$marker_effects, trait = stat)
     if (is.null(eff))
-      stop("track_marker_stat: the GenoMeta carries no marker effects.")
+      .hs_abort("track_marker_stat: the GenoMeta carries no marker effects.")
     map <- as.data.table(x$map_info)
     dt <- as.data.table(eff)[, .(Marker, value = abs(as.numeric(Effect)))]
     dt <- dt[, .(value = max(value)), by = Marker]
     dt <- merge(dt, map[, .(Marker, Chrom, Pos = as.numeric(Pos))],
                 by = "Marker")[value > 0]
     if (nrow(dt) == 0L)
-      stop("track_marker_stat: every |effect| for '", stat, "' is zero.")
+      .hs_abort("track_marker_stat: every |effect| for '", stat, "' is zero.")
   } else {
-    stop("track_marker_stat: 'x' must be a data.frame or a GenoMeta.")
+    .hs_abort("track_marker_stat: 'x' must be a data.frame or a GenoMeta.")
   }
   circos_track(dt, type = mark, value_col = "value",
                name = name %||% stat, palette = palette %||% "#E69F00",
@@ -475,25 +539,30 @@ track_marker_stat <- function(x, stat, name = stat, palette = NULL,
 #'   to \code{\link{circos_track}} (\code{palette}: the region colour, then
 #'   optionally the window colour).
 #' @return An \code{hs_circos_track}.
+#' @param chr_map Optional named character vector, container chromosome ->
+#'   the table's spelling, passed to the standardizer (0.9.0).
 #' @export
 track_marker_labels <- function(x, meta = NULL, value_col = NULL,
                                 match_bp = .HS_ANNOT_DEFAULT_BP,
                                 label_top_n = 10L, min_gap_rad = 0.14,
                                 name = "loci", palette = NULL,
                                 height_mm = NULL, window_bp = NULL,
-                                window_name = "search window") {
+                                window_name = "search window",
+                                chr_map = NULL) {
   dt <- as.data.table(x)
-  located <- "Chrom" %in% names(dt) &&
-    any(c("Start", "End", "Pos") %in% names(dt))
-  if (!located || !"Name" %in% names(dt)) {
-    std <- as.data.table(standardize_marker_annotations(x, meta = meta,
-                                                        match_bp = match_bp))
-    # one row per input row, in order: carry region, window and rank over
-    carry <- setdiff(intersect(c("Start", "End", "Window_start", "Window_end",
-                                 value_col), names(dt)), names(std))
-    for (cc in carry) std[, (cc) := dt[[cc]]]
-    dt <- std
-  }
+  # The standardizer always runs (D5 §3.6 e): one contract, one validation.
+  std <- as.data.table(standardize_marker_annotations(x, meta = meta,
+                                                      match_bp = match_bp,
+                                                      chr_map = chr_map))
+  # one row per input row, in order: carry region, window and rank over
+  carry <- setdiff(intersect(c("Start", "End", "Window_start", "Window_end",
+                               value_col), names(dt)), names(std))
+  for (cc in carry) std[, (cc) := dt[[cc]]]
+  # a located region table (Chrom + Start/End, no Pos, no Marker) keeps its
+  # span; the midpoint used for matching is not a column
+  if (!any(c("Pos", "Marker") %in% names(dt)) && all(c("Start", "End") %in% names(dt)))
+    std[, Pos := NULL]
+  dt <- std
   keep <- intersect(c("Chrom", "Start", "End", "Pos", "Window_start",
                       "Window_end", "Name", value_col), names(dt))
   circos_track(dt[, keep, with = FALSE], type = "labels",
@@ -749,9 +818,14 @@ track_marker_labels <- function(x, meta = NULL, value_col = NULL,
 #'   parameters.
 #' @param chr_colors Optional named colours per chromosome (default
 #'   Okabe–Ito in natural order).
-#' @param legend Draw the legend (default \code{TRUE}); \code{FALSE} is
-#'   \code{legend_position = "none"}.
-#' @param draw  Render now on the current device (default \code{TRUE}).
+#' @param legend Deprecated since 0.9.0 (warns when supplied):
+#'   \code{FALSE} is \code{legend_position = "none"}.
+#' @param draw  Render now on the current device. Default \code{FALSE} since
+#'   0.9.0: the function returns the figure object, and drawing happens when
+#'   it is printed (a console call auto-prints, as a ggplot does) or rendered
+#'   to a file with \code{\link{hs_render_figure}} /
+#'   \code{\link{save_journal_figure}}. \code{TRUE} draws at once and returns
+#'   the object invisibly, as 0.8.8 did.
 #' @param legend_position Where the legend goes: \code{"center"} (default;
 #'   \code{"centre"} also accepted) inside the hole, skipped with a message
 #'   when the hole is too small for it; \code{"bottomright"},
@@ -773,9 +847,12 @@ track_marker_labels <- function(x, meta = NULL, value_col = NULL,
 #'   message names the \code{height_mm} that fits when the longest drawn
 #'   name would run off the page.
 #'
-#' @return Invisibly, an \code{hs_meta_circos} object: \code{$render(width_mm)}
+#' @return An \code{hs_meta_circos} object, returned visibly (so a bare call at
+#'   the console prints it, which draws it; \code{print()} / \code{plot()}
+#'   methods render on the current device) or invisibly when
+#'   \code{draw = TRUE}. Its fields: \code{$render(width_mm)}
 #'   re-draws the figure at any declared width (what
-#'   \code{\link{save_journal_figure}} calls), \code{$height_mm(width_mm)}
+#'   \code{\link{hs_render_figure}} calls), \code{$height_mm(width_mm)}
 #'   gives the figure height at that width (the width itself unless an
 #'   outside legend needs room), \code{$legend} the legend entry names in
 #'   order, \code{$tracks} the ring names outermost first (an
@@ -789,7 +866,7 @@ track_marker_labels <- function(x, meta = NULL, value_col = NULL,
 plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
                              rel_heights = NULL, width_mm = 89,
                              gap_degree = 2, start_degree = 90,
-                             chr_colors = NULL, legend = TRUE, draw = TRUE,
+                             chr_colors = NULL, legend = TRUE, draw = FALSE,
                              legend_position = c("center", "bottomright",
                                                  "bottomleft", "topright",
                                                  "topleft", "bottom",
@@ -797,20 +874,27 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
                              outer_labels = NULL) {
   if (identical(legend_position, "centre")) legend_position <- "center"
   legend_position <- match.arg(legend_position)
+  if (!missing(legend)) {                     # deprecated since 0.9.0 (D5 3.2)
+    .hs_deprecated("legend", "legend_position", "0.9.0", what = "argument",
+                   fn = "plot_meta_circos")
+    if (isFALSE(legend)) legend_position <- "none"
+  }
   if (!requireNamespace("circlize", quietly = TRUE))
-    stop("plot_meta_circos: the 'circlize' package is required. ",
+    .hs_abort(class = "hs_error_dependency",
+         data = list(hint = "install.packages(\"circlize\")"),
+         "plot_meta_circos: the 'circlize' package is required. ",
          "Install it with install.packages('circlize').")
   if (inherits(tracks, "hs_circos_track")) tracks <- list(tracks)
   if (!is.list(tracks) || length(tracks) == 0L ||
       !all(vapply(tracks, inherits, logical(1L), "hs_circos_track")))
-    stop("plot_meta_circos: 'tracks' must be circos_track() specs ",
+    .hs_abort("plot_meta_circos: 'tracks' must be circos_track() specs ",
          "(see the track_*() constructors).")
   if (!is.null(rel_heights) && length(rel_heights) != length(tracks))
-    stop("plot_meta_circos: 'rel_heights' must have one value per track.")
+    .hs_abort("plot_meta_circos: 'rel_heights' must have one value per track.")
   if (!is.null(outer_labels) &&
       !(inherits(outer_labels, "hs_circos_track") &&
         identical(outer_labels$type, "labels")))
-    stop("plot_meta_circos: 'outer_labels' must be a \"labels\" ",
+    .hs_abort("plot_meta_circos: 'outer_labels' must be a \"labels\" ",
          "circos_track() (e.g. from track_marker_labels()).")
   outer_mm <- if (is.null(outer_labels)) 0 else outer_labels$height_mm
   # The gap between the bar and the outer ring. 0.8.7 cleared every tick
@@ -838,7 +922,7 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
   }
   sizes <- if (!is.null(chr_sizes)) {
     if (is.null(names(chr_sizes)))
-      stop("plot_meta_circos: 'chr_sizes' must be named by chromosome.")
+      .hs_abort("plot_meta_circos: 'chr_sizes' must be named by chromosome.")
     chr_sizes
   } else if (!is.null(meta) && !is.null(meta$map_info)) {
     mp <- as.data.table(meta$map_info)
@@ -884,8 +968,8 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
     margin <- (1.06 * 1.08 - 1) * width_mm / (2 * 1.06 * 1.08)
     have   <- (1 - .hs_lab_geom$text_y_out) * outer_mm / 1.08 + 0.8 * margin
     if (need > have)
-      message("plot_meta_circos: the longest outer label (", round(need, 1),
-              " mm) runs off the page at ", width_mm, " mm — height_mm = ",
+      .hs_inform("plot_meta_circos: the longest outer label (", round(need, 1),
+              " mm) runs off the page at ", width_mm, " mm \u2014 height_mm = ",
               ceiling((need - 0.8 * margin) * 1.08 /
                         (1 - .hs_lab_geom$text_y_out)), " fits.")
   }
@@ -899,27 +983,10 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
   }
 
   # --- one ring's palette ----------------------------------------------------
-  ring_fill <- function(tr) {
-    v <- tr$data$.val
-    pal <- tr$palette
-    if (tr$type != "rect" || !is.null(tr$categories))
-      return(list(fun = NULL, col = pal[1L]))
-    rng <- range(v, na.rm = TRUE)
-    if (is.null(pal)) pal <- if (rng[1L] < 0 && rng[2L] > 0) .hs_diverging()
-                             else .hs_sequential()
-    if (length(pal) >= 3L) {
-      a <- max(abs(rng)); if (!is.finite(a) || a == 0) a <- 1
-      list(fun = circlize::colorRamp2(c(-a, 0, a), pal[c(1L, 2L, 3L)]),
-           lab = c(-a, 0, a))
-    } else {
-      hi <- max(rng[2L], 1e-12)
-      list(fun = circlize::colorRamp2(c(0, hi), pal[c(1L, 2L)]),
-           lab = c(0, hi))
-    }
-  }
+  ring_fill <- function(tr) .hs_ring_fill(tr)     # see .hs_ring_fill() (viz/F06, limits)
 
   # --- the legend: one entry per ring, measured in mm (width-independent) ---
-  use_legend <- isTRUE(legend) && legend_position != "none"
+  use_legend <- legend_position != "none"
   legend_of <- function(tr, kept) {
     if (!is.null(tr$categories))                  # one chip per category
       return(lapply(tr$categories, function(l)
@@ -1012,10 +1079,13 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
 
   render <- function(width_mm_now = width_mm) {
     small <- heights_mm[heights_mm < 2.5]
+    # I11 (0.9.0): the double-column advice only when the figure is narrower.
+    wider <- if (width_mm_now < 183) "double column (183 mm) or fewer rings"
+             else "fewer rings"
     if (length(small) > 0L)
-      message("plot_meta_circos: ", length(small), " ring(s) under 2.5 mm at ",
-              width_mm_now, " mm — consider double column (183 mm) or fewer ",
-              "rings for journal legibility.")
+      .hs_inform("plot_meta_circos: ", length(small), " ring(s) under 2.5 mm at ",
+              width_mm_now, " mm \u2014 consider ", wider,
+              " for journal legibility.")
 
     # Radial budget: ring heights are physical mm, so the centre hole shrinks
     # as rings stack. A cramped hole makes the innermost ring (and a centre
@@ -1026,10 +1096,10 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
       if (is.null(outer_labels)) 0 else outer_mm + gap_mm + 0.8 * 2
     hole_mm   <- radius_mm - used_mm
     if (hole_mm < 0.35 * radius_mm)
-      message("plot_meta_circos: ", length(tracks), " rings (",
+      .hs_inform("plot_meta_circos: ", length(tracks), " rings (",
               round(sum(heights_mm), 1), " mm) leave a ",
               max(0, round(hole_mm)), " mm centre at ", width_mm_now,
-              " mm width — use double column (183 mm) or fewer rings.")
+              " mm width \u2014 use ", wider, ".")
     lay <- if (use_legend) layout_at(width_mm_now)
     do_legend <- use_legend
     if (use_legend && !outside) {
@@ -1046,8 +1116,8 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
                         max(.hs_text_mm(last$data$Name), 0) * k0)
       do_legend <- (sqrt(lay$w^2 + lay$h^2) / 2 + .hs_lg$air) * k0 <= hole_u
       if (!do_legend)
-        message("plot_meta_circos: the centre is too small for the legend ",
-                "at ", width_mm_now, " mm — legend skipped; ",
+        .hs_inform("plot_meta_circos: the centre is too small for the legend ",
+                "at ", width_mm_now, " mm \u2014 legend skipped; ",
                 "legend_position = \"bottomright\" (or another outside ",
                 "position) draws it outside the circle.")
     }
@@ -1217,9 +1287,25 @@ plot_meta_circos <- function(tracks, meta = NULL, chr_sizes = NULL,
                                         "name"),
                         chr_levels = chr_levels),
                    class = "hs_meta_circos")
-  if (isTRUE(draw)) render(width_mm)
-  invisible(out)
+  if (isTRUE(draw)) {
+    render(width_mm)
+    return(invisible(out))
+  }
+  out
 }
+
+#' @export
+print.hs_meta_circos <- function(x, ...) {
+  op <- graphics::par(mar = c(0, 0, 0, 0))
+  on.exit(graphics::par(op), add = TRUE)
+  if (requireNamespace("circlize", quietly = TRUE))
+    on.exit(circlize::circos.clear(), add = TRUE, after = FALSE)
+  x$render(x$width_mm)
+  invisible(x)
+}
+
+#' @export
+plot.hs_meta_circos <- function(x, y, ...) print(x, ...)
 
 
 # --- the journal standard ----------------------------------------------------
@@ -1307,50 +1393,31 @@ save_journal_figure <- function(plot, file,
                                 width = c("single", "onehalf", "double"),
                                 height = NULL, dpi = 600) {
   if (inherits(plot, "recordedplot"))
-    stop("save_journal_figure: refusing to rescale a recorded plot — text ",
+    .hs_abort("save_journal_figure: refusing to rescale a recorded plot \u2014 text ",
          "sizes would drift from their pt spec. Re-render at the target ",
          "width instead (plot_meta_circos() objects do this automatically).")
   w_mm <- if (is.numeric(width)) width
           else c(single = 89, onehalf = 120, double = 183)[[match.arg(width)]]
   is_circos <- inherits(plot, "hs_meta_circos")
-  h_mm <- height %||% if (!is_circos) w_mm * 0.75
-                      else if (is.function(plot$height_mm)) plot$height_mm(w_mm)
-                      else w_mm                     # an object from <= 0.8.1
+  h_mm <- height %||% if (is_circos) plot$height_mm(w_mm) else w_mm * 0.75
 
   if (inherits(plot, "ggplot")) {
     tt <- plot$labels[c("title", "subtitle")]
     if (any(vapply(tt, function(x) !is.null(x) && nzchar(paste(x)[1L]),
                    logical(1L))))
-      warning("save_journal_figure: the plot carries a title/subtitle — a ",
+      .hs_warn("save_journal_figure: the plot carries a title/subtitle \u2014 a ",
               "journal figure's caption does that job. theme_hs_journal() ",
               "removes them.")
   }
 
   ext <- tolower(tools::file_ext(file))
-  dir.create(dirname(file), recursive = TRUE, showWarnings = FALSE)
-  in_w <- w_mm / 25.4; in_h <- h_mm / 25.4
-  if (ext == "pdf") {
-    grDevices::cairo_pdf(file, width = in_w, height = in_h, pointsize = 12)
-  } else if (ext == "png") {
-    if (requireNamespace("ragg", quietly = TRUE))
-      ragg::agg_png(file, width = in_w, height = in_h, units = "in",
-                    res = dpi)
-    else
-      grDevices::png(file, width = in_w, height = in_h, units = "in",
-                     res = dpi, type = "cairo")
-  } else {
-    stop("save_journal_figure: unsupported extension '.", ext,
+  if (!ext %in% c("pdf", "png"))
+    .hs_abort("save_journal_figure: unsupported extension '.", ext,
          "' (use .pdf or .png).")
-  }
-  on.exit(grDevices::dev.off(), add = TRUE)
 
-  if (is_circos) {
-    graphics::par(mar = c(0, 0, 0, 0))
-    plot$render(w_mm)
-  } else if (inherits(plot, "ggplot")) {
-    print(plot)
-  } else {
-    plot(plot)
-  }
+  # 0.9.0: the journal wrapper sets the page; hs_render_figure() owns the
+  # device (ragg / cairo fallbacks, previous device and par restored).
+  hs_render_figure(plot, file, width_mm = w_mm, height_mm = h_mm, dpi = dpi,
+                   create_dir = TRUE, overwrite = TRUE)
   invisible(file)
 }

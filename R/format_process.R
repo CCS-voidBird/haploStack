@@ -59,6 +59,12 @@
 #'   \item{\code{encode}}{Resolved encoding.}
 #' }
 #'
+#' @section Deprecated:
+#' Since 0.9.0 (warns on every call; removed in 0.10 with
+#' \code{\link{transform_genotype}}). Build a \code{GenoMeta} with
+#' \code{\link{build_geno_meta}} or a reader instead. See
+#' \link{haploStack-deprecated}.
+#'
 #' @seealso \code{\link{transform_genotype}}, \code{\link{detect_genotype_encoding}}
 #'
 #' @examples
@@ -79,6 +85,8 @@ process_genotype <- function(genotype,
                               ploidy      = 2L,
                               map_preset  = NULL,
                               pos_unit    = "bp") {
+  # Deprecated since 0.9.0 (row 27 a): the pre-GenoMeta layer. Removed in 0.10.
+  .hs_deprecated("process_genotype()", "build_geno_meta() or a read_*() reader", "0.9.0")
 
   params      <- .resolve_preset(preset, orientation, split_char, encode)
   orientation <- params$orientation
@@ -144,6 +152,7 @@ process_genotype <- function(genotype,
 #' @param pos_unit    Input position unit: \code{"bp"} or \code{"mbp"}.
 #' @return Standardised data.frame with columns Chr, Marker, Pos, or NULL.
 #' @keywords internal
+#' @noRd
 .process_map <- function(map_info,
                           marker_names = NULL,
                           map_preset   = NULL,
@@ -174,7 +183,7 @@ process_genotype <- function(genotype,
 
   for (col in c("Chrom", "Marker", "Pos")) {
     if (!col %in% colnames(df)) {
-      warning("Map column '", col, "' not found; setting to NA.")
+      .hs_warn("Map column '", col, "' not found; setting to NA.")
       df[[col]] <- NA
     }
   }
@@ -186,7 +195,7 @@ process_genotype <- function(genotype,
   if (pos_unit == "bp" && !all(is.na(df$Pos))) {
     pos_max <- max(df$Pos, na.rm = TRUE)
     if (is.finite(pos_max) && pos_max < 10000) {
-      warning(
+      .hs_warn(
         "Maximum marker position is ", pos_max, " (pos_unit = \"bp\"). ",
         "Values this small look like Mbp scale. ",
         "If positions are in megabase-pairs, set pos_unit = \"mbp\"."
@@ -208,25 +217,27 @@ process_genotype <- function(genotype,
 #' @param to_unit   \code{"bp"} or \code{"mbp"}.
 #' @return Numeric vector.
 #' @keywords internal
+#' @noRd
 .convert_pos_unit <- function(pos, from_unit = "bp", to_unit = "bp") {
   if (identical(from_unit, to_unit)) return(pos)
   pos <- suppressWarnings(as.numeric(pos))
   if (from_unit == "mbp" && to_unit == "bp")  return(pos * 1e6)
   if (from_unit == "bp"  && to_unit == "mbp") return(pos / 1e6)
-  stop("Unsupported unit conversion: '", from_unit, "' -> '", to_unit, "'")
+  .hs_abort("Unsupported unit conversion: '", from_unit, "' -> '", to_unit, "'")
 }
 
 
 #' Warn on marker-set mismatches between genotype array and map
 #' @keywords internal
+#' @noRd
 .validate_geno_map <- function(geno_array, map_df) {
   geno_markers <- dimnames(geno_array)[[2L]]
   map_markers  <- map_df$Marker
   miss_map  <- setdiff(geno_markers, map_markers)
   miss_geno <- setdiff(map_markers, geno_markers)
   if (length(miss_map)  > 0L)
-    warning(length(miss_map), " genotype marker(s) absent from map.")
+    .hs_warn(length(miss_map), " genotype marker(s) absent from map.")
   if (length(miss_geno) > 0L)
-    warning(length(miss_geno), " map marker(s) absent from genotype.")
+    .hs_warn(length(miss_geno), " map marker(s) absent from genotype.")
   invisible(NULL)
 }

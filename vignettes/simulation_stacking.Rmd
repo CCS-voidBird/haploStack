@@ -80,14 +80,21 @@ print(design_seq)
 
 ---
 
-## 3  Greedy Selection  [Node: `greedy_selection`]
+## 3  OHS, greedy engine  [Node: `ohs_selection`]
+
+`greedy_selection()` and `genetic_algorithm_selection()` (the coverage
+selectors taught here up to 0.8.8) are deprecated since 0.9.0: the driver runs
+the same objective as the `OHS` scheme, whose selector is exported as
+`ohs_selection()` with a greedy and a GA engine. The table it takes is the
+Block × Sample local-GEBV table; a haplotype-level table (`<Sample>.1`,
+`<Sample>.2` columns from `compute_profile_localgebv()`) is also accepted.
 
 ```{r greedy}
-## ── Node: greedy_selection ─────────────────────────────────────────────────────
+## ── Node: ohs_selection (Greedy) ──────────────────────────────────────────────
 ## Select 6 parents from 15 candidates by block coverage
 
-selected_greedy <- greedy_selection(gebv_mat, n_parents = 6L, min_effect = 0.1)
-cat("Greedy selected parents:", selected_greedy, "\n")
+selected_greedy <- ohs_selection(gebv_mat, n_parents = 6L, method = "Greedy")
+cat("OHS (greedy) selected parents:", selected_greedy, "\n")
 
 ## Coverage statistics
 sample_cols <- setdiff(names(gebv_mat), "Block")
@@ -109,19 +116,20 @@ cat("Proportion of blocks covered by selection:", round(mean(covered), 3), "\n")
 
 ---
 
-## 4  Genetic Algorithm Selection  [Node: `genetic_algorithm_selection`]
+## 4  OHS, GA engine  [Node: `ohs_selection`]
 
 ```{r ga-selection}
-## ── Node: genetic_algorithm_selection ──────────────────────────────────────────
+## ── Node: ohs_selection (GA_pairwise) ─────────────────────────────────────────
 
-selected_ga <- genetic_algorithm_selection(
+selected_ga <- ohs_selection(
   gebv_mat,
   n_parents     = 6L,
+  method        = "GA_pairwise",
   n_generations = 100L,
   seed          = 42L,
   verbose       = FALSE
 )
-cat("GA selected parents:", selected_ga, "\n")
+cat("OHS (GA) selected parents:", selected_ga, "\n")
 
 ## Compare coverage: greedy vs GA
 covered_ga <- apply(
@@ -135,10 +143,10 @@ cat("Greedy block coverage:", round(mean(covered), 3), "\n")
 ### 4.1 Reproducibility check
 
 ```{r ga-repro}
-ga_r1 <- genetic_algorithm_selection(gebv_mat, n_parents = 4L,
-                                      n_generations = 50L, seed = 7L)
-ga_r2 <- genetic_algorithm_selection(gebv_mat, n_parents = 4L,
-                                      n_generations = 50L, seed = 7L)
+ga_r1 <- ohs_selection(gebv_mat, n_parents = 4L, method = "GA_pairwise",
+                       n_generations = 50L, seed = 7L)
+ga_r2 <- ohs_selection(gebv_mat, n_parents = 4L, method = "GA_pairwise",
+                       n_generations = 50L, seed = 7L)
 cat("Same seed → identical result:", identical(ga_r1, ga_r2), "\n")
 ```
 

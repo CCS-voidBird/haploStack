@@ -2,14 +2,28 @@
 # zzz.R — package load hooks + data.table hardening
 # =============================================================================
 
+# The second line is how a coding agent meeting the package in a clean
+# environment finds the usage guide shipped in inst/skills (R/agent_guide.R).
 .onAttach <- function(libname, pkgname) {
   version <- utils::packageDescription(pkgname, fields = "Version")
   packageStartupMessage(pkgname, " ", version,
-                        "  —  haplotype block analysis & stacking simulation")
+                        "  \u2014  haplotype block analysis & stacking simulation\n",
+                        "Usage guide (people and AI agents): hs_agent_guide()")
 }
 
 # ---------------------------------------------------------------------------
 # Package options
+#
+# Six settings, one rule (0.9.0, design framework F1): every exported function
+# whose result depends on a setting takes it as an argument (missing_chars=,
+# sample_order=, fill_na=, strict_missing=, st_formats=; use_rcpp stays a
+# process option),
+# and the option is only the default when the argument is NULL. They are
+# resolved once, at the entry point, through .hs_setting() (R/state.R) — the
+# registry .HS_SETTINGS there lists option name, default and validator — and
+# passed down as plain arguments. No other file reads getOption("haploStack.")
+# (test-090-hygiene.R). A value set with options() by hand is validated on
+# read: a wrong one is ignored where 0.8.8 ignored it, never obeyed silently.
 #
 # haploStack.use_rcpp — global switch for ALL compiled kernels (src/*.cpp):
 # the local-GEBV kernel (src/local_gebv.cpp) and the marker allele-count / dosage
@@ -44,15 +58,28 @@
 #
 # haploStack.missing_chars — extra missing-allele characters, registered per
 # source format for the session (list(nucleotide = "#", ...)). Read via
-# .extra_missing_chars() inside .missing_tokens(), so one registration reaches
-# every consumer at once. Deliberately UNSET by default and deliberately not
-# persisted: it is a statement about a file being read, not about the package,
-# and a character that means "absent" in one vocabulary can be a genotype in
-# another. Set it with use_missing_chars(), not options(): the setter validates
-# (single character, never a real allele of that mode), so a bad registration
-# fails at the call the user can see rather than inside the next read. A
-# container normalised while one was active records the vocabulary in
-# metadata$missing_tokens.
+# .extra_missing_chars() ONLY where a container is built or repaired (the
+# readers, build_geno_meta(), new_geno_meta(), repair_geno_meta(), each of which
+# also takes `missing_chars=`); the container then records the vocabulary it
+# was normalised against in metadata$missing_tokens, and that stamp is what
+# every consumer goes by (.meta_extra_missing()). Deliberately UNSET by default
+# and deliberately not persisted: it is a statement about a file being read,
+# not about the package, and a character that means "absent" in one vocabulary
+# can be a genotype in another. Set it with use_missing_chars(), not options():
+# the setter validates (single character, never a real allele of that mode), so
+# a bad registration fails at the call the user can see rather than inside the
+# next read.
+#
+# haploStack.strict_missing — FALSE by default. TRUE turns the "container still
+# carries a missing token" warning of is_geno_meta() / load_geno_meta() into an
+# error (.notify_missing_tokens(), R/geno_meta_missing.R); both functions take
+# `strict_missing=` per call. Never set by the package.
+#
+# haploStack.st_formats — FALSE by default. SelectionTools is being retired;
+# everything that reads or writes one of its own formats (st_convert(),
+# st_ld_blocks(), st_ld_blocks_files(), R/st_formats.R) refuses to run until
+# this is TRUE — use_st_formats(TRUE) for the session, or `st_formats = TRUE`
+# on the call. Never set by the package.
 # ---------------------------------------------------------------------------
 .onLoad <- function(libname, pkgname) {
   if (is.null(getOption("haploStack.use_rcpp")))
@@ -94,14 +121,15 @@ utils::globalVariables(c(
   "GenoEffect", "GenomicPos", "NewID", "OldID",
   "HapEffect", "HapN", "Haplotype", "Haplotype_idx", "IBD", "Label", "MAF",
   "Marker", "MarkerTotal", "Method", "P1_Allele", "P2_Allele", "Parent",
-  "Parent1", "Parent2", "ParentHap", "Pos", "Pos_", "Progeny", "ProgenyHap",
+  "Parent1", "Parent2", "ParentHap", "Pos", "Pos_", "Pos2", "Progeny",
+  "ProgenyHap",
   "Sample", "SampleHap", "SelFreq", "Similarity", "Start", "Subtype", "TP",
   "TargetFreq",
   "Trait", "Value", "accuracy", "allele", "block", "block_id", "candidate",
   "chr_max", "chromosome", "code", "comparable", "contrib", "f1", "j",
   "marker", "marker_same", "mcc",
   "mid", "n_offspring", "precision", "recall", "sample", "score_val",
-  "signature", "sim",
+  "signature", "sim", "srow", "mrow",
   "specificity", "tkey", "x_center", "x_pos", "xmin", "y_label",
   # signal-marker selection (catalogue_similarity.R / catalogue_viz.R)
   "N_Signal", "Signal_Marker", "Signal_Score", "block_highlighted",

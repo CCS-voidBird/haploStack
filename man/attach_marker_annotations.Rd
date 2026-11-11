@@ -8,7 +8,8 @@ attach_marker_annotations(
   meta,
   x,
   match_bp = .HS_ANNOT_DEFAULT_BP,
-  source = NULL
+  source = NULL,
+  chr_map = NULL
 )
 }
 \arguments{
@@ -21,9 +22,15 @@ already-standardized table.}
 
 \item{source}{Optional free-text provenance note (e.g. the file the df
 came from).}
+
+\item{chr_map}{Passed to the standardizer: container chromosome -> the
+table's spelling.}
 }
 \value{
-The \code{GenoMeta} with \code{$annotation$custom} set.
+The \code{GenoMeta} with \code{$annotation$custom} set. The
+provenance under \code{metadata$annotation$custom} records the source,
+\code{match_bp}, \code{chr_map}, the counts, the unplaced names and an
+ISO-8601 \code{created} stamp.
 }
 \description{
 Normalises \code{x} through \code{\link{standardize_marker_annotations}}

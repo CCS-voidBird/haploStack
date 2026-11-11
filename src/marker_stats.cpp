@@ -69,6 +69,7 @@ IntegerMatrix marker_allele_counts_cpp(IntegerVector codes,
   for (int k = 0; k < ploidy; ++k) {
     const R_xlen_t base_k = (R_xlen_t)n_samples * (R_xlen_t)n_markers * k;
     for (int j = 0; j < n_markers; ++j) {
+      if ((j & 255) == 0) Rcpp::checkUserInterrupt();   // 0.9.0 D1-5
       const R_xlen_t base_jk = base_k + (R_xlen_t)n_samples * j;
       for (int i = 0; i < n_samples; ++i) {
         const int code = codes[base_jk + i];
@@ -117,6 +118,7 @@ IntegerMatrix dosage_from_codes_cpp(IntegerVector codes,
   IntegerMatrix out(n_samples, n_markers);
 
   for (int j = 0; j < n_markers; ++j) {
+    if ((j & 255) == 0) Rcpp::checkUserInterrupt();   // 0.9.0 D1-5
     const int tj    = target_code[j];
     const bool tj_na = IntegerVector::is_na(tj);
     if (!tj_na && tj < 1)

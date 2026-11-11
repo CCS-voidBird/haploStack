@@ -50,9 +50,9 @@ several, \code{trait} (or an explicit \code{effect_df}) is required.}
 \code{"haplotype"} keeps them separate with column names
 \code{"<Sample>.<haplotype_idx>"}. See \emph{What a haplotype slot is}.}
 
-\item{center}{Centring mode applied to the allele effects:
-�\code{"none"}, �\code{"locus_mean"} or �\code{"allele_freq"}. See
-�\code{\link{compute_profile_localgebv}} for what each preserves.}
+\item{center}{Centring mode applied to the allele effects before they
+are summed: \code{"none"} (default), \code{"locus_mean"} or
+\code{"allele_freq"}. See \emph{Centring}.}
 
 \item{center_by_freq}{\strong{Deprecated} logical, kept for one release:
 \code{TRUE} maps to \code{center = "allele_freq"} and \code{FALSE} to
@@ -106,12 +106,12 @@ frequency, and \code{mean_i = sum_a p_a * e_a} for the locus mean of marker
 
 \tabular{llll}{
 \strong{mode} \tab \strong{contribution} \tab \strong{allele contrast} \tab \strong{block variance} \cr
-\co\code{"none"} \tab \code{e_a} \tab \code{e_A - e_B} \tab reference \cr
-\co\code{"locus_mean"} \tab \code{e_a - mean_i} \tab \strong{preserved} \tab \strong{unchanged} \cr
-\co\code{"allele_freq"} \tab \code{e_a * (1 - p_a)} \tab becomes \code{q*e_A - p*e_B} \tab changed
+\code{"none"} \tab \code{e_a} \tab \code{e_A - e_B} \tab reference \cr
+\code{"locus_mean"} \tab \code{e_a - mean_i} \tab \strong{preserved} \tab \strong{unchanged} \cr
+\code{"allele_freq"} \tab \code{e_a * (1 - p_a)} \tab becomes \code{q*e_A - p*e_B} \tab changed
 }
 
-\co\code{"locus_mean"} subtracts \strong{one} value per marker from every allele
+\code{"locus_mean"} subtracts \strong{one} value per marker from every allele
 at it, so it is a pure location shift: the A-vs-B contrast survives and every
 block variance is identical to the uncentred one. It is also invariant to
 adding a constant to both alleles' effects at a marker — the property 0.5.3
@@ -120,14 +120,14 @@ wanted from centring — and it reproduces HapSelect's
 \code{d*e_A + (ploidy - d)*e_B - ploidy*mean_i} is exactly
 \code{(d - ploidy*p_A) * (e_A - e_B)}.
 
-\co\code{"allele_freq"} centres each allele by \strong{its own} frequency, so
+\code{"allele_freq"} centres each allele by \strong{its own} frequency, so
 the two alleles of a marker are weighted differently. That is a reweighting
 rather than a shift: block variances change (median factor ~3 on the barley
 panel) and rankings can move with them. It was the catalogue default up to
 0.5.5 and is what reproduces those numbers.
 
-Use \co\code{"locus_mean"} for selection and for any cross-package comparison;
-\co\code{"none"} is the default because it is the raw quantity and because it is
+Use \code{"locus_mean"} for selection and for any cross-package comparison;
+\code{"none"} is the default because it is the raw quantity and because it is
 what both entry points to this engine now agree on.
 }
 

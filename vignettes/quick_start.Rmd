@@ -27,7 +27,7 @@ pipeline:
 │ Stage 1 │ Genotype format standardisation               │
 │ Stage 2 │ LD-based haplotype block definition           │
 │ Stage 3 │ Haplotype catalogue (local GEBV + plots)      │
-│ Stage 4 │ Stacking simulation (GA / GS / OCS)           │
+│ Stage 4 │ Stacking simulation (TS / OHS / GBS)          │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -48,11 +48,11 @@ devtools::install("Haplotype_workflow_R")
 ```
 
 **Required packages** (installed automatically):
-`data.table`, `dplyr`, `ggplot2`, `tidyr`, `reshape2`, `stringr`
+`data.table`, `ggplot2`, `Rcpp`
 
 **Optional packages** (for full functionality):
 `SelectionTools` (block definition), `genomicSimulation` (realistic crossing),
-`Rcpp` (C++ speed-ups), `cowplot` (combined plots)
+`cowplot` (combined plots)
 
 ---
 
@@ -68,10 +68,10 @@ set.seed(42)
 
 # Generate a small simulated genotype dataset
 geno_mat  <- sim_geno_matrix(n_samples = 12L, n_markers = 24L,
-                              encoding = "selectiontools")
+                              encoding = "nucleotide")
 map_df    <- sim_map_data(rownames(geno_mat), n_chrom = 3L)
 block_map <- sim_block_map(map_df, block_size = 4L)
-effect_df <- sim_effect_df(rownames(geno_mat), alleles = c("1","4"))
+effect_df <- sim_effect_df(rownames(geno_mat), alleles = c("A","T"))
 
 cat("Genotype matrix:", dim(geno_mat), "(markers × samples)\n")
 cat("Blocks defined:", length(unique(block_map$Block)), "\n")
@@ -133,7 +133,7 @@ gebv_matrix <- compute_profile_localgebv(
   geno_meta      = meta,
   effect_df      = effect_df,     # or omit: defaults to meta$marker_effects
   level          = "genotype",    # sum both haplotypes per sample
-  center_by_freq = TRUE           # population-mean centering
+  center = "allele_freq"           # population-mean centering
 )
 
 cat("GEBV matrix:", dim(gebv_matrix), "(blocks × samples + Block col)\n")
@@ -176,34 +176,38 @@ head(res$gebv)                  # Sample, GEBV_Yield
 compute_profile_localgebv(res$geno_meta)[1:4, 1:6, with = FALSE]
 ```
 
-The genotype must use a diploid allele encoding (`"selectiontools"` or
-`"nucleotide"`); recode with `recode_geno_meta()` if needed. `rrBLUP` (for
+The genotype must use the diploid allele encoding (`"nucleotide"`; a dosage
+container has no strand resolution). `rrBLUP` (for
 `"rrblup"`/`"gblup"`) and `BGLR` (for `"bayesc"`) are optional — install the one
 you use.
 
 ### Step 5 — Select parents for stacking
 
-Three low-level selectors are shown here (the driver in Step 7 wraps them as
-the schemes `TS`, `OHS`, `GBS` — and `OCS`, which currently has known issues
-and is not recommended; see *Example 4* and `vignettes/selection_grid.md`):
+The driver in Step 7 selects parents with one of the schemes `TS`, `OHS`,
+`GBS` (and `OCS`, which has known issues and is not recommended; see
+*Example 4* and `vignettes/selection_grid.md`). The scheme selectors are also
+exported, so a single selection can be run on the local-GEBV table. Two are
+shown here; `greedy_selection()` and `genetic_algorithm_selection()`, the
+pre-0.9.0 coverage selectors, are deprecated and map onto `OHS`:
 
 ```{r selection}
-# Greedy: maximise block coverage
-sel_greedy <- greedy_selection(gebv_matrix, n_parents = 6L)
-cat("Greedy selected:", sel_greedy, "\n")
+# OHS, greedy engine: maximise haplotype-block coverage
+sel_greedy <- ohs_selection(gebv_matrix, n_parents = 6L, method = "Greedy")
+cat("OHS (greedy) selected:", sel_greedy, "\n")
 
-# Genetic Algorithm: optimised coverage across generations
-sel_ga <- genetic_algorithm_selection(gebv_matrix, n_parents = 6L,
-                                       n_generations = 50L, verbose = FALSE)
-cat("GA selected:", sel_ga, "\n")
+# OHS, GA engine: optimised pairwise coverage
+sel_ga <- ohs_selection(gebv_matrix, n_parents = 6L, method = "GA_pairwise",
+                        n_generations = 50L, verbose = FALSE)
+cat("OHS (GA) selected:", sel_ga, "\n")
 
-# OCS: GEBV-ranked (use OCS with kinship matrix for full functionality)
+# Truncation on the total GEBV (the TS scheme; OCS without a kinship matrix
+# is the same ranking)
 gebv_totals <- setNames(
   colSums(gebv_matrix[, setdiff(names(gebv_matrix),"Block"), with=FALSE]),
   setdiff(names(gebv_matrix),"Block")
 )
-sel_ocs <- ocs_selection(gebv_totals, n_parents = 6L)
-cat("OCS selected:", sel_ocs, "\n")
+sel_ts <- names(sort(gebv_totals, decreasing = TRUE))[1:6]
+cat("TS selected:", sel_ts, "\n")
 ```
 
 ### Step 6 — Design crosses
@@ -221,30 +225,18 @@ print(design)
 ### Step 7 — Run stacking simulation
 
 ```{r simulation}
-# Build a minimal catalogue_results list (normally from run_haplotype_catalogue)
-catalogue_results <- list(
-  SimTrait = list(
-    gebv_matrix  = gebv_matrix,
-    gebv_summary = data.table(
-      Sample = setdiff(names(gebv_matrix), "Block"),
-      GEBV   = gebv_totals[setdiff(names(gebv_matrix), "Block")]
-    ),
-    block_counts = data.table(),  # placeholder
-    geno_meta    = meta
-  )
-)
-
+# The driver takes the GenoMeta and the effect table directly (0.9.0; the
+# catalogue_results / trait_name / select_method inputs are deprecated).
 sim_results <- run_stacking_simulation(
-  catalogue_results = catalogue_results,
-  trait_name        = "SimTrait",
-  effect_df         = effect_df,
-  replications      = 3L,
-  select_cycles     = 5L,
-  top_founders      = 4L,
-  num_offspring     = 3L,
-  select_method     = "GA",
-  output_dir        = tempdir(),
-  verbose           = FALSE
+  geno_meta     = meta,
+  effect_df     = effect_df,
+  replications  = 3L,
+  select_cycles = 5L,
+  top_founders  = 4L,
+  num_offspring = 3L,
+  scheme        = "OHS",
+  output_dir    = tempdir(),
+  verbose       = FALSE
 )
 
 cat("Simulation complete.\n")
@@ -304,7 +296,8 @@ of matching markers — the basis for family-wise block alignment.
 Orientation : rows = markers, cols = samples
 Rownames    : marker IDs
 Colnames    : sample IDs
-Cell values : "1/4" (SelectionTools) | "A/T" (nucleotide) | 0/1/2 (dosage)
+Cell values : "A/T" (nucleotide) | 0/1/2 (dosage); SelectionTools' "1/4" codes
+              are translated on the read (st_convert(), the "ST" preset)
 ```
 
 ### Map data frame
@@ -349,7 +342,7 @@ v$alleles      # data.table: Sample, Haplotype_idx, [marker cols]
 v$marker_meta  # data.table: marker, chromosome, position, block_id
 v$block_meta   # data.table: block_id, chromosome, start_pos, end_pos, n_markers
 v$samples      # character vector of sample names
-v$encoding     # "selectiontools" | "nucleotide" | "numeric"
+v$encoding     # "nucleotide" | "numeric"
 ```
 
 ---
@@ -386,6 +379,7 @@ involved, and markers absent from the map become single-marker blocks.
 
 ```r
 meta <- hapS_ld_blocks(meta, ld_threshold = 0.5, tolerance = 3)  # HapSelect (default)
+use_st_formats(TRUE)                                                # SelectionTools is being retired: opt in
 meta <- st_ld_blocks(meta, ld_threshold = 0.5, tolerance = 0)    # SelectionTools (experimental)
 ```
 

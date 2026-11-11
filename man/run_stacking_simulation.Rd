@@ -26,7 +26,7 @@ run_stacking_simulation(
   overshoot = c("skip", "stop"),
   ts_pair_score = c("midparent", "usefulness"),
   usefulness_k = 1,
-  scheme = c("TS", "OHS", "OCS", "GBS"),
+  scheme = c("TS", "OHS", "GBS"),
   ohs_method = c("GA_pairwise", "Greedy"),
   ohs_elite_ratio = 1,
   ohs_elite_level = c("pair", "block"),
@@ -50,10 +50,15 @@ run_stacking_simulation(
   cross_backend = c("block", "genomicSimulation"),
   metrics = "gebv",
   seed = 42L,
-  output_dir = "stacking_output",
+  output_dir = NULL,
   verbose = TRUE,
   monitor = FALSE,
   n_cores = 1L,
+  trait = NULL,
+  keep_populations = c("final", "none"),
+  backend_opts = list(),
+  ga_control = list(),
+  progress = NULL,
   catalogue_results = NULL,
   trait_name = NULL,
   select_method = NULL
@@ -64,10 +69,13 @@ run_stacking_simulation(
 \code{catalogue_results} list (see \code{\link{run_haplotype_catalogue}})
 may be passed here or via \code{catalogue_results}.}
 
-\item{effect_df}{data.frame of marker effects (Marker, Allele, Effect). When
-\code{NULL}, the \code{GenoMeta}'s attached \code{marker_effects} are used;
-if those hold a named per-trait list, the first trait's table is taken (this
-pipeline is single-trait).}
+\item{effect_df}{Marker effects: one \code{(Marker, Allele, Effect)} table, a
+named per-trait list of them, or one long table with a \code{Trait}
+column. When \code{NULL}, the \code{GenoMeta}'s attached
+\code{marker_effects} are used. This pipeline breeds on one trait: with
+several traits pass \code{trait = "<name>"} (since 0.9.0 the call stops
+otherwise, naming the traits; up to 0.8.8 the first trait was taken
+silently).}
 
 \item{selected_blocks}{Optional character vector restricting selection to
 these blocks. Default \code{NULL} (all blocks).}
@@ -85,7 +93,9 @@ between decision cycles. Default \code{0}.}
 
 \item{num_offspring}{Integer. Offspring per cross. Default \code{4}.}
 
-\item{top_founders}{Integer. Parents selected per cycle. Default \code{16}.}
+\item{top_founders}{Integer. Parents selected per cycle. Default \code{16}.
+Must not exceed the population (since 0.9.0 that is an error; up to 0.8.8
+the set was capped silently).}
 
 \item{avoid_selfing}{Logical. Exclude self-crosses. Default \code{TRUE}.
 The \code{"all_pairs"} design of the parents-first protocol never contains
@@ -130,7 +140,9 @@ the search.}
   sd(F1)}. Default \code{usefulness_k = 1}.}
 
 \item{scheme}{Character vector of schemes to run/compare: any of \code{"TS"},
-\code{"OHS"}, \code{"OCS"}, \code{"GBS"}.}
+\code{"OHS"}, \code{"OCS"}, \code{"GBS"}. Default \code{c("TS", "OHS",
+  "GBS")} since 0.9.0 (OCS stays available by name; up to 0.8.8 the default
+ran all four).}
 
 \item{ohs_method}{OHS engine (see \code{\link{ohs_selection}}).}
 
@@ -190,7 +202,11 @@ origin behaviour: a lost state drops out and the remaining targets are
 re-normalised).}
 
 \item{select_priority}{\code{"high"} (default) or \code{"low"} — selection
-direction (shared by TS/OHS-ideal/GBS and the ideal genotype).}
+direction. \code{"low"} is honoured by TS (both selection units) and by
+GBS with \code{construct_method = "argmax"}; OHS, OCS and GBS with the
+\code{"custom"} or \code{"ratio"} builder select for the high tail
+whatever the priority says, so \code{"low"} is refused with them (0.9.0;
+up to 0.8.8 it was ignored silently).}
 
 \item{construct_method}{Ideal-genotype construction (see
 \code{\link{construct_ideal_genotype}}).}
@@ -221,7 +237,13 @@ builds its ideal-genotype selection target regardless of this argument.)}
 \item{seed}{Base random seed (replication \code{r} uses \code{seed + r}).
 Default \code{42}.}
 
-\item{output_dir}{Directory for output files/plots. Created if absent.}
+\item{output_dir}{\code{NULL} (default since 0.9.0): the result is returned
+in memory and nothing is written. A directory (created if absent) receives
+the files 0.8.8 wrote, through \code{\link{write_outputs}}:
+\code{stacking_plans_<tag>.txt}, \code{stacking_summary_<tag>.txt} and
+\code{Trajectories_<tag>.png} (\code{<tag>} = the schemes joined by
+\code{"-"}); the result is then returned invisibly. Up to 0.8.8 the default
+was \code{"stacking_output"} in the working directory.}
 
 \item{verbose}{Logical. Print progress. Default \code{TRUE}.}
 
@@ -240,14 +262,47 @@ a \code{monitor = FALSE} run. Default \code{FALSE}.}
 \item{n_cores}{Integer. Parallel workers (\code{> 1} needs \pkg{future} and
 \pkg{future.apply}). Default \code{1}.}
 
-\item{catalogue_results, trait_name, select_method}{Deprecated back-compat
+\item{trait}{The trait to breed on when \code{effect_df} (or the
+container's \code{marker_effects}) holds several traits. Default
+\code{NULL}.}
+
+\item{keep_populations}{\code{"final"} (default): keep every job's final
+population in \code{final_populations}; \code{"none"}: an empty list.}
+
+\item{backend_opts}{Options of the crossing backend (genomicSimulation):
+a list with any of \code{cM_per_mb}, \code{map_unit}, \code{keep_files};
+see \code{\link{stk_spec}}.}
+
+\item{ga_control}{\code{list(pop_size, n_generations, mutation_rate)} for
+the GA engines; see \code{\link{stk_spec}}.}
+
+\item{progress}{\code{NULL} (default) or a function of one argument, the
+package's progress contract: with \code{n_cores = 1} it is called after
+every generation (\code{unit = "cycle"}, see \code{\link{stk_step}}), with
+\code{n_cores > 1} after every job (\code{unit = "job"}). Returning
+\code{FALSE} cancels the run with an \code{hs_error_cancelled} error whose
+\code{partial} field holds the result of the generations and jobs done so
+far.}
+
+\item{catalogue_results, trait_name, select_method}{Deprecated since 0.9.0
+(each warns on every call, see \link{haploStack-deprecated}) back-compat
 inputs. \code{catalogue_results}/\code{trait_name} supply the founder
 \code{GenoMeta}; \code{select_method} (\code{"GA"}/\code{"GS"}/\code{"OCS"})
 maps to \code{scheme} (\code{GA -> OHS(GA_pairwise)}, \code{GS -> TS},
 \code{OCS -> OCS}).}
 }
 \value{
-A named list:
+An \code{hs_simulation} result (class \code{c("hs_simulation",
+  "hs_result", "list")}, see \code{\link{hs_result}}): the five 0.8.8
+elements below, plus \code{notes} (every silent fallback of the run, one
+row per job and code: \code{fallback_truncation}, \code{ocs_grm_failed},
+\code{ocs_kinship_cap}, \code{metric_failed}, \code{f1mean_failed},
+\code{monitor_write_failed}, \code{figure_failed}; one warning per code
+is also raised at the end of the run), \code{provenance} (package, status,
+the resolved \code{spec}, trait, seed, RNG kind, input sizes, block
+provenance, backend, the founder ideal's summary, the file tag, one row per
+job) and \code{figures} (empty: the trajectories figure is built by
+\code{write_outputs()} on demand). The result survives \code{saveRDS()}.
 \describe{
 \item{\code{plans}}{Per-cross data.table: \code{CrossID, Parent1, Parent2,
     F1count, F1mean, select_type, cycle, rep, sel_scheme, D2Ideal,

@@ -1,0 +1,31 @@
+2026-11-10 18:19:07 [INFO    ] block_annotation: ============================================================
+2026-11-10 18:19:07 [INFO    ] block_annotation: Block Annotation Pipeline
+2026-11-10 18:19:07 [INFO    ] block_annotation: Species : barley
+2026-11-10 18:19:07 [INFO    ] block_annotation: Features: ['gene']
+2026-11-10 18:19:07 [INFO    ] block_annotation: Coords  : block_info file (external)
+2026-11-10 18:19:07 [INFO    ] block_annotation: ============================================================
+2026-11-10 18:19:07 [INFO    ] block_annotation: Parsing SNP map: snp_map.txt
+2026-11-10 18:19:07 [INFO    ] block_annotation:   2400 SNPs across 2 chromosomes
+2026-11-10 18:19:07 [INFO    ] block_annotation: Parsing block map: block_marker_map.csv
+2026-11-10 18:19:07 [INFO    ] block_annotation:   2400 marker-block pairs | 1195 blocks | 2 chromosomes
+2026-11-10 18:19:07 [INFO    ] block_annotation: Parsing block info: block_info.csv
+2026-11-10 18:19:07 [INFO    ] block_annotation:   1195 blocks | 2 chromosomes | span range 1 – 5,341,013 bp
+2026-11-10 18:19:07 [INFO    ] block_annotation: Block coordinates sourced from block_info_path (1195 blocks)
+2026-11-10 18:19:07 [INFO    ] block_annotation:   n_markers filled from the derived block-marker map
+2026-11-10 18:19:07 [INFO    ] block_annotation: Step 1 output → C:\Users\70651\AppData\Local\Temp\claude\3cf02d1ceb4540dd\f49e11ee-bd07-4d97-ac8b-62ac4a434c95\scratchpad\parity_fixture\ref\step1_block_coordinates.tsv
+2026-11-10 18:19:07 [INFO    ] block_annotation: Step 1 output → C:\Users\70651\AppData\Local\Temp\claude\3cf02d1ceb4540dd\f49e11ee-bd07-4d97-ac8b-62ac4a434c95\scratchpad\parity_fixture\ref\step1_block_marker_map.tsv
+2026-11-10 18:19:07 [INFO    ] block_annotation: Loading GFF3 genes: genes_1H2H.gff3
+2026-11-10 18:19:07 [INFO    ] block_annotation:   10245 gene records
+2026-11-10 18:19:08 [INFO    ] block_annotation: Local annotation saved → C:\Users\70651\AppData\Local\Temp\claude\3cf02d1ceb4540dd\f49e11ee-bd07-4d97-ac8b-62ac4a434c95\scratchpad\parity_fixture\ref\step3_local_annotation.tsv
+2026-11-10 18:19:08 [INFO    ] block_annotation: Feature records saved → C:\Users\70651\AppData\Local\Temp\claude\3cf02d1ceb4540dd\f49e11ee-bd07-4d97-ac8b-62ac4a434c95\scratchpad\parity_fixture\ref\step3_local_annotation_records.tsv  (5397 rows)
+2026-11-10 18:19:08 [INFO    ] block_annotation: --- Annotation summary ---
+2026-11-10 18:19:08 [INFO    ] block_annotation:   Total blocks : 1195
+2026-11-10 18:19:08 [INFO    ] block_annotation:   gene                    : 568 / 1195 blocks have ≥1 hit (max 95)
+2026-11-10 18:19:08 [INFO    ] block_annotation:   Block size : median=120.3 kb  max=5,341,013 bp
+2026-11-10 18:19:08 [INFO    ] block_annotation: Loading local feature records for deep annotation ...
+2026-11-10 18:19:08 [INFO    ] block_annotation: Deep annotation (local): 5397 gene records across 568 blocks
+2026-11-10 18:19:08 [INFO    ] block_annotation:   63 marker–gene overlaps | 63 unique genes
+2026-11-10 18:19:08 [WARNING ] block_annotation:   No xref_path given — co-localisation only, annotation columns empty.
+2026-11-10 18:19:08 [INFO    ] block_annotation: Deep annotation saved → C:\Users\70651\AppData\Local\Temp\claude\3cf02d1ceb4540dd\f49e11ee-bd07-4d97-ac8b-62ac4a434c95\scratchpad\parity_fixture\ref\step4_deep_annotation.tsv  (63 rows)
+2026-11-10 18:19:08 [INFO    ] block_annotation: Deep annotation (local): 63 marker-gene rows
+2026-11-10 18:19:08 [INFO    ] block_annotation: Pipeline complete — 4 output tables produced.

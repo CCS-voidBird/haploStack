@@ -15,7 +15,8 @@ track_marker_labels(
   palette = NULL,
   height_mm = NULL,
   window_bp = NULL,
-  window_name = "search window"
+  window_name = "search window",
+  chr_map = NULL
 )
 }
 \arguments{
@@ -38,6 +39,9 @@ optionally the window colour).}
 \item{window_bp}{Optional search-window flank (bp) either side of each
 region, for loci without \code{Window_start}/\code{Window_end}.
 \code{NULL} (default) draws windows only from those columns.}
+
+\item{chr_map}{Optional named character vector, container chromosome ->
+the table's spelling, passed to the standardizer (0.9.0).}
 }
 \value{
 An \code{hs_circos_track}.

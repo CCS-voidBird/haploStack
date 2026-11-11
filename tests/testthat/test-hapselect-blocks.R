@@ -18,6 +18,7 @@
 
 library(testthat)
 library(haploStack)
+withr::local_options(list(haploStack.st_formats = TRUE))   # H8 compares with SelectionTools (gate, 0.9.0)
 
 test_that("H1: planted LD groups come back as exactly those blocks", {
   skip_if_not_installed("HapSelect")
@@ -26,7 +27,7 @@ test_that("H1: planted LD groups come back as exactly those blocks", {
     Marker = bm$Marker, Block = planted_group(bm$Marker))))
   for (tol in c(0L, 3L)) {
     r <- hapS_ld_blocks(toy, tolerance = tol, attach = FALSE, verbose = FALSE)
-    expect_named(r, c("block_marker_map", "block_info"))
+    expect_named(r, c("block_marker_map", "block_info", "provenance"))
     bm <- r$block_marker_map
     expect_setequal(bm$Marker, dimnames(toy$geno_arrays)[[2L]])
     expect_identical(unname(partition(bm)), planted(bm), info = tol)

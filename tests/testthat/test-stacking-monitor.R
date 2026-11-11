@@ -81,7 +81,7 @@ test_that("compute_gene_diversity is 0 for a monomorphic population", {
 test_that("driver populates a finite block-IBS coancestry column", {
   m   <- sim_geno_meta(n_samples = 12L, n_markers = 24L, n_chrom = 2L,
                        block_size = 3L, seed = 5L)
-  e   <- sim_effect_df(dimnames(m$geno_arrays)[[2L]], alleles = c("1", "4"))
+  e   <- sim_effect_df(dimnames(m$geno_arrays)[[2L]], alleles = c("A", "T"))
   res <- run_stacking_simulation(
     m, e, replications = 1L, select_cycles = 3L, top_founders = 4L,
     num_offspring = 2L, scheme = "TS", select_top_blocks = 50L,
@@ -95,14 +95,15 @@ test_that("driver populates a finite block-IBS coancestry column", {
 test_that("driver reports Nei gene diversity per cycle, in both crossing backends", {
   m <- sim_geno_meta(n_samples = 12L, n_markers = 24L, n_chrom = 2L,
                      block_size = 3L, seed = 5L)
-  e <- sim_effect_df(dimnames(m$geno_arrays)[[2L]], alleles = c("1", "4"))
+  e <- sim_effect_df(dimnames(m$geno_arrays)[[2L]], alleles = c("A", "T"))
 
   run_backend <- function(backend) {
     run_stacking_simulation(
       m, e, replications = 1L, select_cycles = 4L, top_founders = 4L,
       num_offspring = 3L, scheme = "GBS", select_top_blocks = 50L,
       cross_backend = backend, metrics = "gene_diversity",
-      output_dir = NULL, verbose = FALSE)$summary
+      output_dir = NULL, verbose = FALSE,
+      backend_opts = list(map_unit = "bp"))$summary     # the simulated map is bp
   }
 
   for (backend in c("block", "genomicSimulation")) {
@@ -122,7 +123,7 @@ test_that("driver reports Nei gene diversity per cycle, in both crossing backend
 test_that("plot_simulation_metrics builds a ggplot from the summary contract", {
   m   <- sim_geno_meta(n_samples = 12L, n_markers = 24L, n_chrom = 2L,
                        block_size = 3L, seed = 5L)
-  e   <- sim_effect_df(dimnames(m$geno_arrays)[[2L]], alleles = c("1", "4"))
+  e   <- sim_effect_df(dimnames(m$geno_arrays)[[2L]], alleles = c("A", "T"))
   res <- run_stacking_simulation(
     m, e, replications = 2L, select_cycles = 3L, top_founders = 4L,
     num_offspring = 2L, scheme = c("TS", "GBS"), select_top_blocks = 50L,
@@ -145,7 +146,7 @@ test_that("plot_simulation_metrics builds a ggplot from the summary contract", {
 test_that("monitor = TRUE writes live files, emits per-job progress, and does not change results", {
   m <- sim_geno_meta(n_samples = 12L, n_markers = 24L, n_chrom = 2L,
                      block_size = 3L, seed = 5L)
-  e <- sim_effect_df(dimnames(m$geno_arrays)[[2L]], alleles = c("1", "4"))
+  e <- sim_effect_df(dimnames(m$geno_arrays)[[2L]], alleles = c("A", "T"))
   od <- tempfile("livemon")                       # driver creates it if absent
 
   base <- list(m, e, replications = 2L, select_cycles = 3L, top_founders = 4L,
@@ -176,7 +177,7 @@ test_that("monitor = TRUE writes live files, emits per-job progress, and does no
 test_that("monitor = TRUE without output_dir announces and skips (no error)", {
   m <- sim_geno_meta(n_samples = 10L, n_markers = 18L, n_chrom = 2L,
                      block_size = 3L, seed = 4L)
-  e <- sim_effect_df(dimnames(m$geno_arrays)[[2L]], alleles = c("1", "4"))
+  e <- sim_effect_df(dimnames(m$geno_arrays)[[2L]], alleles = c("A", "T"))
   expect_message(
     res <- run_stacking_simulation(
       m, e, replications = 1L, select_cycles = 2L, top_founders = 4L,
@@ -189,9 +190,10 @@ test_that("monitor = TRUE without output_dir announces and skips (no error)", {
 test_that("live monitor harvests as jobs resolve under parallel execution, same result", {
   skip_if_not_installed("future")
   skip_if_not_installed("future.apply")
+  .skip_if_dev_namespace()
   m <- sim_geno_meta(n_samples = 12L, n_markers = 24L, n_chrom = 2L,
                      block_size = 3L, seed = 5L)
-  e <- sim_effect_df(dimnames(m$geno_arrays)[[2L]], alleles = c("1", "4"))
+  e <- sim_effect_df(dimnames(m$geno_arrays)[[2L]], alleles = c("A", "T"))
   od <- tempfile("livemon_par")
 
   base <- list(m, e, replications = 2L, select_cycles = 2L, top_founders = 4L,

@@ -26,7 +26,7 @@ fb_meta <- function(n_samples = 8L, seed = 7L) {
                       n_chrom = 3L, block_size = 4L, seed = seed)
   mk <- dimnames(m$geno_arrays)[[2L]]
   m$marker_effects <- list(
-    Yield = sim_effect_df(mk, alleles = c("1", "4"), seed = 1L))
+    Yield = sim_effect_df(mk, alleles = c("A", "T"), seed = 1L))
   m
 }
 
@@ -51,7 +51,7 @@ fb_meta_ped <- function(...) {
 
 test_that("the result is the documented list and the table the fixed schema", {
   m   <- fb_meta()
-  res <- suppressWarnings(count_favourable_blocks(m, trait = "Yield"))
+  res <- suppressWarnings(count_favourable_blocks(m, trait = "Yield", center = "allele_freq"))
 
   expect_identical(names(res),
                    c("table", "plots", "dummy", "prefer", "level"))
@@ -68,7 +68,7 @@ test_that("the result is the documented list and the table the fixed schema", {
 
 test_that("nPositive + nNegative + nZero == nBlock * ploidy", {
   m   <- fb_meta()
-  res <- suppressWarnings(count_favourable_blocks(m, trait = "Yield"))
+  res <- suppressWarnings(count_favourable_blocks(m, trait = "Yield", center = "allele_freq"))
   tab <- res$table
   ploidy <- dim(m$geno_arrays)[3L]
 
@@ -85,7 +85,7 @@ test_that("nPositive + nNegative + nZero == nBlock * ploidy", {
 test_that("counts match an independent recomputation from the wide matrix", {
   m  <- fb_meta()
   lg <- compute_profile_localgebv(m, trait = "Yield", level = "haplotype",
-                                  center_by_freq = TRUE)
+                                  center = "allele_freq")
   lg <- data.table::as.data.table(lg)
 
   cols <- setdiff(names(lg), "Block")
@@ -97,7 +97,7 @@ test_that("counts match an independent recomputation from the wide matrix", {
                              nPositive = sum(v > 0), nNegative = sum(v < 0))
     }))
 
-  got <- suppressWarnings(count_favourable_blocks(m, trait = "Yield"))$table
+  got <- suppressWarnings(count_favourable_blocks(m, trait = "Yield", center = "allele_freq"))$table
   j   <- merge(got, ref, by = "IID", suffixes = c("", ".ref"))
 
   expect_equal(j$GEBV, j$GEBV.ref)
@@ -111,11 +111,11 @@ test_that("GEBV equals the genotype-level local GEBV column sum", {
   m  <- fb_meta()
   gt <- data.table::as.data.table(
     compute_profile_localgebv(m, trait = "Yield", level = "genotype",
-                              center_by_freq = TRUE))
+                              center = "allele_freq"))
   ref <- vapply(setdiff(names(gt), "Block"),
                 function(s) sum(gt[[s]]), numeric(1L))
 
-  got <- suppressWarnings(count_favourable_blocks(m, trait = "Yield"))$table
+  got <- suppressWarnings(count_favourable_blocks(m, trait = "Yield", center = "allele_freq"))$table
   expect_equal(got$GEBV, unname(ref[got$IID]))
 })
 
@@ -127,9 +127,9 @@ test_that("GEBV equals the genotype-level local GEBV column sum", {
 test_that("prefer selects nPreferred and changes nothing else", {
   m   <- fb_meta()
   pos <- suppressWarnings(
-    count_favourable_blocks(m, trait = "Yield", prefer = "positive"))$table
+    count_favourable_blocks(m, trait = "Yield", center = "allele_freq", prefer = "positive"))$table
   neg <- suppressWarnings(
-    count_favourable_blocks(m, trait = "Yield", prefer = "negative"))$table
+    count_favourable_blocks(m, trait = "Yield", center = "allele_freq", prefer = "negative"))$table
 
   data.table::setorder(pos, IID)
   data.table::setorder(neg, IID)
@@ -146,12 +146,12 @@ test_that("the dummy matrix follows prefer", {
   m  <- fb_meta()
   lg <- data.table::as.data.table(
     compute_profile_localgebv(m, trait = "Yield", level = "haplotype",
-                              center_by_freq = TRUE))
+                              center = "allele_freq"))
   cols <- setdiff(names(lg), "Block")
 
   for (p in c("positive", "negative")) {
     d <- suppressWarnings(
-      count_favourable_blocks(m, trait = "Yield", prefer = p))$dummy
+      count_favourable_blocks(m, trait = "Yield", center = "allele_freq", prefer = p))$dummy
     for (cc in cols) {
       want <- if (p == "positive") as.integer(lg[[cc]] > 0)
               else                 as.integer(lg[[cc]] < 0)
@@ -167,7 +167,7 @@ test_that("the dummy matrix follows prefer", {
 
 test_that("pedigree columns are NA without a family history", {
   m   <- fb_meta()
-  tab <- suppressWarnings(count_favourable_blocks(m, trait = "Yield"))$table
+  tab <- suppressWarnings(count_favourable_blocks(m, trait = "Yield", center = "allele_freq"))$table
 
   expect_true(all(is.na(tab$GID)))
   expect_true(all(is.na(tab$FID)))
@@ -177,7 +177,7 @@ test_that("pedigree columns are NA without a family history", {
 test_that("pedigree columns match the family history, one row per sample", {
   m    <- fb_meta_ped()
   samp <- dimnames(m$geno_arrays)[[1L]]
-  res  <- count_favourable_blocks(m, trait = "Yield", plot = FALSE)
+  res  <- count_favourable_blocks(m, trait = "Yield", center = "allele_freq", plot = FALSE)
   tab  <- res$table
 
   # Every sample once, even the parents that appear in two generations.
@@ -212,14 +212,14 @@ test_that("a sample outside the history keeps NA pedigree columns", {
               function(g) data.table::as.data.table(g)[IID != samp[length(samp)]])
   m$metadata$family_history <- h
 
-  tab <- count_favourable_blocks(m, trait = "Yield", plot = FALSE)$table
+  tab <- count_favourable_blocks(m, trait = "Yield", center = "allele_freq", plot = FALSE)$table
   expect_true(is.na(tab[IID == samp[length(samp)], GID]))
   expect_false(any(is.na(tab[IID == samp[1], GID])))
 })
 
 test_that("rows are ordered by GID, FID, then descending nPreferred", {
   m   <- fb_meta_ped(n_samples = 10L)
-  tab <- count_favourable_blocks(m, trait = "Yield", plot = FALSE)$table
+  tab <- count_favourable_blocks(m, trait = "Yield", center = "allele_freq", plot = FALSE)$table
 
   # Each (GID, FID) group is one contiguous run of rows ...
   tab[, grp := paste(GID, FID, sep = "\r")]
@@ -241,8 +241,8 @@ test_that("the dummy matrix has the local-GEBV matrix's shape and is 1/0 only", 
   m  <- fb_meta()
   lg <- data.table::as.data.table(
     compute_profile_localgebv(m, trait = "Yield", level = "haplotype",
-                              center_by_freq = TRUE))
-  d  <- suppressWarnings(count_favourable_blocks(m, trait = "Yield"))$dummy
+                              center = "allele_freq"))
+  d  <- suppressWarnings(count_favourable_blocks(m, trait = "Yield", center = "allele_freq"))$dummy
 
   expect_identical(names(d), names(lg))
   expect_identical(d$Block, lg$Block)          # genomic block order preserved
@@ -253,7 +253,7 @@ test_that("the dummy matrix has the local-GEBV matrix's shape and is 1/0 only", 
 
 test_that("nPreferred equals the dummy matrix's per-sample column sum", {
   m   <- fb_meta()
-  res <- suppressWarnings(count_favourable_blocks(m, trait = "Yield"))
+  res <- suppressWarnings(count_favourable_blocks(m, trait = "Yield", center = "allele_freq"))
   d   <- res$dummy
   cols <- setdiff(names(d), "Block")
   base <- sub("\\.[0-9]+$", "", cols)
@@ -268,7 +268,7 @@ test_that("nPreferred equals the dummy matrix's per-sample column sum", {
 
 test_that("plot = TRUE returns the nested plot list on a pedigreed object", {
   m   <- fb_meta_ped()
-  res <- count_favourable_blocks(m, trait = "Yield", plot = TRUE)
+  res <- count_favourable_blocks(m, trait = "Yield", center = "allele_freq", plot = TRUE)
 
   expect_type(res$plots, "list")
   expect_true(all(grepl("^gen_", names(res$plots))))
@@ -280,7 +280,7 @@ test_that("plot = TRUE returns the nested plot list on a pedigreed object", {
 test_that("plot without a family history warns and yields NULL, table intact", {
   m   <- fb_meta()
   res <- NULL
-  expect_warning(res <- count_favourable_blocks(m, trait = "Yield",
+  expect_warning(res <- count_favourable_blocks(m, trait = "Yield", center = "allele_freq",
                                                 plot = TRUE),
                  "no family history")
   expect_null(res$plots)
@@ -289,7 +289,7 @@ test_that("plot without a family history warns and yields NULL, table intact", {
 
 test_that("plot_favourable_blocks accepts a result list or a bare dummy", {
   m   <- fb_meta_ped()
-  res <- count_favourable_blocks(m, trait = "Yield", plot = FALSE)
+  res <- count_favourable_blocks(m, trait = "Yield", center = "allele_freq", plot = FALSE)
   expect_null(res$plots)
 
   from_res <- plot_favourable_blocks(res, family = m)
@@ -305,7 +305,7 @@ test_that("plot_favourable_blocks accepts a result list or a bare dummy", {
 
 test_that("plot_favourable_blocks requires a family", {
   m   <- fb_meta()
-  res <- suppressWarnings(count_favourable_blocks(m, trait = "Yield",
+  res <- suppressWarnings(count_favourable_blocks(m, trait = "Yield", center = "allele_freq",
                                                  plot = FALSE))
   expect_error(plot_favourable_blocks(res), "'family' is required")
 })
@@ -326,9 +326,9 @@ test_that("fill_na = NA_real_ makes nBlock the per-sample informative count", {
   m$geno_arrays[samp, hole, ] <- NA_character_
 
   full <- suppressWarnings(
-    count_favourable_blocks(m, trait = "Yield", fill_na = 0))$table
+    count_favourable_blocks(m, trait = "Yield", center = "allele_freq", fill_na = 0))$table
   part <- suppressWarnings(
-    count_favourable_blocks(m, trait = "Yield", fill_na = NA_real_))$table
+    count_favourable_blocks(m, trait = "Yield", center = "allele_freq", fill_na = NA_real_))$table
   data.table::setorder(full, IID)
   data.table::setorder(part, IID)
 
@@ -358,7 +358,7 @@ test_that("output_file writes the table and the list is still returned", {
   m   <- fb_meta()
   f   <- withr::local_tempfile(fileext = ".txt")
   res <- suppressWarnings(suppressMessages(
-    count_favourable_blocks(m, trait = "Yield", output_file = f)))
+    count_favourable_blocks(m, trait = "Yield", center = "allele_freq", output_file = f)))
 
   expect_true(file.exists(f))
   back <- data.table::fread(f)
@@ -371,7 +371,7 @@ test_that("an invalid prefer or GenoMeta errors", {
   m <- fb_meta()
   expect_error(count_favourable_blocks(list(), trait = "Yield"),
                "not a valid GenoMeta")
-  expect_error(count_favourable_blocks(m, trait = "Yield", prefer = "high"),
+  expect_error(count_favourable_blocks(m, trait = "Yield", center = "allele_freq", prefer = "high"),
                "should be one of")
 })
 

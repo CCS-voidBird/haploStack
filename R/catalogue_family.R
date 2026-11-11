@@ -21,11 +21,11 @@
   if (!is.null(id_col)) {
     if (is.character(id_col)) {
       if (!id_col %in% names(fam))
-        stop(".fam_resolve_ids: id_col '", id_col, "' not found in fam.")
+        .hs_abort(".fam_resolve_ids: id_col '", id_col, "' not found in fam.")
       return(as.character(fam[[id_col]]))
     }
     if (id_col < 1L || id_col > ncol(fam))
-      stop(".fam_resolve_ids: id_col index ", id_col, " out of range.")
+      .hs_abort(".fam_resolve_ids: id_col index ", id_col, " out of range.")
     return(as.character(fam[[id_col]]))
   }
   ids <- if ("IID" %in% names(fam)) fam$IID else rownames(fam)
@@ -45,12 +45,12 @@
   if (is.character(parent_cols)) {
     miss <- setdiff(parent_cols, names(fam))
     if (length(miss) > 0L)
-      stop(".fam_to_edges: parent column(s) not found: ",
+      .hs_abort(".fam_to_edges: parent column(s) not found: ",
            paste(miss, collapse = ", "))
     pcols <- parent_cols
   } else {
     if (any(parent_cols < 1L | parent_cols > ncol(fam)))
-      stop(".fam_to_edges: parent_cols index out of range.")
+      .hs_abort(".fam_to_edges: parent_cols index out of range.")
     pcols <- names(fam)[parent_cols]
   }
 
@@ -84,7 +84,7 @@
   if (nrow(f1) == 0L) return(empty)
 
   # Sorted unique parent set per child
-  combs <- lapply(split(f1$Parent, f1$IID), function(p) sort(unique(p)))
+  combs <- lapply(split(f1$Parent, f1$IID), function(p) .hs_sort(unique(p)))
 
   unique_combs <- unique(unname(combs))
   parts <- lapply(seq_along(unique_combs), function(i) {
@@ -206,25 +206,22 @@ trace_family_history <- function(fam, parent_cols, id_col = NULL,
 attach_family_history <- function(geno_meta, fam = NULL,
                                   parent_cols = NULL, id_col = NULL,
                                   founder_id = NA) {
-  if (!is_geno_meta(geno_meta))
-    stop("attach_family_history: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "attach_family_history", "geno_meta")
 
   if (is.null(fam)) {
     fam <- geno_meta$sample_info                 # trace the object's own FAM
     if (is.null(parent_cols)) parent_cols <- c(3L, 4L)
     if (is.null(id_col))      id_col      <- 2L
   } else if (is.null(parent_cols)) {
-    stop("attach_family_history: 'parent_cols' is required when 'fam' is given.")
+    .hs_abort("attach_family_history: 'parent_cols' is required when 'fam' is given.")
   }
   history <- trace_family_history(fam, parent_cols, id_col, founder_id)
 
   hist_ids <- unique(unlist(lapply(history, function(g) g$IID)))
   geno_samples <- dimnames(geno_meta$geno_arrays)[[1L]]
   if (length(intersect(hist_ids, geno_samples)) == 0L)
-    warning("attach_family_history: no family-history individual matches the ",
-            "genotype sample set — history stored but not linkable to genotypes.")
-
-  geno_meta$metadata$family_history <- history
+    .hs_warn("attach_family_history: no family-history individual matches the ",
+            "genotype sample set \u2014 history stored but not linkable to genotypes.")
 
   # Write-back: each sample's offspring-family FID (generation-qualified, e.g.
   # "gen_1.F_3") into sample_info$Family, leaving founders / unmatched as-is.
@@ -232,9 +229,12 @@ attach_family_history <- function(geno_meta, fam = NULL,
   si <- geno_meta$sample_info
   hit <- si$Sample %in% names(fid_map)
   si$Family[hit] <- unname(fid_map[si$Sample[hit]])
-  geno_meta$sample_info <- si
 
-  geno_meta
+  # One rebuild path (0.9.0): the history is a sample-scoped metadata key and
+  # the FAM is replaced; everything else is forwarded and revalidated.
+  .rebuild_geno_meta(geno_meta, sample_info = si,
+                     metadata = list(family_history = history),
+                     .caller = "attach_family_history")
 }
 
 
@@ -293,7 +293,7 @@ family_history_to_pedigree <- function(x) {
       offs    <- unique(grp$IID[grp$Label == "O"])
       if (length(parents) > 2L) {
         if (!warned) {
-          warning("family_history_to_pedigree: family '", fid, "' has >2 ",
+          .hs_warn("family_history_to_pedigree: family '", fid, "' has >2 ",
                   "parents; truncating to the first two.")
           warned <- TRUE
         }
@@ -333,8 +333,12 @@ family_history_to_pedigree <- function(x) {
 #'   \item{\code{Block}}{Block ID.}
 #'   \item{\code{Parent}}{Inferred parental origin (\code{Parent1},
 #'     \code{Parent2}, \code{"ambiguous"}, or \code{"unknown"}).}
-#'   \item{\code{n_match}}{Number of markers matching the assigned parent.}
+#'   \item{\code{n_match}}{Number of markers matching the assigned parent's
+#'     best-matching copy.}
 #'   \item{\code{n_total}}{Total markers compared in the block.}
+#'   \item{\code{ParentHap}}{The assigned parent's copy (haplotype index) that
+#'     matched; \code{NA} when the parent is ambiguous or unknown. New in
+#'     0.9.0.}
 #' }
 #'
 #' @details
@@ -352,14 +356,23 @@ family_history_to_pedigree <- function(x) {
 #' head(fam)
 #' }
 #'
+#' @section Both parental copies (0.9.0):
+#' Each offspring copy is compared, per block, with \strong{both} copies of each
+#' parent; the parent's best-matching copy counts and is reported as
+#' \code{ParentHap} (decision-form row 17 a). Up to 0.8.8 only parent copy 1 was
+#' read, so a block inherited from a heterozygous parent's second copy scored 0
+#' and went to the other parent, \dQuote{ambiguous} or \dQuote{unknown}.
+#' Assignments (\code{Parent}, \code{n_match}) therefore change wherever a parent
+#' is heterozygous in the block; the row order follows the offspring, copy and
+#' block.
+#'
 #' @export
 trace_haplotype_family <- function(geno_meta, pedigree, blocks = NULL) {
-  if (!is_geno_meta(geno_meta))
-    stop("trace_haplotype_family: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "trace_haplotype_family", "geno_meta")
 
   ped <- as.data.table(pedigree)
   if (!all(c("Sample","Parent1","Parent2") %in% names(ped)))
-    stop("trace_haplotype_family: pedigree must have columns Sample, Parent1, Parent2.")
+    .hs_abort("trace_haplotype_family: pedigree must have columns Sample, Parent1, Parent2.")
 
   # Filter to relevant blocks, then build profile views on demand
   gm   <- if (!is.null(blocks)) filter_geno_meta(geno_meta, blocks = blocks)
@@ -369,7 +382,8 @@ trace_haplotype_family <- function(geno_meta, pedigree, blocks = NULL) {
   if (nrow(prof$alleles) == 0L)
     return(data.table(Sample = character(0L), Haplotype_idx = integer(0L),
                       Block  = character(0L), Parent = character(0L),
-                      n_match = integer(0L),  n_total = integer(0L)))
+                      n_match = integer(0L),  n_total = integer(0L),
+                      ParentHap = integer(0L)))
 
   alleles     <- prof$alleles
   marker_meta <- prof$marker_meta
@@ -390,45 +404,73 @@ trace_haplotype_family <- function(geno_meta, pedigree, blocks = NULL) {
   long_dt[blk_map, on = "Marker", Block := i.Block]
   long_dt <- long_dt[!is.na(Block)]
 
-  # For each offspring in pedigree
+  # 0.9.0 (decision-form row 17 a, 🔢): every offspring copy is compared with
+  # BOTH copies of each parent, per block; the parent's best-matching copy
+  # counts. Up to 0.8.8 only parent copy 1 was read, so an offspring block
+  # inherited from a heterozygous parent's second copy scored 0 and was
+  # assigned to the other parent, "ambiguous" or "unknown". Assignments change
+  # wherever a parent is heterozygous in the block. `ParentHap` (the matched
+  # parental copy) is new.
+  data.table::setkeyv(long_dt, "Sample")
+  key_cols <- c("Sample", "Haplotype_idx", "Block")
+
+  # Best-matching copy of parent `p` for every (offspring copy, block):
+  # data.table(Sample, Haplotype_idx, Block, n, ParentHap), or NULL when the
+  # parent is unknown or not genotyped.
+  best_copy <- function(off_dt, p) {
+    if (is.na(p) || !p %in% prof$samples) return(NULL)
+    par_dt <- long_dt[list(p), nomatch = NULL][
+      , .(Marker, Block, ParentHap = Haplotype_idx, P_Allele = Allele)]
+    j <- merge(off_dt[, .(Sample, Haplotype_idx, Block, Marker, Allele)], par_dt,
+               by = c("Marker", "Block"), allow.cartesian = TRUE)
+    m <- j[, .(n = sum(Allele == P_Allele, na.rm = TRUE)),
+           by = c(key_cols, "ParentHap")]
+    data.table::setorderv(m, c(key_cols, "n", "ParentHap"), order = c(1L, 1L, 1L, -1L, 1L))
+    m[, .SD[1L], by = key_cols]                 # ties -> the lower copy index
+  }
+  add_parent <- function(res, b, nm_n, nm_h) {
+    if (is.null(b)) {
+      res[, (nm_n) := 0L]
+      res[, (nm_h) := NA_integer_]
+      return(res)
+    }
+    res <- merge(res, b, by = key_cols, all.x = TRUE)
+    res[is.na(n), n := 0L]
+    data.table::setnames(res, c("n", "ParentHap"), c(nm_n, nm_h))
+    res
+  }
+
   results <- lapply(seq_len(nrow(ped)), function(idx) {
-    row      <- ped[idx]
+    row       <- ped[idx]
     offspring <- row$Sample
     p1        <- row$Parent1
     p2        <- row$Parent2
 
-    off_dt <- long_dt[Sample == offspring]
+    off_dt <- long_dt[list(offspring), nomatch = NULL]
     if (nrow(off_dt) == 0L) return(NULL)
 
-    # Get parent alleles per marker (use haplotype 1 as reference)
-    p1_alleles <- if (!is.na(p1) && p1 %in% prof$samples)
-      long_dt[Sample == p1 & Haplotype_idx == 1L, .(Marker, P1_Allele = Allele)]
-    else data.table(Marker = character(0L), P1_Allele = character(0L))
-
-    p2_alleles <- if (!is.na(p2) && p2 %in% prof$samples)
-      long_dt[Sample == p2 & Haplotype_idx == 1L, .(Marker, P2_Allele = Allele)]
-    else data.table(Marker = character(0L), P2_Allele = character(0L))
-
-    off_dt[p1_alleles, on = "Marker", P1_Allele := i.P1_Allele]
-    off_dt[p2_alleles, on = "Marker", P2_Allele := i.P2_Allele]
-
-    # Count matches per (Haplotype_idx, Block)
-    block_result <- off_dt[, {
-      n_p1 <- sum(Allele == P1_Allele, na.rm = TRUE)
-      n_p2 <- sum(Allele == P2_Allele, na.rm = TRUE)
-      n_tot <- .N
-      parent <- if (is.na(p1) && is.na(p2)) "unknown"
-                else if (n_p1 > n_p2)  "Parent1"
-                else if (n_p2 > n_p1)  "Parent2"
-                else if (n_p1 == n_p2 && n_p1 > 0L) "ambiguous"
-                else "unknown"
-      .(Parent  = parent,
-        n_match = max(n_p1, n_p2),
-        n_total = n_tot)
-    }, by = .(Sample, Haplotype_idx, Block)]
-
-    block_result
+    res <- off_dt[, .(n_total = .N), by = key_cols]
+    res <- add_parent(res, best_copy(off_dt, p1), "n_p1", "h_p1")
+    res <- add_parent(res, best_copy(off_dt, p2), "n_p2", "h_p2")
+    both_na <- is.na(p1) && is.na(p2)
+    res[, Parent := data.table::fcase(
+      rep(both_na, .N),         "unknown",
+      n_p1 > n_p2,              "Parent1",
+      n_p2 > n_p1,              "Parent2",
+      n_p1 == n_p2 & n_p1 > 0L, "ambiguous",
+      default = "unknown")]
+    res[, n_match := pmax(n_p1, n_p2)]
+    res[, ParentHap := data.table::fcase(Parent == "Parent1", h_p1,
+                                         Parent == "Parent2", h_p2,
+                                         default = NA_integer_)]
+    res[, .(Sample, Haplotype_idx, Block, Parent, n_match, n_total, ParentHap)]
   })
 
-  rbindlist(Filter(Negate(is.null), results))
+  out <- rbindlist(Filter(Negate(is.null), results))
+  if (nrow(out) == 0L)
+    return(data.table(Sample = character(0L), Haplotype_idx = integer(0L),
+                      Block  = character(0L), Parent = character(0L),
+                      n_match = integer(0L),  n_total = integer(0L),
+                      ParentHap = integer(0L)))
+  out[]
 }

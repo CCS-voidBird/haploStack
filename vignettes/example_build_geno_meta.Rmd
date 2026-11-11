@@ -45,16 +45,18 @@ set.seed(7)
 
 ## 0  A tiny demonstration dataset
 
-We hand-build a 5-sample × 8-marker diploid dataset in **SelectionTools**
-encoding (alleles coded `1` and `4`, the two haplotypes of a genotype written
-as `"1/4"`).
+We hand-build a 5-sample × 8-marker diploid dataset in **nucleotide**
+encoding (alleles `A` and `T`, the two haplotypes of a genotype written as
+`"A/T"`). A `GenoMeta` stores nucleotide alleles (and dosage) only since
+0.9.0; SelectionTools' `1/4` codes are translated at the boundary, as section
+3.1 shows.
 
 ```{r demo-data}
 markers <- paste0("SNP", 1:8)
 samples <- paste0("L", 1:5)
 
 # Genotype matrix — markers as rows, samples as columns, "allele1/allele2" cells.
-geno <- matrix(sample(c("1/1", "1/4", "4/4"), 40, replace = TRUE),
+geno <- matrix(sample(c("A/A", "A/T", "T/T"), 40, replace = TRUE),
                nrow = 8, dimnames = list(markers, samples))
 
 # Marker map — one row per marker: Chrom, Marker, Pos (bp).
@@ -95,9 +97,9 @@ meta <- build_geno_meta(
   geno_2d       = geno_sm,
   map           = map,                  # columns in order: Chrom, Marker, Pos
   ploidy        = 2L,
-  split_char    = "/",                  # allele separator inside a cell ("1/4")
-  encoding      = "selectiontools",     # or "nucleotide" for A/C/G/T data
-  source_format = "selectiontools"
+  split_char    = "/",                  # allele separator inside a cell ("A/T")
+  encoding      = "nucleotide",         # A/C/G/T (or digits used as labels)
+  source_format = "demo"
 )
 
 is_geno_meta(meta)                      # TRUE → structurally valid
@@ -158,7 +160,7 @@ re-passing it. Columns are read by position: `Marker, Allele, Effect`.
 ```{r effects}
 effects <- data.frame(
   Marker = rep(markers, each = 2L),
-  Allele = rep(c("1", "4"), times = 8L),
+  Allele = rep(c("A", "T"), times = 8L),
   Effect = round(rnorm(16, 0, 0.4), 3),
   stringsAsFactors = FALSE
 )
@@ -191,9 +193,13 @@ back.
 io <- file.path(tempdir(), "geno_io")
 dir.create(io, showWarnings = FALSE)
 
-# SelectionTools genotype: markers as rows, first column = marker, then samples.
+# A marker-row genotype table: first column = marker, then one column per
+# sample — once in nucleotides, once in SelectionTools' codes (A = 1, T = 4).
+nuc_geno <- file.path(io, "geno_nuc.tsv")
+fwrite(cbind(Marker = markers, as.data.frame(geno)), nuc_geno, sep = "\t")
 st_geno <- file.path(io, "geno_st.tsv")
-fwrite(cbind(Marker = markers, as.data.frame(geno)), st_geno, sep = "\t")
+fwrite(cbind(Marker = markers, as.data.frame(chartr("AT", "14", geno))),
+       st_geno, sep = "\t")
 
 # Map file (SelectionTools column order: Marker, Chrom, Pos).
 st_map <- file.path(io, "map_st.tsv")
@@ -208,13 +214,19 @@ fwrite(blocks, blk_file, sep = "\t")
 
 Thin format-specific readers wrap the generic reader with the right layout
 preset. `read_st_genotype()`, `read_gs_genotype()` (genomicSimulation) and
-`read_plink_ped()` (PLINK) cover the common cases.
+`read_plink_ped()` (PLINK) cover the common cases. The SelectionTools reader
+is behind `use_st_formats()` (SelectionTools is being retired): its cells are
+the codes `A = 1, C = 2, G = 3, T = 4`, which are translated on the read, so
+the container holds nucleotides whatever the file held.
 
 ```{r read-st}
+use_st_formats(TRUE)
 meta_st <- read_st_genotype(st_geno, map_file = st_map, block_file = blk_file)
 
 is_geno_meta(meta_st)
 meta_st$metadata$n_samples
+meta_st$metadata$encoding            # "nucleotide": the codes were translated
+meta_st$geno_arrays[1, 1:3, ]
 ```
 
 ### 3.2  A custom layout — `resolve_geno_format()` + `read_genotype()`
@@ -226,12 +238,12 @@ re-describe the ST layout explicitly to show the mechanism.)
 ```{r read-custom}
 spec <- resolve_geno_format(list(
   geno_orient = "marker",                       # markers are rows
-  split_char  = "/",                            # "1/4" cells
-  encoding    = "selectiontools",
+  split_char  = "/",                            # "A/T" cells
+  encoding    = "nucleotide",
   map_order   = c("Marker", "Chrom", "Pos")     # column order in the map file
 ))
 
-meta_custom <- read_genotype(st_geno, map_file = st_map,
+meta_custom <- read_genotype(nuc_geno, map_file = st_map,
                              preset = spec, block_file = blk_file)
 is_geno_meta(meta_custom)
 ```
@@ -247,11 +259,11 @@ reader/assembler pipeline into a **format converter**. The encoding and the
 ### 4.1  Write to other genotype formats — `write_geno_meta()`
 
 ```{r write-formats}
-# SelectionTools → PLINK PED/MAP (writes out_plink.ped + out_plink.map)
-write_geno_meta(meta, path = file.path(io, "out_plink"), output_format = "plink_ped")
+# GenoMeta → PLINK PED/MAP (writes out_plink.ped + out_plink.map)
+write_geno_meta(meta, path = file.path(io, "out_plink"), preset = "PL")
 
-# SelectionTools → genomicSimulation CSV
-write_geno_meta(meta, path = file.path(io, "out_gs.csv"), output_format = "gs")
+# GenoMeta → genomicSimulation CSV
+write_geno_meta(meta, path = file.path(io, "out_gs.csv"), preset = "GS")
 
 list.files(io, pattern = "^out_")
 ```
@@ -267,25 +279,32 @@ is_geno_meta(meta_pl)
 ### 4.2  Inspect a converted matrix without writing — `geno_meta_to_matrix()`
 
 ```{r to-matrix}
-m_st <- geno_meta_to_matrix(meta, output_format = "st")          # markers × samples
-m_pl <- geno_meta_to_matrix(meta, output_format = "plink_ped")   # samples × markers
+# the SelectionTools layout is behind use_st_formats(); st_formats = TRUE for one call
+m_st <- geno_meta_to_matrix(meta, preset = "ST", st_formats = TRUE)  # markers × samples
+m_pl <- geno_meta_to_matrix(meta, preset = "PL")                     # samples × markers
 
 dim(m_st$matrix)
-m_st$matrix[1:3, 1:3]                  # SelectionTools "1/4" cells
+m_st$matrix[1:3, 1:3]                  # the ST layout (markers × samples), "A/T" cells
 m_pl$matrix[1:3, 1:3]                  # PLINK concatenated-allele cells
 ```
 
+SelectionTools' own files — its `1/4` codes in its tab-separated matrix
+format plus its map — are written by `st_convert(meta, to = "selectiontools",
+output_dir = )`, behind `use_st_formats()`.
+
 ### 4.3  Re-encode alleles — `recode_geno_meta()`
 
-Convert the whole object between SelectionTools numeric codes and nucleotide
-letters (e.g. `1 → A`, `4 → T`).
+Since 0.9.0 a `GenoMeta` holds nucleotide alleles only, so there is nothing to
+recode on a fresh container: `recode_geno_meta(to_type = "nucleotide")` is
+the explicit route for an object saved by an earlier version with
+SelectionTools codes (`load_geno_meta()` and `upgrade_geno_meta()` do the
+same on their own), and `to_type = "selectiontools"` is defunct.
 
 ```{r recode}
-meta_nuc <- recode_geno_meta(meta, to_type = "nucleotide")
+meta_nuc <- recode_geno_meta(meta, to_type = "nucleotide")   # a no-op here
 
 meta$metadata$encoding         # before
 meta_nuc$metadata$encoding     # after
-c(before = meta$geno_arrays[1, 1, 1], after = meta_nuc$geno_arrays[1, 1, 1])
 ```
 
 ### 4.4  Persist and reload the object — `save_geno_meta()` / `load_geno_meta()`

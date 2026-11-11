@@ -7,7 +7,7 @@
 sim_geno_matrix(
   n_samples = 10L,
   n_markers = 20L,
-  encoding = "selectiontools",
+  encoding = c("nucleotide", "selectiontools"),
   seed = 42L
 )
 }
@@ -16,18 +16,24 @@ sim_geno_matrix(
 
 \item{n_markers}{Number of markers (rows). Default 20.}
 
-\item{encoding}{\code{"selectiontools"} (default) or \code{"nucleotide"}.}
+\item{encoding}{\code{"nucleotide"} (default since 0.9.0) or
+\code{"selectiontools"} (deprecated).}
 
-\item{seed}{Random seed for reproducibility. Default 42.}
+\item{seed}{Random seed for reproducibility. Default 42. The caller's
+own random stream is left untouched; \code{NULL} draws from it instead.}
 }
 \value{
 A character matrix (\code{n_markers} x \code{n_samples}) with named rows
 (\code{Mkr1}, \code{Mkr2}, ...) and columns (\code{S1}, \code{S2}, ...); each cell is a phased
-genotype such as \code{"1/4"} or \code{"A/T"}.
+genotype such as \code{"A/T"}.
 }
 \description{
 Generate a random biallelic genotype matrix (markers in rows, samples in
-columns) in either nucleotide or SelectionTools numeric encoding.
+columns) in nucleotide encoding (\code{A/T}). The SelectionTools numeric
+encoding (\code{1/4}) is deprecated since 0.9.0 — a \code{GenoMeta} stores
+nucleotide alleles only — and still returned here, with a warning, for the
+same draws (the allele is sampled by position, so \code{1} is \code{A} and \code{4} is
+\code{T}).
 }
 \examples{
 geno <- sim_geno_matrix(n_samples = 6, n_markers = 8)

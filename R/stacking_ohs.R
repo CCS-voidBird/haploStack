@@ -37,7 +37,6 @@
 #   "Greedy"      — greedy marginal gain on the set objective, seeded with the
 #                   best row sum of M (0.7.3; the origin's first pick was the
 #                   first sample column, whatever the data).
-#   "GA_coverage" (binary block coverage) was removed in 0.7.4.
 #
 # Input: haplotype-level local GEBV from
 #   compute_profile_localgebv(geno_meta, effect_df, level = "haplotype")
@@ -50,7 +49,7 @@
 #' Selects \code{n_parents} candidates that maximise expected next-cross gain,
 #' using one of two engines (\code{method}): \code{GA_pairwise} and
 #' \code{Greedy} optimise the set objective built on the block-value matrix
-#' \code{\link{.pairwise_block_value_matrix}} — by default
+#' \code{.pairwise_block_value_matrix()} — by default
 #' \code{sum(M[S, S])}, every family's stacking ceiling summed. (The former
 #' \code{"GA_coverage"} engine — binary block coverage via
 #' \code{\link{genetic_algorithm_selection}} — was removed in 0.7.4 for its
@@ -119,9 +118,9 @@ ohs_selection <- function(localgebv,
   .ohs_check_elite(elite_ratio)
   dt <- as.data.table(localgebv)
   if (!"Block" %in% names(dt))
-    stop("ohs_selection: 'localgebv' must have a 'Block' column.")
+    .hs_abort("ohs_selection: 'localgebv' must have a 'Block' column.")
   if (length(setdiff(names(dt), "Block")) == 0L)
-    stop("ohs_selection: 'localgebv' has no sample columns.")
+    .hs_abort("ohs_selection: 'localgebv' has no sample columns.")
 
   need_array <- elite_level == "block" && elite_ratio < 1
   pm <- .pairwise_block_value_matrix(dt, ploidy = ploidy, return_array = need_array)
@@ -143,7 +142,7 @@ ohs_selection <- function(localgebv,
 .ohs_check_elite <- function(elite_ratio) {
   if (!is.numeric(elite_ratio) || length(elite_ratio) != 1L ||
       is.na(elite_ratio) || elite_ratio <= 0 || elite_ratio > 1)
-    stop("'elite_ratio' must be a single number in (0, 1].")
+    .hs_abort("'elite_ratio' must be a single number in (0, 1].")
   invisible(TRUE)
 }
 
@@ -170,16 +169,17 @@ ohs_selection <- function(localgebv,
                                          return_array = FALSE) {
   dt <- as.data.table(localgebv)
   if (!"Block" %in% names(dt))
-    stop(".pairwise_block_value_matrix: 'localgebv' needs a 'Block' column.")
+    .hs_abort(".pairwise_block_value_matrix: 'localgebv' needs a 'Block' column.")
   sample_cols <- setdiff(names(dt), "Block")
   if (length(sample_cols) == 0L)
-    stop(".pairwise_block_value_matrix: no sample columns.")
+    .hs_abort(".pairwise_block_value_matrix: no sample columns.")
 
-  base    <- sub("\\.[0-9]+$", "", sample_cols)
-  samples <- unique(base)
+  hc      <- .hap_cols(sample_cols, ploidy)           # one parser (sc/F24)
+  base    <- hc$base
+  samples <- hc$samples
   n       <- length(samples)
   nb      <- nrow(dt)
-  if (is.null(ploidy)) ploidy <- max(tabulate(match(base, samples)))
+  ploidy  <- hc$ploidy
 
   # A[sample, block, hap] — per-sample block values sorted descending, zero-pad.
   A <- array(0, dim = c(n, nb, ploidy))
@@ -187,8 +187,27 @@ ohs_selection <- function(localgebv,
     cols <- sample_cols[base == samples[s]]
     vals <- matrix(as.numeric(as.matrix(dt[, cols, with = FALSE])),
                    nrow = nb, ncol = length(cols))
-    sorted <- t(apply(vals, 1L, sort, decreasing = TRUE))
-    if (nb == 1L) sorted <- matrix(sorted, nrow = 1L)
+    # A missing value is an absent copy: it sorts out and the row is padded
+    # with 0, like copies beyond the data (up to 0.8.8 an NA made the rows
+    # ragged and the assignment below failed).
+    if (ploidy == 2L && ncol(vals) == 2L) {
+      # Diploid: the descending sort of two values is (max, min); vectorised,
+      # it is the same numbers as the per-row sort() (0.9.0, #013 perf).
+      x1 <- vals[, 1L]; x2 <- vals[, 2L]
+      n1 <- is.na(x1); n2 <- is.na(x2)
+      hi <- pmax(x1, x2); lo <- pmin(x1, x2)
+      hi[n1] <- x2[n1]; hi[n2 & !n1] <- x1[n2 & !n1]; hi[is.na(hi)] <- 0
+      lo[n1 | n2] <- 0
+      A[s, , 1L] <- hi
+      A[s, , 2L] <- lo
+      next
+    }
+    k <- ncol(vals)
+    srt <- apply(vals, 1L, function(r) {
+      r <- sort(r, decreasing = TRUE)
+      c(r, rep(0, k - length(r)))
+    })
+    sorted <- matrix(srt, nrow = nb, ncol = k, byrow = TRUE)
     if (ncol(sorted) < ploidy)
       sorted <- cbind(sorted, matrix(0, nb, ploidy - ncol(sorted)))
     A[s, , ] <- sorted[, seq_len(ploidy), drop = FALSE]
@@ -198,7 +217,20 @@ ohs_selection <- function(localgebv,
   # contribute to sum(M[S,S]) — matches the origin compute_pairwise.cpp, which
   # fills only i < j).
   M <- matrix(0, n, n, dimnames = list(samples, samples))
-  if (n >= 2L) {
+  if (n >= 2L && ploidy == 2L) {
+    # 0.9.0: all pairs through the vectorised family rule, in chunks of pairs
+    # (each chunk's pairs x blocks matrices stay ~16 MB). Same top-2 rule and
+    # the same long-double sum over blocks as the per-pair loop it replaces,
+    # so M is bit-identical; OHS spent 2-4 s per cycle in that loop (#013).
+    cb    <- utils::combn(n, 2L)
+    chunk <- max(1L, floor(2e6 / max(1L, nb)))
+    for (st in seq(1L, ncol(cb), by = chunk)) {
+      idx  <- st:min(ncol(cb), st + chunk - 1L)
+      vals <- rowSums(.ohs_pair_block_values(A, cb[1L, idx], cb[2L, idx]))
+      M[cbind(cb[1L, idx], cb[2L, idx])] <- vals
+      M[cbind(cb[2L, idx], cb[1L, idx])] <- vals
+    }
+  } else if (n >= 2L) {
     for (i in seq_len(n - 1L)) {
       Ai <- matrix(A[i, , ], nb, ploidy)
       for (j in (i + 1L):n) {
@@ -293,7 +325,7 @@ ohs_selection <- function(localgebv,
   }
 
   if (is.null(A))
-    stop(".ohs_objective: the block level needs the sorted haplotype array 'A'.")
+    .hs_abort(".ohs_objective: the block level needs the sorted haplotype array 'A'.")
   fit <- function(idx) {
     k <- length(idx)
     if (k < 2L) return(0)
@@ -355,15 +387,7 @@ ohs_selection <- function(localgebv,
   if (is.null(obj)) obj <- .ohs_objective(M)
   fit <- obj$fit
 
-  old_seed <- if (exists(".Random.seed", envir = globalenv(), inherits = FALSE))
-    get(".Random.seed", envir = globalenv()) else NULL
-  on.exit({
-    if (is.null(old_seed)) {
-      if (exists(".Random.seed", envir = globalenv(), inherits = FALSE))
-        rm(list = ".Random.seed", envir = globalenv())
-    } else assign(".Random.seed", old_seed, envir = globalenv())
-  }, add = TRUE)
-  set.seed(seed)
+  .local_seed(seed)
 
   pop  <- replicate(pop_size, sort(sample.int(n, n_select)), simplify = FALSE)
   fv   <- vapply(pop, fit, numeric(1L))
@@ -395,7 +419,7 @@ ohs_selection <- function(localgebv,
     gb  <- which.max(fv)
     if (fv[gb] > bestf) { bestf <- fv[gb]; best <- pop[[gb]] }
     if (verbose && g %% 50L == 0L)
-      message("  OHS-GA gen ", g, " — best objective = ", round(bestf, 3L))
+      .hs_inform("  OHS-GA gen ", g, " \u2014 best objective = ", round(bestf, 3L))
   }
   nm[best]
 }
@@ -410,8 +434,9 @@ ohs_selection <- function(localgebv,
 .collapse_hap_to_geno <- function(localgebv) {
   dt <- as.data.table(localgebv)
   sample_cols <- setdiff(names(dt), "Block")
-  base    <- sub("\\.[0-9]+$", "", sample_cols)
-  samples <- unique(base)
+  hc      <- .hap_cols(sample_cols)                   # one parser (sc/F24)
+  base    <- hc$base
+  samples <- hc$samples
 
   out <- data.table(Block = dt$Block)
   for (s in samples) {

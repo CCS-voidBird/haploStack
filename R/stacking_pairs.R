@@ -259,10 +259,8 @@ print.pair_selection <- function(x, n = 10L, ...) {
   M       <- .pairwise_block_value_matrix(localgebv, ploidy = ploidy)
   samples <- rownames(M)
   if (isTRUE(allow_selfing)) {
-    if (is.null(ploidy)) {
-      cols   <- setdiff(names(as.data.table(localgebv)), "Block")
-      ploidy <- max(tabulate(match(sub("\\.[0-9]+$", "", cols), samples)))
-    }
+    if (is.null(ploidy))
+      ploidy <- .hap_cols(setdiff(names(as.data.table(localgebv)), "Block"))$ploidy
     diag(M) <- .pair_self_ceiling(localgebv, samples, ploidy)
   }
   cand0 <- .pair_candidates(length(samples), allow_selfing)
@@ -353,7 +351,7 @@ print.pair_selection <- function(x, n = 10L, ...) {
     pair_freq <- if (identical(budget$pair_budget, "families")) "projected" else "running"
   pair_freq <- match.arg(pair_freq, c("projected", "running"))
   if (objective == "candidate" && level == "family")
-    stop("gbs_pair_selection: gbs_objective = \"candidate\" is a population-level ",
+    .hs_abort("gbs_pair_selection: gbs_objective = \"candidate\" is a population-level ",
          "need score; use gbs_pair_level = \"population\" with it.")
 
   HapN    <- ctx$HapN
@@ -466,14 +464,15 @@ print.pair_selection <- function(x, n = 10L, ...) {
 # TS pairs (driver-only, mirrors .stk_select_truncation())
 # ---------------------------------------------------------------------------
 
+# `opts` is the driver's resolved option list (every knob present; the
+# defaults are held once, in the driver's signature — sc/F32).
 .stk_pairs_truncation <- function(localgebv, budget, opts) {
   scorer <- .pair_scorer_ts(localgebv, allow_selfing = budget$allow_selfing,
-                            ts_pair_score = opts$ts_pair_score %||% "midparent",
-                            usefulness_k  = opts$usefulness_k %||% 1,
-                            select_priority = opts$select_priority %||% "high")
+                            ts_pair_score = opts$ts_pair_score,
+                            usefulness_k  = opts$usefulness_k,
+                            select_priority = opts$select_priority)
   .pairs_greedy(scorer, budget, allow_selfing = budget$allow_selfing,
-                max_use = opts$max_use %||% Inf,
-                overshoot = opts$overshoot %||% "skip")
+                max_use = opts$max_use, overshoot = opts$overshoot)
 }
 
 
@@ -486,7 +485,7 @@ print.pair_selection <- function(x, n = 10L, ...) {
 #' Chooses the crosses themselves rather than a parent subgroup: every family
 #' \code{(i, j)} is valued by its stacking ceiling \code{M[i, j]} — the sum
 #' over blocks of the best \code{ploidy} haplotype values among the two parents'
-#' haplotypes (\code{\link{.pairwise_block_value_matrix}}, the quantity
+#' haplotypes (\code{.pairwise_block_value_matrix()}, the quantity
 #' \code{\link{ohs_selection}} sums over a parent set) — and families are taken
 #' under one of the two budgets of \code{\link{pair_selection_budget}}.
 #'
@@ -663,6 +662,10 @@ ohs_pair_selection <- function(localgebv,
 #' @param pair_penalty \code{"loss"} (default) or \code{"hard"}.
 #' @param pair_pool \code{"shortlist"} (default) or \code{"all"}.
 #' @param shortlist_k Parents in the shortlist; \code{NULL} = \code{4 * top_founders}.
+#' @param gbs_engine The family engine. Only \code{"greedy"} (the default) is
+#'   implemented over family sets; \code{"GA"} is refused with the same message
+#'   as the driver (pair plan Phase D). Present so the three GBS entry points
+#'   share one specification (0.9.0).
 #'
 #' @return A \code{"pair_selection"} \code{data.table}: \code{Parent1},
 #'   \code{Parent2}, \code{score} (lower = better; at the population level the
@@ -698,31 +701,36 @@ gbs_pair_selection <- function(localgebv,
                                shortlist_k       = NULL,
                                max_use           = Inf,
                                overshoot         = c("skip", "stop"),
-                               select_priority   = c("high", "low")) {
+                               select_priority   = c("high", "low"),
+                               gbs_engine        = "greedy") {
   gbs_method      <- match.arg(gbs_method)
   gbs_preset      <- match.arg(gbs_preset)
   gbs_objective   <- match.arg(gbs_objective)
   select_priority <- match.arg(select_priority)
   overshoot       <- match.arg(overshoot)
+  gbs_engine      <- match.arg(gbs_engine, c("greedy", "GA"))
+  if (gbs_engine == "GA")
+    .hs_abort("gbs_pair_selection: gbs_engine = \"GA\" over family sets is not ",
+              "implemented (pair plan Phase D); the pairs engine is the greedy.",
+              call. = FALSE)
 
   # The preset fills the penalty knobs the caller did not pass (explicit wins);
-  # the objective is the pairs default "set" unless passed.
-  spec <- .gbs_apply_preset(gbs_preset, list(
-    penalty_mode      = if (missing(penalty_mode))      NULL else match.arg(penalty_mode),
+  # the objective is the pairs default "set" unless passed (one resolver with
+  # gbs_selection() and the driver, sc/F25).
+  spec <- .gbs_spec(
+    gbs_preset, gbs_objective = gbs_objective, gbs_engine = gbs_engine,
+    penalty_mode      = if (missing(penalty_mode))      NULL else penalty_mode,
     gbs_penalty       = if (missing(gbs_penalty))       NULL else gbs_penalty,
     penalty_scale     = if (missing(penalty_scale))     NULL else penalty_scale,
-    gbs_effect_weight = if (missing(gbs_effect_weight)) NULL else gbs_effect_weight))
-  .gbs_check_penalty_args(spec$gbs_penalty, spec$penalty_mode, spec$penalty_scale)
-  # Not preset-backed (#036 stage 1); validated then set on the spec directly.
-  .gbs_check_rank_scale(penalty_rank_scale)
-  spec$penalty_rank_scale <- penalty_rank_scale
+    gbs_effect_weight = if (missing(gbs_effect_weight)) NULL else gbs_effect_weight,
+    penalty_rank_scale = penalty_rank_scale, caller = "gbs_pair_selection")
 
   budget <- pair_selection_budget(top_founders, pair_budget, allow_selfing)
   if (is.null(ideal_genotypes))
     ideal_genotypes <- .construct_ideal_genotype(localgebv)
   mm <- .gbs_hapn_matrix(localgebv, ideal_genotypes)
   if (length(mm$samples) < 2L && !isTRUE(allow_selfing))
-    stop("gbs_pair_selection: fewer than two candidates in 'localgebv'.")
+    .hs_abort("gbs_pair_selection: fewer than two candidates in 'localgebv'.")
   ctx <- .gbs_context(mm, budget$n_parents_ref, gbs_method, spec)
 
   scorer <- .pair_scorer_gbs(mm, ctx, budget, n_offspring = num_offspring,

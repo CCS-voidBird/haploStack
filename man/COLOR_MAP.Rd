@@ -5,15 +5,15 @@
 \alias{COLOR_MAP}
 \title{Diploid genotype color map}
 \format{
-An object of class \code{list} of length 2.
+An object of class \code{list} of length 1.
 }
 \usage{
 COLOR_MAP
 }
 \description{
-Named list with two encoding keys (\code{"nucleotide"} and
-\code{"selectiontools"}). Each element maps two-allele genotype strings
-(e.g. \code{"11"}, \code{"14"}, \code{"AA"}, \code{"AT"}) to hex colors.
+Named list with one encoding key, \code{"nucleotide"} (the
+\code{"selectiontools"} palette went with the encoding in 0.9.0). It maps
+two-allele genotype strings (e.g. \code{"AA"}, \code{"AT"}) to hex colors.
 Homozygotes are saturated; heterozygotes are intermediate hues; missing
 calls are light grey.
 }

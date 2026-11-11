@@ -22,44 +22,16 @@ DEFAULT_ALLELE_DICT <- c("A", "T")
 #' @export
 EXTENDED_ALLELE_DICT <- c("A", "T", "C", "G")
 
-#' Default numeric encoding dictionary
-#'
-#' Named list mapping nucleotide characters to their SelectionTools integer
-#' codes. Missing alleles ("-") map to -1L.
-#'
-#' @details
-#' The canonical nucleotide dictionary (\code{A, C, G, T, -}) maps to the
-#' SelectionTools integer codes in \strong{alphabetical} order:
-#'
-#' | Character | Code |
-#' |-----------|------|
-#' | A         | 1    |
-#' | C         | 2    |
-#' | G         | 3    |
-#' | T         | 4    |
-#' | -         | -1   |
-#'
-#' \code{recode_geno_meta(to_type = "selectiontools")} therefore encodes
-#' \code{A -> 1, C -> 2, G -> 3, T -> 4} (missing \code{-> -1}); nucleotide
-#' \code{A, C, G, T, -} is the primary dictionary and SelectionTools numeric codes
-#' are the alternate encoding (used for tools that ingest numeric genotypes, e.g.
-#' LD estimation).
-#'
-#' @export
-DEFAULT_ENCODING_DICT <- list(
-  "A" = 1L,
-  "C" = 2L,
-  "G" = 3L,
-  "T" = 4L,
-  "-" = -1L
-)
+# The SelectionTools code table (DEFAULT_ENCODING_DICT, REVERSED_ENCODING_DICT)
+# moved to R/st_formats.R in 0.9.0 (C-5): a GenoMeta stores nucleotide alleles
+# only, and the table is applied at the SelectionTools boundary.
 
 #' Default placeholder for a missing allele in a haplotype signature
 #'
 #' The character written in place of an unobserved allele when a block's
 #' haplotype signature is assembled (see \code{\link{write_block_allele_sheet}},
 #' \code{\link{count_block_subtypes}}). \code{"-"} is the canonical missing-allele
-#' character of \code{\link{DEFAULT_ENCODING_DICT}}, where it maps to \code{-1L}.
+#' character of the nucleotide vocabulary.
 #'
 #' @details
 #' A signature is the alleles of a haplotype copy pasted together in genomic
@@ -74,39 +46,20 @@ DEFAULT_ENCODING_DICT <- list(
 #' Override globally with \code{options(haploStack.fill_na = "?")}, or per call
 #' via the \code{fill_na} argument.
 #'
-#' @seealso \code{\link{DEFAULT_ENCODING_DICT}},
-#'   \code{\link{write_block_allele_sheet}}, \code{\link{count_block_subtypes}}
+#' @seealso \code{\link{write_block_allele_sheet}},
+#'   \code{\link{count_block_subtypes}}
 #' @export
 HS_FILL_NA_DEFAULT <- "-"
 
-# Resolve the active missing-allele placeholder: the `haploStack.fill_na` option
-# when set (see zzz.R), else HS_FILL_NA_DEFAULT. Must be a single non-NA string;
-# an empty string is refused because it reintroduces the collision the
-# placeholder exists to prevent.
+# Resolve the active missing-allele placeholder: the call's `fill_na` argument,
+# else the `haploStack.fill_na` option (see zzz.R), else HS_FILL_NA_DEFAULT
+# (.hs_setting(), R/state.R). Must be a single non-NA string; an empty string
+# is refused because it reintroduces the collision the placeholder exists to
+# prevent.
 # @keywords internal
 .hs_fill_na <- function(fill_na = NULL) {
-  x <- fill_na %||% getOption("haploStack.fill_na", HS_FILL_NA_DEFAULT)
-  if (!is.character(x) || length(x) != 1L || is.na(x))
-    stop("fill_na must be a single non-NA character string; got ",
-         paste(utils::capture.output(utils::str(x)), collapse = " "), ".")
-  if (!nzchar(x))
-    stop('fill_na must not be the empty string — an empty placeholder shortens ',
-         'the signature and lets distinct allele combinations collide. Use "-" ',
-         "(the default) or another single character.")
-  x
+  .hs_setting("fill_na", fill_na)
 }
-
-#' Reversed encoding dictionary
-#'
-#' Inverse of \code{DEFAULT_ENCODING_DICT}: maps integer codes back to
-#' nucleotide character strings. Useful for converting SelectionTools numeric
-#' genotypes back to nucleotide format.
-#'
-#' @export
-REVERSED_ENCODING_DICT <- setNames(
-  names(DEFAULT_ENCODING_DICT),
-  as.character(unname(unlist(DEFAULT_ENCODING_DICT)))
-)
 
 #' Single-allele base color map
 #'
@@ -122,41 +75,19 @@ BASE_COLOR_MAP <- list(
     "C" = "#1f78b4",  # blue
     "T" = "#ff7f00",  # orange
     "-" = "#D3D3D3"   # light grey (missing)
-  ),
-  "selectiontools" = c(          # codes A=1, C=2, G=3, T=4 (mirror the nucleotide colours)
-    "1"  = "#6a3d9a",            # A purple
-    "2"  = "#1f78b4",            # C blue
-    "3"  = "#009E73",            # G green
-    "4"  = "#ff7f00",            # T orange
-    "0"  = "#D3D3D3",
-    "-1" = "#D3D3D3",
-    "-"  = "#D3D3D3"
   )
 )
 
 #' Diploid genotype color map
 #'
-#' Named list with two encoding keys (\code{"nucleotide"} and
-#' \code{"selectiontools"}). Each element maps two-allele genotype strings
-#' (e.g. \code{"11"}, \code{"14"}, \code{"AA"}, \code{"AT"}) to hex colors.
+#' Named list with one encoding key, \code{"nucleotide"} (the
+#' \code{"selectiontools"} palette went with the encoding in 0.9.0). It maps
+#' two-allele genotype strings (e.g. \code{"AA"}, \code{"AT"}) to hex colors.
 #' Homozygotes are saturated; heterozygotes are intermediate hues; missing
 #' calls are light grey.
 #'
 #' @export
 COLOR_MAP <- list(
-  "selectiontools" = c(          # codes A=1, C=2, G=3, T=4 (mirror the nucleotide genotypes)
-    "00"  = "#D3D3D3",
-    "01"  = "#c9aede", "11" = "#6a3d9a",   # -A / AA
-    "02"  = "#80d4b8", "22" = "#009E73",   # -C / CC
-    "03"  = "#a6c8e8", "33" = "#1f78b4",   # -G / GG
-    "04"  = "#ffd199", "44" = "#ff7f00",   # -T / TT
-    "12"  = "#3d7a6a",                     # AC
-    "13"  = "#3d5a8a",                     # AG
-    "14"  = "#b35e00",                     # AT
-    "23"  = "#0a6678",                     # CG
-    "24"  = "#a05a1f",                     # CT
-    "34"  = "#7a8a00"                      # GT
-  ),
   "nucleotide" = c(
     "--"  = "#D3D3D3",
     "-A"  = "#c9aede", "AA" = "#6a3d9a",
@@ -191,7 +122,7 @@ COLOR_MAP <- list(
 #'
 #' @export
 make_allele_color_map <- function(allele_values, encoding) {
-  u <- sort(unique(allele_values[!is.na(allele_values) & nzchar(allele_values)]))
+  u <- .hs_sort(unique(allele_values[!is.na(allele_values) & nzchar(allele_values)]))
   if (length(u) == 0L) return(character(0))
 
   if (identical(encoding, "numeric")) {
@@ -204,7 +135,7 @@ make_allele_color_map <- function(allele_values, encoding) {
     } else if (all(lens == 2L)) {
       COLOR_MAP
     } else {
-      stop("make_allele_color_map: mixed allele-string lengths (",
+      .hs_abort("make_allele_color_map: mixed allele-string lengths (",
            paste(sort(unique(lens)), collapse = ", "),
            "); all values must be single alleles or all two-allele genotypes.")
     }
@@ -250,33 +181,107 @@ HS_MISSING_MODES <- c("nucleotide", "selectiontools", "numeric")
 
 .hs_missing_mode <- function(mode, caller) {
   if (missing(mode) || is.null(mode))
-    stop(caller, ": 'mode' is required — name the source format the character ",
+    .hs_abort(caller, ": 'mode' is required \u2014 name the source format the character ",
          "belongs to: ", paste0('"', HS_MISSING_MODES, '"', collapse = ", "),
          ". A missing character is only ever missing for the format that ",
          "writes it; \"0\" is an absence in a PED and a genotype in a dosage ",
          "matrix.", call. = FALSE)
   if (!is.character(mode) || length(mode) != 1L || is.na(mode))
-    stop(caller, ": 'mode' must be a single non-NA string.", call. = FALSE)
+    .hs_abort(caller, ": 'mode' must be a single non-NA string.", call. = FALSE)
   if (identical(mode, "allele")) mode <- "numeric"     # dosage alias
   if (!mode %in% HS_MISSING_MODES)
-    stop(caller, ': unknown mode "', mode, '". Use one of ',
+    .hs_abort(caller, ': unknown mode "', mode, '". Use one of ',
          paste0('"', HS_MISSING_MODES, '"', collapse = ", "), ".", call. = FALSE)
   mode
 }
 
-# Read the session registry for one mode. Returns character(0) when nothing is
-# attached, when the mode is NULL/unknown, or when the option holds something
-# unexpected — a malformed option must not be able to change what is missing.
+# The built-in missing-allele vocabulary for a source format, plus `extra`
+# (characters the caller resolved: a container's stamp, a registry read at the
+# portal). "0" is missing for the two allele vocabularies and never for a
+# dosage one, where it is a real genotype — that exclusion is load-bearing, see
+# normalise_missing_alleles(). Since 0.9.0 this function reads no option: the
+# session registry (use_missing_chars()) reaches a container only where it is
+# built or repaired, through .extra_missing_chars(); afterwards the container's
+# metadata$missing_tokens stamp is the record every consumer uses
+# (.meta_extra_missing()).
 # @keywords internal
-.extra_missing_chars <- function(mode) {
+.missing_tokens <- function(encoding, extra = character(0L)) {
+  base <- c("", "NA", "N", "n", ".", "-")
+  if (identical(encoding, "nucleotide") ||
+      identical(encoding, "selectiontools")) base <- c(base, "0")
+  if (length(extra)) {
+    extra <- as.character(extra)
+    base  <- c(base, extra[!is.na(extra)])
+  }
+  unique(base)
+}
+
+# The characters a container was normalised against beyond the built-in set:
+# its stamp minus the vocabulary of its recorded encoding. character(0) for
+# an unstamped (pre-0.6.0 or hand-built) container.
+# @keywords internal
+.meta_extra_missing <- function(meta) {
+  stamp <- meta$metadata$missing_tokens
+  if (!is.character(stamp)) return(character(0L))
+  setdiff(stamp[!is.na(stamp)], .missing_tokens(meta$metadata$encoding))
+}
+
+# The extra missing characters in force for one mode at a build or repair.
+# `missing_chars` is the call's argument: NULL takes the session registry
+# (use_missing_chars()), a character vector names the characters for this
+# mode, a per-mode list is read like the registry. An argument is validated
+# as use_missing_chars() validates (single characters, never a real allele of
+# the mode); an unusable option value is ignored, because options() set by
+# hand must not be able to change what is missing. Returns character(0) when
+# nothing applies or the mode is NULL/unknown.
+# @keywords internal
+.extra_missing_chars <- function(mode, missing_chars = NULL) {
   if (is.null(mode) || !is.character(mode) || length(mode) != 1L || is.na(mode))
     return(character(0L))
   if (identical(mode, "allele")) mode <- "numeric"
-  reg <- getOption("haploStack.missing_chars")
-  if (!is.list(reg) || is.null(reg[[mode]])) return(character(0L))
-  x <- reg[[mode]]
-  if (!is.character(x)) return(character(0L))
+  reg <- .hs_setting("missing_chars", missing_chars)
+  if (is.null(reg)) return(character(0L))
+  x <- if (is.character(reg)) reg else reg[[mode]]
+  if (is.null(x) || !is.character(x)) return(character(0L))
+  if (!is.null(missing_chars)) {
+    if (length(x) == 0L) return(character(0L))
+    return(.hs_check_missing_chars(x, mode, "missing_chars"))
+  }
   unique(x[!is.na(x) & nchar(x) == 1L])
+}
+
+# The validation use_missing_chars() and the `missing_chars` argument share:
+# a non-empty character vector of single, non-blank, non-NA characters, none
+# of them a real allele of `mode`. Returns the unique characters.
+.hs_check_missing_chars <- function(chars, mode, caller) {
+  if (!is.character(chars) || length(chars) == 0L)
+    .hs_abort(caller, ": 'chars' must be a non-empty character vector.",
+         call. = FALSE)
+  if (anyNA(chars))
+    .hs_abort(caller, ": 'chars' must not contain NA — NA is already the ",
+         "one representation of missing inside a GenoMeta.", call. = FALSE)
+
+  bad_len <- chars[nchar(chars) != 1L]
+  if (length(bad_len) > 0L)
+    .hs_abort(caller, ": each character must be exactly one character; ",
+         "got ", paste0('"', bad_len, '"', collapse = ", "),
+         ". Missing is decided per allele, so a multi-character token would ",
+         "never match a single allele.", call. = FALSE)
+
+  blank <- chars[!nzchar(trimws(chars))]
+  if (length(blank) > 0L)
+    .hs_abort(caller, ": blank and whitespace-only cells are already ",
+         "missing under every mode — nothing to register.", call. = FALSE)
+
+  reserved <- intersect(chars, .hs_reserved_alleles(mode))
+  if (length(reserved) > 0L)
+    .hs_abort(caller, ": ", paste0('"', reserved, '"', collapse = ", "),
+         if (length(reserved) > 1L) " are real alleles of " else " is a real allele of ",
+         '"', mode, '" and cannot mean missing there.',
+         if (identical(mode, "numeric"))
+           " For a dosage panel that genuinely writes a digit for an absent call, declare it on the read instead (extra_na=), where the caller owns the risk."
+         else "", call. = FALSE)
+  unique(chars)
 }
 
 
@@ -295,7 +300,10 @@ HS_MISSING_MODES <- c("nucleotide", "selectiontools", "numeric")
 #'   \code{"nucleotide"} \tab \code{"" "NA" "N" "n" "." "-" "0"} \tab
 #'     \strong{both} \code{"0"} (PLINK's code) and \code{"-"} \cr
 #'   \code{"selectiontools"} \tab \code{"" "NA" "N" "n" "." "-" "0"} \tab
-#'     \code{"0"} since 0.6.0 — a 1/2/3/4 file writes it for an absent call \cr
+#'     \code{"0"} since 0.6.0 — a 1/2/3/4 file writes it for an absent call;
+#'     \strong{deprecated as a registration mode since 0.9.0}: it reaches only
+#'     \code{\link{st_convert}} and the \code{"ST"} preset, which translate the
+#'     codes on the way in \cr
 #'   \code{"numeric"} \tab \code{"" "NA" "N" "n" "." "-"} \tab
 #'     \strong{never} \code{"0"} — that is a real genotype
 #' }
@@ -319,13 +327,21 @@ HS_MISSING_MODES <- c("nucleotide", "selectiontools", "numeric")
 #' @section Scope and lifetime:
 #' The registration is a session option (\code{haploStack.missing_chars}) and is
 #' gone on restart — deliberately, because it is a statement about a file being
-#' read, not about the package. It applies everywhere at once: the readers, the
-#' \code{\link{is_geno_meta}} check, \code{\link{repair_geno_meta}}, and the
-#' frequency/IBS/clustering paths that still resolve missing themselves.
+#' read, not about the package.
 #'
-#' A container normalised while a registration was active records the vocabulary
-#' it was cleaned against in \code{metadata$missing_tokens}, so it stays
-#' self-describing in a later session where nothing is attached.
+#' Since 0.9.0 it is read in exactly one place: where a container is
+#' \strong{built or repaired} — the readers, \code{\link{build_geno_meta}},
+#' \code{\link{new_geno_meta}} and \code{\link{repair_geno_meta}}. Each of
+#' those also takes the same characters as its own \code{missing_chars}
+#' argument, which wins over the registry (\code{character(0)} ignores it for
+#' that call). The vocabulary a container was normalised against is recorded in
+#' \code{metadata$missing_tokens}, and from then on that stamp is what every
+#' consumer — \code{\link{is_geno_meta}}, the frequency, IBS and clustering
+#' paths — goes by. A character registered \emph{after} a container was built
+#' does not change how that container is read; repair it with
+#' \code{repair_geno_meta(meta, missing_chars = "#")} if it should. This is
+#' what lets two jobs in one process read different panels without one
+#' registration leaking into the other's numbers.
 #'
 #' @param chars Character vector of single characters to register.
 #' @param mode  Source format the characters belong to: \code{"nucleotide"},
@@ -347,45 +363,25 @@ HS_MISSING_MODES <- c("nucleotide", "selectiontools", "numeric")
 #'   \code{\link{repair_geno_meta}}, \code{\link{HS_FILL_NA_DEFAULT}}
 #' @export
 use_missing_chars <- function(chars, mode) {
-  mode <- .hs_missing_mode(mode, "use_missing_chars")
+  mode  <- .hs_missing_mode(mode, "use_missing_chars")
+  chars <- .hs_check_missing_chars(chars, mode, "use_missing_chars")
+  if (identical(mode, "selectiontools")) .st_gate("use_missing_chars", per_call = FALSE)  # C-6
+  if (identical(mode, "selectiontools"))
+    .st_encoding_deprecated("use_missing_chars", what = "mode = \"selectiontools\"",
+                            then = paste0("the registration reaches only st_convert() ",
+                                          "and the \"ST\" preset, which translate the ",
+                                          "codes on the way in"))
 
-  if (!is.character(chars) || length(chars) == 0L)
-    stop("use_missing_chars: 'chars' must be a non-empty character vector.",
-         call. = FALSE)
-  if (anyNA(chars))
-    stop("use_missing_chars: 'chars' must not contain NA — NA is already the ",
-         "one representation of missing inside a GenoMeta.", call. = FALSE)
-
-  bad_len <- chars[nchar(chars) != 1L]
-  if (length(bad_len) > 0L)
-    stop("use_missing_chars: each character must be exactly one character; ",
-         "got ", paste0('"', bad_len, '"', collapse = ", "),
-         ". Missing is decided per allele, so a multi-character token would ",
-         "never match a single allele.", call. = FALSE)
-
-  blank <- chars[!nzchar(trimws(chars))]
-  if (length(blank) > 0L)
-    stop("use_missing_chars: blank and whitespace-only cells are already ",
-         "missing under every mode — nothing to register.", call. = FALSE)
-
-  reserved <- intersect(chars, .hs_reserved_alleles(mode))
-  if (length(reserved) > 0L)
-    stop("use_missing_chars: ", paste0('"', reserved, '"', collapse = ", "),
-         if (length(reserved) > 1L) " are real alleles of " else " is a real allele of ",
-         '"', mode, '" and cannot mean missing there.',
-         if (identical(mode, "numeric"))
-           " For a dosage panel that genuinely writes a digit for an absent call, declare it on the read instead (extra_na=), where the caller owns the risk."
-         else "", call. = FALSE)
-
-  reg <- getOption("haploStack.missing_chars")
+  reg <- .hs_option_raw("missing_chars")
   if (!is.list(reg)) reg <- list()
   reg[[mode]] <- unique(c(.extra_missing_chars(mode), chars))
   options(haploStack.missing_chars = reg)
 
-  message("use_missing_chars: ", paste0('"', chars, '"', collapse = ", "),
+  eff <- .missing_tokens(mode, .extra_missing_chars(mode))
+  .hs_inform("use_missing_chars: ", paste0('"', chars, '"', collapse = ", "),
           " now read as missing for '", mode, "' (session only). Effective set: ",
-          paste0('"', .missing_tokens(mode), '"', collapse = " "), ".")
-  invisible(.missing_tokens(mode))
+          paste0('"', eff, '"', collapse = " "), ".")
+  invisible(eff)
 }
 
 
@@ -407,8 +403,9 @@ use_missing_chars <- function(chars, mode) {
 #' @seealso \code{\link{use_missing_chars}}
 #' @export
 missing_chars <- function(mode, chars_only = FALSE) {
-  mode <- .hs_missing_mode(mode, "missing_chars")
-  if (isTRUE(chars_only)) .extra_missing_chars(mode) else .missing_tokens(mode)
+  mode  <- .hs_missing_mode(mode, "missing_chars")
+  extra <- .extra_missing_chars(mode)
+  if (isTRUE(chars_only)) extra else .missing_tokens(mode, extra)
 }
 
 
@@ -435,7 +432,7 @@ reset_missing_chars <- function(mode = NULL) {
     return(invisible(list()))
   }
   mode <- .hs_missing_mode(mode, "reset_missing_chars")
-  reg  <- getOption("haploStack.missing_chars")
+  reg  <- .hs_option_raw("missing_chars")
   if (!is.list(reg)) reg <- list()
   reg[[mode]] <- NULL
   options(haploStack.missing_chars = reg)

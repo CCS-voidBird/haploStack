@@ -14,10 +14,10 @@ library(haploStack)
 .test_data <- local({
   set.seed(42L)
   geno <- sim_geno_matrix(n_samples = 6L, n_markers = 12L,
-                           encoding = "selectiontools")
+                           encoding = "nucleotide")
   map  <- sim_map_data(rownames(geno), n_chrom = 2L)
   bmap <- sim_block_map(map, block_size = 3L)
-  eff  <- sim_effect_df(rownames(geno), alleles = c("1","4"))
+  eff  <- sim_effect_df(rownames(geno), alleles = c("A","T"))
   meta <- sim_geno_meta(n_samples = 6L, n_markers = 12L,
                          n_chrom = 2L, block_size = 3L, seed = 42L)
   list(geno = geno, map = map, bmap = bmap, eff = eff, meta = meta)
@@ -48,7 +48,7 @@ test_that("geno_meta_views alleles table has correct dimensions", {
 
 test_that("geno_meta_views detects encoding automatically", {
   v <- .views(.test_data$meta)
-  expect_equal(v$encoding, "selectiontools")
+  expect_equal(v$encoding, "nucleotide")
 })
 
 test_that("geno_meta_views errors when input is not a GenoMeta", {
@@ -207,8 +207,11 @@ test_that("recode_geno_meta converts selectiontools to nucleotide", {
 })
 
 test_that("recode_geno_meta returns input unchanged when encoding matches", {
-  rec <- recode_geno_meta(.test_data$meta, to_type = "selectiontools")
-  expect_equal(rec$metadata$encoding, .test_data$meta$metadata$encoding)
+  rec <- recode_geno_meta(.test_data$meta, to_type = "nucleotide")
+  expect_identical(rec, .test_data$meta)
+  # the old target is defunct (0.9.0, C-5)
+  expect_error(recode_geno_meta(.test_data$meta, to_type = "selectiontools"),
+               class = "hs_error_defunct")
 })
 
 test_that("nucleotide<->selectiontools codes are alphabetical A=1,C=2,G=3,T=4", {
@@ -217,15 +220,18 @@ test_that("nucleotide<->selectiontools codes are alphabetical A=1,C=2,G=3,T=4", 
   # inverse: codes 2/3 map back to C/G (the fixed swap)
   expect_equal(unname(REVERSED_ENCODING_DICT[c("1", "2", "3", "4")]),
                c("A", "C", "G", "T"))
-  # end-to-end: a 4-allele nucleotide GenoMeta recodes C->2, G->3
-  m <- build_geno_meta(
-    geno_2d = matrix(c("A/C", "G/T"), nrow = 1,
-                     dimnames = list("S1", c("M1", "M2"))),
-    map     = data.frame(Chrom = "1", Marker = c("M1", "M2"), Pos = c(1e6, 2e6)),
-    encoding = "nucleotide", source_format = "nucleotide")
-  st <- recode_geno_meta(m, to_type = "selectiontools")
-  expect_setequal(as.character(st$geno_arrays["S1", "M1", ]), c("1", "2"))  # A,C
-  expect_setequal(as.character(st$geno_arrays["S1", "M2", ]), c("3", "4"))  # G,T
+  # end-to-end: codes 1/2 and 3/4 declared as SelectionTools translate to
+  # A/C and G/T at the portal (deprecated since 0.9.0, C-5; behind the switch, C-6)
+  withr::local_options(list(haploStack.st_formats = TRUE))
+  expect_warning(
+    m <- suppressMessages(build_geno_meta(
+      geno_2d = matrix(c("1/2", "3/4"), nrow = 1,
+                       dimnames = list("S1", c("M1", "M2"))),
+      map     = data.frame(Chrom = "1", Marker = c("M1", "M2"), Pos = c(1e6, 2e6)),
+      encoding = "selectiontools")),
+    class = "hs_warning_deprecated")
+  expect_setequal(as.character(m$geno_arrays["S1", "M1", ]), c("A", "C"))
+  expect_setequal(as.character(m$geno_arrays["S1", "M2", ]), c("G", "T"))
 })
 
 # ── compute_profile_localgebv ─────────────────────────────────────────────────

@@ -8,94 +8,115 @@ run_haplotype_catalogue(
   geno_meta,
   effect_list = NULL,
   trait_names = NULL,
-  output_dir = "catalogue_output",
+  output_dir = NULL,
   selected_blocks = NULL,
-  ld_threshold = 0.5,
-  tolerance = 0,
+  label = NULL,
+  ld_threshold = NULL,
+  tolerance = NULL,
   save_profile = TRUE,
+  figures = TRUE,
   center = NULL,
   center_by_freq = NULL,
-  n_cores = 1L
+  n_cores = 1L,
+  progress = NULL
 )
 }
 \arguments{
 \item{geno_meta}{A valid \code{GenoMeta} with
-\code{block_marker_map_info} populated. Use \code{\link{read_st_genotype}}
-(or another reader) followed by \code{\link{attach_block_info}} to prepare
-the input.}
+\code{block_marker_map_info} populated.}
 
 \item{effect_list}{Marker effects to catalogue. Either a named list of
 effect data.frames (one per trait, each with columns Marker, Allele,
 Effect) or a single data.frame (optionally with a \code{Trait} column to
 split on). When \code{NULL} (default), \code{geno_meta$marker_effects} is
-used — so effects attached by \code{\link{fit_genomic_prediction}} are
-picked up automatically. An explicit \code{effect_list} always overrides
-the stored copy.}
+used. An explicit \code{effect_list} always overrides the stored copy.}
 
 \item{trait_names}{Character vector of trait names to process. Must
 match names in the resolved \code{effect_list}. Default (\code{NULL}): all
 traits in the resolved effects.}
 
-\item{output_dir}{Directory for output files and plots. Created if it
-does not exist. Default \code{"catalogue_output"}.}
+\item{output_dir}{Directory to write the files into. Default
+\code{NULL}: nothing is written; the result is returned (visibly). Pass
+\code{"catalogue_output"} for the 0.8.8 behaviour.}
 
-\item{selected_blocks}{Optional data.frame with column \code{Block}
-restricting analysis to a subset of blocks. Default \code{NULL} (all
-blocks).}
+\item{selected_blocks}{Optional data.frame with column \code{Block} (or a
+character vector of block ids) restricting the local GEBV matrix to a
+subset of blocks. Default \code{NULL} (all blocks).}
 
-\item{ld_threshold}{LD threshold label used in output file names only.
-Default \code{0.5}.}
+\item{label}{Output label (see \emph{Output label}). Default
+\code{NULL}: from the block provenance.}
 
-\item{tolerance}{Tolerance label used in output file names only.
-Default \code{0}.}
+\item{ld_threshold, tolerance}{The 0.8.8 label pair. Default \code{NULL};
+when either is given the label is \code{<ld>_t<tol>} (defaults 0.5 and 0
+for the missing one), overriding the provenance.}
 
 \item{save_profile}{Logical. Save the \code{GenoMeta} object to
-\code{output_dir} as an RDS file. Default \code{TRUE}.}
+\code{output_dir} as \code{geno_meta_<L>.rds}. Default \code{TRUE}; only
+consulted when \code{output_dir} is given.}
+
+\item{figures}{Logical. Build the per-trait figure recipes (cheap;
+nothing is rendered until written). Default \code{TRUE}.}
 
 \item{center}{Centring mode applied to the allele effects:
-�\code{"none"}, �\code{"locus_mean"} or �\code{"allele_freq"}. See
-�\code{\link{compute_profile_localgebv}} for what each preserves.}
+\code{"none"} (default), \code{"locus_mean"} or \code{"allele_freq"}. See
+\code{\link{compute_profile_localgebv}} for what each preserves.}
 
-\item{center_by_freq}{Logical. Mean-centre allele effects by population
-frequency (catalogue-style). Default \code{TRUE}.}
+\item{center_by_freq}{Deprecated logical form of \code{center}
+(\code{TRUE} = \code{"allele_freq"}, \code{FALSE} = \code{"none"}).}
 
 \item{n_cores}{Integer. Parallel workers for trait processing.
 \code{1L} (default) is sequential. Values \code{> 1} require
 \pkg{future} and \pkg{future.apply}.}
+
+\item{progress}{\code{NULL} (default) or a function of one argument,
+called after each trait with an event list (\code{stage = "catalogue"},
+\code{unit = "trait"}, \code{i}, \code{n}, \code{label}, \code{elapsed},
+\code{payload = list(trait)}). Returning \code{FALSE} cancels the run with
+\code{hs_error_cancelled}, whose \code{partial} field holds the traits
+finished so far.}
 }
 \value{
-Invisibly, a named list with one element per trait containing:
+An \code{hs_catalogue} (see \code{\link{hs_result}}): a named list
+with one element per trait, each holding
 \describe{
 \item{\code{gebv_matrix}}{data.table — wide Block × Sample GEBV matrix.}
 \item{\code{gebv_summary}}{data.table — per-sample total GEBV.}
 \item{\code{block_counts}}{data.table — per-sample positive/zero/negative
-block counts.}
+block counts (\code{Sample} is character; \code{\link{plot_block_counts}}
+orders the bars).}
 \item{\code{hap_catalogue}}{data.table — long-format block-haplotype
-catalogue (one row per distinct block effect state with its allele-combination
-\code{signature}, population \code{Count} and block location; identification
-columns lead), written as
-\code{Haplotype_Catalogue_<ld>_t<tol>_<trait>.txt}. See
-\code{\link{compute_block_catalogue}}.}
-\item{\code{block_summary}}{data.table — one row per block summarising its
-across-sample local-GEBV effect, identification columns first
-(\code{Chrom}, \code{Pos}, \code{Block}) then \code{BlockVariance},
-\code{BlockMax}, \code{BlockMin}, \code{BlockMean}, written as
-\code{Block_Summary_<ld>_t<tol>_<trait>.txt}. Drives the per-trait
-variance scatter (\code{\link{plot_manhattan_variance}}).}
-\item{\code{geno_meta}}{The \code{GenoMeta} object analysed.}
+catalogue (one row per distinct block effect state with its
+allele-combination \code{signature}, population \code{Count} and block
+location). See \code{\link{compute_block_catalogue}}.}
+\item{\code{block_summary}}{data.table — one row per block:
+\code{Chrom}, \code{Pos}, \code{Block}, then \code{BlockVariance},
+\code{BlockMax}, \code{BlockMin}, \code{BlockMean}.}
+\item{\code{figures}}{the three figure recipes (\code{block_counts},
+\code{manhattan_variance}, \code{manhattan_effect}); build them with
+\code{hs_figures(res, build = TRUE)}.}
 }
+Returned visibly, or invisibly when \code{output_dir} was written. The
+per-trait copy of the container that 0.8.8 returned is gone: the caller
+has it, and \code{write_outputs(geno_meta =)} writes it.
 }
 \description{
 Orchestrates the complete catalogue workflow for one or more traits. Builds
 a haplotype profile from the supplied \code{GenoMeta}, computes per-block
-local GEBVs, summarises counts, and generates visualisation plots for each
-trait. All input data (genotypes, map, block assignments) are read directly
-from the \code{GenoMeta} fields. Marker effects may be passed explicitly via
-\code{effect_list} or detected from \code{geno_meta$marker_effects} (for
-example after \code{\link{fit_genomic_prediction}}); effects are required to
-run, but never to construct a valid \code{GenoMeta}.
+local GEBVs, summarises counts, builds the block-haplotype catalogue and
+prepares the per-trait figures. All input data (genotypes, map, block
+assignments) are read from the \code{GenoMeta}. Marker effects may be passed
+via \code{effect_list} or detected from \code{geno_meta$marker_effects} (for
+example after \code{\link{fit_genomic_prediction}}).
 }
 \details{
+Since 0.9.0 the function \strong{computes and returns}; it writes files only
+when \code{output_dir} is given. The result is an
+\code{\link[=hs_result]{hs_catalogue}}: a list keyed by trait whose elements
+are the 0.8.8 tables, plus unrendered figure recipes, with notes and
+provenance reached through \code{\link{hs_notes}} and
+\code{\link{hs_provenance}}. \code{\link{write_outputs}} writes the same
+files \code{output_dir} would have, at any later time.
+
 The \code{GenoMeta} must already contain block assignments — call
 \code{\link{attach_block_info}} before this function if
 \code{block_marker_map_info} is \code{NULL}.
@@ -105,23 +126,42 @@ Trait processing is embarrassingly parallel: set \code{n_cores > 1} to use
 \pkg{future.apply}). Falls back to sequential with a warning if those
 packages are absent.
 }
+\section{Output label}{
+
+File names carry a label where 0.8.8 stamped \code{<ld>_t<tol>} (by default
+\code{0.5_t0}, whatever made the blocks). Since 0.9.0 the label comes from
+the container's block provenance (\code{metadata$blocks}, written by
+\code{\link{attach_block_info}} and the LD resolvers): LD-built blocks keep
+their \code{<r2>_t<tol>} name; a user block map gives the map file's stem
+(or \code{"usermap"} for an in-memory table); a container with no
+provenance keeps \code{0.5_t0} and the result carries a note
+(\code{label_legacy_default}). An explicit \code{label}, or the 0.8.8
+\code{ld_threshold} / \code{tolerance} pair, overrides it.
+}
+
+\section{Files written}{
+
+With \code{output_dir} (or later through \code{write_outputs()}), per trait
+\code{<T>} and label \code{<L>}: \code{Haplotype_GA_Matrix_<L>_<T>.txt},
+\code{GEBV_<L>_<T>.txt}, \code{Block_Counts_<L>_<T>.txt},
+\code{Haplotype_Catalogue_<L>_<T>.txt}, \code{Block_Summary_<L>_<T>.txt},
+and the figures \code{Block_Counts_<T>.png}, \code{Manhattan_Variance_<L>_<T>.png},
+\code{Manhattan_Effect_<L>_<T>.png}; plus \code{geno_meta_<L>.rds} once when
+\code{save_profile = TRUE}. Trait names are sanitised for file names (a
+changed stem is a note); two traits that collide after sanitising are an
+error.
+}
+
 \examples{
 \dontrun{
-# Prepare GenoMeta with block info
-meta <- read_st_genotype("geno.csv")
-meta <- attach_block_info(meta, read.csv("block_marker_map.csv"))
-
-results <- run_haplotype_catalogue(
-  geno_meta   = meta,
-  effect_list = list(Yield = yield_effects, Protein = prot_effects),
-  output_dir  = "catalogue_output",
-  n_cores     = 2L
-)
+res <- run_haplotype_catalogue(meta, effect_list = list(Yield = yield_effects))
+hs_notes(res); hs_provenance(res)$label
+write_outputs(res, "catalogue_output", geno_meta = meta)
 }
 
 }
 \seealso{
-\code{\link{attach_block_info}},
+\code{\link{write_outputs}}, \code{\link{attach_block_info}},
 \code{\link{compute_profile_localgebv}},
 \code{\link{hapS_ld_blocks}} (local LD blocks, when no block map exists)
 }

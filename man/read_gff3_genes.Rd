@@ -4,7 +4,12 @@
 \alias{read_gff3_genes}
 \title{Read gene rows from a GFF3 annotation file}
 \usage{
-read_gff3_genes(path, feature_type = "gene", chr_map = NULL)
+read_gff3_genes(
+  path,
+  feature_type = "gene",
+  rename_seqid = NULL,
+  chr_map = NULL
+)
 }
 \arguments{
 \item{path}{Path to the GFF3 file (plain or \code{.gz}).}
@@ -12,19 +17,27 @@ read_gff3_genes(path, feature_type = "gene", chr_map = NULL)
 \item{feature_type}{GFF3 type (column 3) to keep, case-insensitive.
 Default \code{"gene"} — the only type the local annotation route uses.}
 
-\item{chr_map}{Optional named character vector renaming the GFF3
-seqids (names = seqid as the file spells it, values = the name to store).
-Usually left \code{NULL}: \code{\link{compute_block_annotation}} maps the
-\emph{container's} chromosome names onto the GFF3 vocabulary instead,
-which is the direction the Python route uses.}
+\item{rename_seqid}{Optional named character vector renaming the GFF3
+seqids as they are stored (names = seqid as the file spells it, values =
+the name to store). Usually left \code{NULL}:
+\code{\link{compute_block_annotation}} maps the \emph{container's}
+chromosome names onto the GFF3 vocabulary with its \code{chr_map}
+instead, which is the direction every haploStack \code{chr_map} uses
+(container spelling -> the other table's spelling).}
+
+\item{chr_map}{Deprecated since 0.9.0 (warns): the old name of
+\code{rename_seqid}, which renames in the opposite direction to every
+other \code{chr_map} in the package.}
 }
 \value{
 A \code{data.table} with columns \code{chrom}, \code{start},
-\code{end} (integer, 1-based inclusive), \code{strand}, \code{gene_id},
+\code{end} (numeric, 1-based inclusive), \code{strand}, \code{gene_id},
 \code{gene_name}, \code{biotype} (character; \code{NA} where the
-attribute is absent), in file order. The source path, file size and
-modification time are recorded in the \code{"hs_annotation_source"}
-attribute for provenance.
+attribute is absent) and \code{feature_type} (the file's spelling of the
+type kept), in file order. The source is recorded in the
+\code{"hs_annotation_source"} attribute for provenance as \code{file}
+(the base name), \code{md5}, \code{size} and \code{n}; no absolute path
+and no modification time, so two reads of one file give one record.
 }
 \description{
 A minimal GFF3 parser for the offline annotation route (thread #033): it

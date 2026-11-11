@@ -49,8 +49,18 @@ Named list:
 \description{
 Takes the metadata list produced by \code{\link{process_genotype}} and
 reformats the genotype data to a different encoding, orientation, or
-output preset (e.g. SelectionTools → PLINK dosage).
+output preset (e.g. SelectionTools → PLINK dosage). Legacy layer: a
+translation to or from the \code{"selectiontools"} encoding warns
+(deprecated since 0.9.0; see \code{\link{st_convert}}).
 }
+\section{Deprecated}{
+
+Since 0.9.0 (warns on every call; removed in 0.10 with
+\code{\link{process_genotype}}). A \code{GenoMeta} is written by
+\code{\link{write_geno_meta}} or laid out by \code{\link{geno_meta_to_matrix}}.
+See \link{haploStack-deprecated}.
+}
+
 \examples{
 # Round-trip ST → nucleotide → ST
 geno <- matrix(c("1/1","1/4","4/4","1/1"), nrow = 2,

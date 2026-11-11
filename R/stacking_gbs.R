@@ -58,18 +58,20 @@
 .localgebv_long <- function(localgebv) {
   dt <- as.data.table(localgebv)
   if (!"Block" %in% names(dt))
-    stop(".localgebv_long: 'localgebv' must have a 'Block' column.")
+    .hs_abort(".localgebv_long: 'localgebv' must have a 'Block' column.")
   sample_cols <- setdiff(names(dt), "Block")
   if (length(sample_cols) == 0L)
-    stop(".localgebv_long: 'localgebv' has no sample columns.")
+    .hs_abort(".localgebv_long: 'localgebv' has no sample columns.")
 
   long <- data.table::melt(dt, id.vars = "Block",
                            measure.vars = sample_cols,
                            variable.name = "SampleHap",
                            value.name = "Effect",
                            variable.factor = FALSE)
-  long[, Sample    := sub("\\.[0-9]+$", "", SampleHap)]
-  long[, Haplotype := as.integer(sub("^.*\\.([0-9]+)$", "\\1", SampleHap))]
+  hc <- .hap_cols(sample_cols)                       # one parser (sc/F24)
+  ci <- match(long$SampleHap, hc$cols)
+  long[, Sample    := hc$base[ci]]
+  long[, Haplotype := hc$idx[ci]]
   long[, Effect    := as.numeric(Effect)]
   long[, SampleHap := NULL]
   long[]
@@ -169,10 +171,10 @@
   tcols <- intersect(c("Block", "Effect", "CFreq", "TargetFreq"), names(ig))
   targets <- ig[TargetFreq > 0, tcols, with = FALSE]
   if (nrow(targets) == 0L)
-    stop(".gbs_hapn_matrix: 'ideal_genotypes' has no positive TargetFreq rows.")
+    .hs_abort(".gbs_hapn_matrix: 'ideal_genotypes' has no positive TargetFreq rows.")
   targets[, tkey := .I]
 
-  all_samples <- sort(unique(pop.ref$Sample))
+  all_samples <- .hs_sort(unique(pop.ref$Sample))
   hits <- pop.ref[targets, on = .(Block, Effect), nomatch = NULL,
                   allow.cartesian = TRUE]
 
@@ -204,7 +206,7 @@
   switch(gbs_method,
          ARCSIN = asin(sqrt(p)) - asin(sqrt(tau)),
          LOG    = tau * log(p),
-         stop(".gbs_deviation: unknown gbs_method '", gbs_method, "'."))
+         .hs_abort(".gbs_deviation: unknown gbs_method '", gbs_method, "'."))
 }
 
 # f_t(p): per-state term of the set objective F(S) = sum_t w_t f_t(p_t(S)),
@@ -260,11 +262,11 @@
 # Argument validation shared by gbs_selection() and the driver.
 .gbs_check_penalty_args <- function(gbs_penalty, penalty_mode, penalty_scale) {
   if (!is.numeric(gbs_penalty) || length(gbs_penalty) != 1L || gbs_penalty > 0)
-    stop("'gbs_penalty' must be a single non-positive number (the base penalty, ",
+    .hs_abort("'gbs_penalty' must be a single non-positive number (the base penalty, ",
          "e.g. -10).")
   if (!is.numeric(penalty_scale) || length(penalty_scale) != 1L ||
       penalty_scale < 1)
-    stop("'penalty_scale' must be a single number >= 1 (the fixed scale, or the ",
+    .hs_abort("'penalty_scale' must be a single number >= 1 (the fixed scale, or the ",
          "cap of the dynamic scale).")
   invisible(TRUE)
 }
@@ -309,10 +311,10 @@
 .gbs_check_rank_scale <- function(penalty_rank_scale) {
   if (!is.numeric(penalty_rank_scale) || length(penalty_rank_scale) < 1L ||
       !all(is.finite(penalty_rank_scale)) || any(penalty_rank_scale < 0))
-    stop("'penalty_rank_scale' must be a numeric vector with every element ",
+    .hs_abort("'penalty_rank_scale' must be a numeric vector with every element ",
          "finite and >= 0 (per-rank multipliers of the absent-state penalty).")
   if (penalty_rank_scale[1L] != 1)
-    message("penalty_rank_scale[1] = ", format(penalty_rank_scale[1L]),
+    .hs_inform("penalty_rank_scale[1] = ", format(penalty_rank_scale[1L]),
             " (not 1): the rank-1 (blackout) absence penalty itself is being ",
             "rescaled.")
   invisible(TRUE)
@@ -340,10 +342,42 @@
 .gbs_apply_preset <- function(gbs_preset, supplied = list()) {
   base <- .GBS_PRESETS[[gbs_preset]]
   if (is.null(base))
-    stop(".gbs_apply_preset: unknown gbs_preset '", gbs_preset, "'.")
+    .hs_abort(".gbs_apply_preset: unknown gbs_preset '", gbs_preset, "'.")
   for (nm in names(supplied))
     if (!is.null(supplied[[nm]])) base[[nm]] <- supplied[[nm]]
   base
+}
+
+# The resolved GBS specification (0.9.0, sc/F25): one function behind
+# gbs_selection(), gbs_pair_selection() and run_stacking_simulation(). A knob
+# passed as NULL takes the preset value; a value is validated as the entry
+# point validated it (match.arg on the choice knobs, the penalty and rank-scale
+# checks), and the one cross-knob rule — the GA engine optimises a set
+# objective — is checked here. `penalty_rank_scale` is not preset-backed
+# (#036 stage 1) and rides on the spec after validation.
+.gbs_spec <- function(gbs_preset = c("haploStack", "kemper"),
+                      gbs_objective = NULL, gbs_engine = NULL,
+                      penalty_mode = NULL, gbs_penalty = NULL,
+                      penalty_scale = NULL, gbs_effect_weight = NULL,
+                      penalty_rank_scale = 1, caller = "gbs_selection") {
+  gbs_preset <- match.arg(gbs_preset)
+  spec <- .gbs_apply_preset(gbs_preset, list(
+    gbs_objective = if (is.null(gbs_objective)) NULL
+                    else match.arg(gbs_objective, c("candidate", "set")),
+    gbs_engine    = if (is.null(gbs_engine)) NULL
+                    else match.arg(gbs_engine, c("greedy", "GA")),
+    penalty_mode  = if (is.null(penalty_mode)) NULL
+                    else match.arg(penalty_mode, c("dynamic", "fixed")),
+    gbs_penalty       = gbs_penalty,
+    penalty_scale     = penalty_scale,
+    gbs_effect_weight = gbs_effect_weight))
+  .gbs_check_penalty_args(spec$gbs_penalty, spec$penalty_mode, spec$penalty_scale)
+  .gbs_check_rank_scale(penalty_rank_scale)
+  spec$penalty_rank_scale <- penalty_rank_scale
+  if (spec$gbs_engine == "GA" && spec$gbs_objective != "set")
+    .hs_abort(caller, ": gbs_engine = \"GA\" optimises a set objective — pass ",
+              "gbs_objective = \"set\".", call. = FALSE)
+  spec
 }
 
 
@@ -437,13 +471,7 @@
 
   greedy0 <- sort(match(.gbs_greedy(ctx, n_parents, "set", take_min), ctx$samples))
 
-  old_seed <- if (exists(".Random.seed", envir = globalenv(), inherits = FALSE))
-    get(".Random.seed", envir = globalenv()) else NULL
-  on.exit({
-    if (is.null(old_seed)) rm(list = ".Random.seed", envir = globalenv())
-    else assign(".Random.seed", old_seed, envir = globalenv())
-  }, add = TRUE)
-  set.seed(seed)
+  .local_seed(seed)
 
   pop_size <- max(2L, as.integer(ctl$pop_size))
   pop <- c(list(greedy0),
@@ -625,22 +653,17 @@ gbs_selection <- function(localgebv,
   gbs_preset      <- match.arg(gbs_preset)
   select_priority <- match.arg(select_priority)
 
-  # Preset fills every knob the caller did not pass; explicit arguments win.
-  spec <- .gbs_apply_preset(gbs_preset, list(
-    gbs_objective     = if (missing(gbs_objective))     NULL else match.arg(gbs_objective),
-    gbs_engine        = if (missing(gbs_engine))        NULL else match.arg(gbs_engine),
-    penalty_mode      = if (missing(penalty_mode))      NULL else match.arg(penalty_mode),
+  # Preset fills every knob the caller did not pass; explicit arguments win
+  # (one resolver with the driver and gbs_pair_selection(), sc/F25).
+  spec <- .gbs_spec(
+    gbs_preset,
+    gbs_objective     = if (missing(gbs_objective))     NULL else gbs_objective,
+    gbs_engine        = if (missing(gbs_engine))        NULL else gbs_engine,
+    penalty_mode      = if (missing(penalty_mode))      NULL else penalty_mode,
     gbs_penalty       = if (missing(gbs_penalty))       NULL else gbs_penalty,
     penalty_scale     = if (missing(penalty_scale))     NULL else penalty_scale,
-    gbs_effect_weight = if (missing(gbs_effect_weight)) NULL else gbs_effect_weight))
-  .gbs_check_penalty_args(spec$gbs_penalty, spec$penalty_mode, spec$penalty_scale)
-  # Not preset-backed (presets keep their published meaning; the knob defaults
-  # off in both) — set on the spec directly after validation.
-  .gbs_check_rank_scale(penalty_rank_scale)
-  spec$penalty_rank_scale <- penalty_rank_scale
-  if (spec$gbs_engine == "GA" && spec$gbs_objective != "set")
-    stop("gbs_selection: gbs_engine = \"GA\" optimises a set objective — pass ",
-         "gbs_objective = \"set\".")
+    gbs_effect_weight = if (missing(gbs_effect_weight)) NULL else gbs_effect_weight,
+    penalty_rank_scale = penalty_rank_scale, caller = "gbs_selection")
 
   if (is.null(ideal_genotypes))
     ideal_genotypes <- .construct_ideal_genotype(localgebv)
@@ -744,7 +767,7 @@ construct_ideal_genotype <- function(localgebv,
 #' \code{penalty_mode = "fixed"}, the cap of the dynamic scale under
 #' \code{"dynamic"}) with the base \code{gbs_penalty} held fixed, scoring each
 #' resulting parent set by its distance to the ideal genotype
-#' (\code{\link{.distance_to_ideal}}, lower is better). Scores are averaged over
+#' (\code{.distance_to_ideal()}, lower is better). Scores are averaged over
 #' \code{n_rep} candidate-pool subsamples to avoid overfitting a single
 #' realisation.
 #'
@@ -793,21 +816,19 @@ tune_gbs_penalty <- function(localgebv,
   penalty_mode <- match.arg(penalty_mode)
   if (is.null(grid)) grid <- c(1, 2, 5, 10, 20)
   if (any(grid < 1))
-    stop("tune_gbs_penalty: every 'grid' value must be >= 1 (a penalty scale).")
+    .hs_abort("tune_gbs_penalty: every 'grid' value must be >= 1 (a penalty scale).")
   if (is.null(ideal_genotypes))
     ideal_genotypes <- .construct_ideal_genotype(localgebv)
 
   dt          <- as.data.table(localgebv)
-  sample_cols <- setdiff(names(dt), "Block")
-  all_samples <- unique(sub("\\.[0-9]+$", "", sample_cols))
+  hc          <- .hap_cols(setdiff(names(dt), "Block"))
+  all_samples <- hc$samples
   n_sub       <- max(n_parents + 1L, floor(length(all_samples) * subsample_frac))
 
-  score_one <- function(scale_s, rep_i) {
-    set.seed(seed + rep_i)
+  score_one <- function(scale_s, rep_i) .with_seed(seed + rep_i, {
     keep_s   <- if (n_sub >= length(all_samples)) all_samples
                 else sample(all_samples, n_sub)
-    keep_cols <- c("Block",
-                   sample_cols[sub("\\.[0-9]+$", "", sample_cols) %in% keep_s])
+    keep_cols <- c("Block", hc$cols[hc$base %in% keep_s])
     sub_lg   <- dt[, keep_cols, with = FALSE]
     sel      <- gbs_selection(sub_lg, ideal_genotypes = ideal_genotypes,
                               n_parents = n_parents, gbs_method = gbs_method,
@@ -816,7 +837,7 @@ tune_gbs_penalty <- function(localgebv,
                               penalty_scale = scale_s, ...)
     .distance_to_ideal(sub_lg, ideal_genotypes, samples = sel,
                        gbs_method = gbs_method)
-  }
+  })
 
   scores <- data.table::rbindlist(lapply(grid, function(s) {
     vals <- vapply(seq_len(n_rep), function(r) score_one(s, r), numeric(1L))

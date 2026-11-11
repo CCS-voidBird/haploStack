@@ -12,7 +12,9 @@ st_ld_blocks(
   output_dir = NULL,
   prefix = "st_blocks",
   keep_files = FALSE,
-  verbose = TRUE
+  verbose = TRUE,
+  st_formats = NULL,
+  progress = NULL
 )
 }
 \arguments{
@@ -44,6 +46,19 @@ reports its path.}
 
 \item{verbose}{\code{TRUE} (default) shows SelectionTools' console
 output and a summary; \code{FALSE} silences both.}
+
+\item{st_formats}{\code{TRUE} enables SelectionTools formats for this call;
+\code{NULL} (default) takes the session switch
+(\code{\link{use_st_formats}}, off by default: SelectionTools is being
+retired from haploStack).}
+
+\item{progress}{\code{NULL} (default) or a function of one argument (the
+package's progress contract, 0.9.0). SelectionTools' C code cannot be
+interrupted, so there are two events only: \code{unit = "run"},
+\code{i = 1} (\code{"start"}) before the run and \code{i = 2}
+(\code{"done"}, \code{payload$n_blocks}) after it; returning \code{FALSE}
+at \code{"start"} cancels with an \code{hs_error_cancelled} error (no
+partial result).}
 }
 \value{
 With \code{attach = TRUE}, the \code{GenoMeta} with
@@ -75,7 +90,9 @@ directory, runs \code{st.calc.ld()} + \code{st.def.hblocks(ld.criterion =
 "flanking")} there, reads the blocks back in the container's own marker IDs
 and chromosome names, deletes the directory, and (by default) attaches the
 blocks. Named \code{define_haplotype_blocks_meta()} in 0.7.9; that name still
-works, with a deprecation warning.
+works, with a deprecation warning. SelectionTools is being retired from
+haploStack: this function is behind \code{\link{use_st_formats}} (off by
+default), and the exchange of formats goes through \code{\link{st_convert}}.
 }
 \section{What SelectionTools sees}{
 
@@ -102,11 +119,13 @@ so a SelectionTools session's \code{"default"} data set is left alone.
 \section{SelectionTools' directory variables}{
 
 SelectionTools resolves file names against \code{st.input.dir} and
-\code{st.output.dir}. It creates both, as \code{""}, in the global
-environment when it loads. Both must be \code{""} here: a directory set there
-is refused, and the error names the remedy. If they are gone — after
-\code{rm(list = ls())}, for instance — \code{""} is supplied for the call and
-removed again afterwards, so the global environment is left as it was found.
+\code{st.output.dir}, two variables its \code{.onLoad} creates as \code{""}
+in the global environment. For the call both are pointed at a private
+temporary directory and restored afterwards (present or absent, whatever
+you had); the working directory is not changed. Process state SelectionTools
+cannot release (its thread count, the resident LD data set and those
+globals) is documented here because the package cannot undo it: run
+SelectionTools in its own R process when that matters.
 }
 
 \section{Known SelectionTools behaviour}{

@@ -26,11 +26,14 @@ run_fitness_pipeline(
 \item{normalise_weights}{Logical. Default \code{FALSE} (weights used as
 given; see \code{\link{create_fitness_index}}).}
 
-\item{plot_landscape}{Logical. When \code{TRUE}, print a barplot of
-marker-level fitness effects. Default \code{FALSE}.}
+\item{plot_landscape}{Logical. When \code{TRUE}, build a barplot of
+marker-level fitness effects, attach it to the result as
+\code{attr(fi, "landscape")} and print it at an interactive console only
+(since 0.9.0 nothing is drawn inside a script). Default \code{FALSE}.}
 }
 \value{
-The fitness index \code{data.table}, invisibly.
+The fitness index \code{data.table}, invisibly; with
+\code{plot_landscape = TRUE} the ggplot is \code{attr(fi, "landscape")}.
 }
 \description{
 High-level wrapper that creates, optionally visualises, and saves a fitness

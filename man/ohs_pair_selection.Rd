@@ -61,7 +61,7 @@ A \code{"pair_selection"} \code{data.table}: \code{Parent1},
 Chooses the crosses themselves rather than a parent subgroup: every family
 \code{(i, j)} is valued by its stacking ceiling \code{M[i, j]} — the sum
 over blocks of the best \code{ploidy} haplotype values among the two parents'
-haplotypes (\code{\link{.pairwise_block_value_matrix}}, the quantity
+haplotypes (\code{.pairwise_block_value_matrix()}, the quantity
 \code{\link{ohs_selection}} sums over a parent set) — and families are taken
 under one of the two budgets of \code{\link{pair_selection_budget}}.
 }

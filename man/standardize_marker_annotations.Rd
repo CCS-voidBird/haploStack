@@ -4,7 +4,12 @@
 \alias{standardize_marker_annotations}
 \title{Normalise a marker-level annotation / QTL data frame}
 \usage{
-standardize_marker_annotations(x, meta = NULL, match_bp = .HS_ANNOT_DEFAULT_BP)
+standardize_marker_annotations(
+  x,
+  meta = NULL,
+  match_bp = .HS_ANNOT_DEFAULT_BP,
+  chr_map = NULL
+)
 }
 \arguments{
 \item{x}{The annotation data.frame.}
@@ -16,12 +21,20 @@ normalised without matching).}
 \item{match_bp}{Matching tolerance in bp (default the shared 10 kb,
 \code{.HS_ANNOT_DEFAULT_BP} — the same constant as
 \code{compute_block_annotation()}'s \code{flank_bp} default).}
+
+\item{chr_map}{Optional named character vector, container chromosome ->
+the annotation's spelling (the one direction every haploStack
+\code{chr_map} uses, e.g. \code{c("1" = "1H")}). Positions are matched
+on the mapped names; the stored \code{Chrom} of a matched row is the
+container's spelling.}
 }
 \value{
 A data.frame: \code{Marker, Chrom, Pos, Block, Name, Type, Trait,
   matched_dist_bp} — one row per input row, input order kept.
 \code{matched_dist_bp} is 0 on the \code{Marker} route, the
 marker-to-position distance on a positional match, \code{NA} unplaced.
+A region table (\code{Chrom} + \code{Start}/\code{End}, no \code{Pos})
+is matched at its midpoint.
 }
 \description{
 The single owner of the Q25.o contract. Accepted inputs: a data.frame with

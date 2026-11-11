@@ -16,7 +16,7 @@
 # Engine dispatch:
 #   .local_gebv_engine() computes the per-block haplotype effects via either a
 #   compiled Rcpp kernel (local_gebv_block_sum_cpp, src/local_gebv.cpp) or a pure
-#   data.table fallback, selected by .use_rcpp(). Both paths are required to
+#   data.table fallback, selected by .hs_use_rcpp(). Both paths are required to
 #   produce identical results (parity-tested in test-catalogue-engine.R). The
 #   pre-refactor implementations are archived verbatim in
 #   dev/codebank/2026-06-26_catalogue_compute.R.
@@ -33,21 +33,15 @@
 # (matching a Chrom/Pos/Block/Marker/Sample reading order); Trait, when present,
 # is the outermost key and comes first.
 # @keywords internal
+
+# Identification columns, in the order they should lead an output table. Any of
+# these present in a table are moved to the front in this order; every other
+# column keeps its existing relative order behind them. Genomic coordinates lead
+# (matching a Chrom/Pos/Block/Marker/Sample reading order); Trait, when present,
+# is the outermost key and comes first.
+# @keywords internal
 .HS_ID_COLS <- c("Trait", "Chrom", "Pos", "Block", "Marker", "Sample",
                  "Haplotype", "signature", "Subtype")
-
-# Reorder a data.table in place so its identification columns lead. `priority`
-# lists id columns most-significant first; those present are pulled to the front
-# in that order and the remaining columns follow in their current relative order.
-# Returns the table invisibly (modified in place via setcolorder).
-# @keywords internal
-.lead_identifier_cols <- function(dt, priority = .HS_ID_COLS) {
-  nm    <- names(dt)
-  lead  <- priority[priority %in% nm]
-  rest  <- setdiff(nm, lead)
-  data.table::setcolorder(dt, c(lead, rest))
-  invisible(dt)
-}
 
 
 # ---------------------------------------------------------------------------
@@ -66,38 +60,31 @@
   if (is.function(fn)) fn else NULL
 }
 
+
 # Is the named Rcpp kernel usable right now? TRUE only when (a) the user has not
 # disabled compiled kernels via options(haploStack.use_rcpp = FALSE) and (b) the
 # symbol is actually loadable. The single option governs ALL kernels; any
-# consumer MUST retain a pure-R fallback for when this returns FALSE.
+# consumer MUST retain a pure-R fallback for when this returns FALSE. The option
+# is read through .hs_setting() (R/state.R); it stays a process option because
+# it picks a code path, never a result.
 # @keywords internal
 .hs_use_rcpp <- function(name) {
-  isTRUE(getOption("haploStack.use_rcpp", TRUE)) && is.function(.hs_kernel(name))
+  isTRUE(.hs_setting("use_rcpp")) && is.function(.hs_kernel(name))
 }
-
-#' Is the Rcpp local-GEBV kernel usable right now?
-#'
-#' Thin wrapper over \code{.hs_use_rcpp()} for the local-GEBV kernel, kept for
-#' the catalogue engine's call sites. TRUE only when compiled kernels are enabled
-#' and \code{local_gebv_block_sum_cpp} is loadable.
-#' @keywords internal
-.use_rcpp <- function() .hs_use_rcpp("local_gebv_block_sum_cpp")
-
-# Resolve the local-GEBV kernel (thin wrapper over .hs_kernel()).
-.gebv_kernel <- function() .hs_kernel("local_gebv_block_sum_cpp")
 
 
 # ---------------------------------------------------------------------------
 # Effect-table standardisation (shared by both public wrappers)
 # ---------------------------------------------------------------------------
 
+
 # Standardise a raw effect_df to a data.table(Marker, Allele[char], Effect[num])
 # read BY POSITION from its first three columns, unique by (Marker, Allele).
 .standardise_effect_dt <- function(effect_df, caller) {
   if (!is.data.frame(effect_df) && !inherits(effect_df, "data.table"))
-    stop(caller, ": 'effect_df' must be a data.frame or data.table.")
+    .hs_abort(caller, ": 'effect_df' must be a data.frame or data.table.")
   if (ncol(effect_df) < 3L)
-    stop(caller, ": 'effect_df' must have >= 3 columns.")
+    .hs_abort(caller, ": 'effect_df' must have >= 3 columns.")
   eff <- as.data.table(effect_df[, 1:3, drop = FALSE])
   setnames(eff, c("Marker", "Allele", "Effect"))
   eff[, Allele := as.character(Allele)]
@@ -109,6 +96,7 @@
 # ---------------------------------------------------------------------------
 # Trait-invariant compute core
 # ---------------------------------------------------------------------------
+
 
 #' Build the trait-invariant catalogue compute core (once per run)
 #'
@@ -129,15 +117,21 @@
 #' @param geno_meta A valid \code{GenoMeta} (already filtered if the caller wants
 #'   a subset; the core is built over whatever \code{geno_meta} contains).
 #' @param use_rcpp  Logical; build the integer-coded structures for the Rcpp
-#'   kernel. Default \code{.use_rcpp()}.
+#'   kernel. Default: the compiled kernel when enabled and loadable.
 #' @return A list with elements: \code{empty} (logical), \code{encoding},
 #'   \code{long_core}, \code{freq_core}, \code{block_order}, \code{sample_order},
 #'   \code{present_copies}, and (when \code{use_rcpp}) \code{code_mat},
 #'   \code{contrib_levels}, \code{block_idx}, \code{block_levels},
 #'   \code{copy_sample}, \code{copy_hap}, \code{n_code}.
 #' @keywords internal
-.catalogue_core <- function(geno_meta, use_rcpp = .use_rcpp()) {
-  prof      <- geno_meta_views(geno_meta)
+#' @noRd
+.catalogue_core <- function(geno_meta,
+                            use_rcpp = .hs_use_rcpp("local_gebv_block_sum_cpp"),
+                            views = NULL) {
+  # `views`: a geno_meta_views(geno_meta) the caller already holds (cc/F09:
+  # run_haplotype_catalogue() builds the views once for the core and the
+  # signatures). NULL builds them here.
+  prof      <- if (is.null(views)) geno_meta_views(geno_meta) else views
   meta_cols <- c("Sample", "Haplotype_idx")
   all_mks   <- setdiff(names(prof$alleles), meta_cols)
   block_mks <- prof$marker_meta[!is.na(block_id), marker]
@@ -148,7 +142,8 @@
       length(markers) == 0L)
     return(empty_core)
 
-  block_order  <- prof$block_meta[order(chromosome, start_pos), block_id]
+  # 0.9.0 (row 29 a): blocks by the one natural chromosome order, then position
+  block_order  <- prof$block_meta[order(.hs_chrom_rank(chromosome), start_pos), block_id]
   sample_order <- prof$samples
 
   # ── Long-format allele table (the single expensive melt, done ONCE) ────────
@@ -169,7 +164,7 @@
   # On a legacy container it stops a retained token being counted in
   # `MarkerTotal` below, which is what deflated every real allele's frequency
   # and shifted local GEBVs under `center_by_freq = TRUE`.
-  .core_miss <- .missing_tokens(prof$encoding)
+  .core_miss <- .missing_tokens(prof$encoding, .meta_extra_missing(geno_meta))
   long_core  <- long_core[!is.na(Allele) & !trimws(Allele) %chin% .core_miss]
 
   blk_map <- prof$marker_meta[, .(Marker = marker, Block = block_id)]
@@ -249,6 +244,7 @@
 # Centring vocabulary (CEN, 0.6.0)
 # ---------------------------------------------------------------------------
 
+
 # The three centrings a local GEBV can be computed under. They are different
 # operations, not settings of one:
 #
@@ -264,41 +260,53 @@
 #                 variances change (median factor ~3 on the barley panel).
 HS_CENTER_MODES <- c("none", "locus_mean", "allele_freq")
 
+
 # One-time-per-session deprecation notice for the retired logical.
-.hs_center_warned <- new.env(parent = emptyenv())
+# One table of centring defaults, looked up by the calling entry point (design
+# D3 §3.7, decision-form row 15 c, 0.9.0). Every catalogue / selection function
+# defaults to "none" (Q22.h); count_favourable_blocks() to "locus_mean": its
+# output is a SIGN count, and an uncentred sign mostly reflects which allele the
+# effect file called the reference, while locus_mean is a per-block location
+# shift that leaves every subtype argmax unchanged. Pin the 0.8.8 numbers with
+# center = "allele_freq". An unknown caller gets "none".
+.HS_CENTER_DEFAULT <- c(
+  run_haplotype_catalogue   = "none",
+  compute_profile_localgebv = "none",
+  predict_gebv              = "none",
+  compute_block_catalogue   = "none",
+  analyze_block_catalogue   = "none",
+  count_block_subtypes      = "none",
+  count_favourable_subtypes = "none",
+  count_favourable_blocks   = "locus_mean"
+)
+
 
 # Resolve the centring from the new argument and the deprecated logical.
 # `default` is what applies when the caller supplies neither — it differs by
 # entry point, which is the disagreement CEN removes.
 .resolve_center <- function(center = NULL, center_by_freq = NULL,
-                            caller = "compute_profile_localgebv",
-                            default = "none") {
-  if (!is.null(center) && !is.null(center_by_freq))
-    stop(caller, ": supply either 'center' or the deprecated 'center_by_freq', ",
-         "not both. 'center_by_freq = TRUE' is 'center = \"allele_freq\"' and ",
-         "'FALSE' is 'center = \"none\"'.", call. = FALSE)
-
+                            caller = "compute_profile_localgebv") {
+  # Defunct since 0.9.0 (row 26 a; deprecated since 0.6.0). The argument stays
+  # in the eight signatures for this release so the caller is told the
+  # replacement; the message names the mode the logical used to mean.
   if (!is.null(center_by_freq)) {
-    if (!is.logical(center_by_freq) || length(center_by_freq) != 1L ||
-        is.na(center_by_freq))
-      stop(caller, ": 'center_by_freq' must be TRUE or FALSE.", call. = FALSE)
-    if (is.null(.hs_center_warned$done)) {
-      .hs_center_warned$done <- TRUE
-      message("'center_by_freq' is deprecated and will be removed in a future ",
-              "release; use center = \"allele_freq\" (TRUE) or ",
-              "center = \"none\" (FALSE). A third mode, center = \"locus_mean\", ",
-              "preserves the allele contrast and leaves block variance ",
-              "unchanged - see ?compute_profile_localgebv.")
-    }
-    return(if (isTRUE(center_by_freq)) "allele_freq" else "none")
+    new <- if (isTRUE(center_by_freq)) "center = \"allele_freq\""
+           else if (isFALSE(center_by_freq)) "center = \"none\""
+           else "center"
+    .hs_defunct("center_by_freq", new, "0.9.0", dep_since = "0.6.0",
+                what = "argument", fn = caller)
   }
 
-  if (is.null(center)) return(default)
+  if (is.null(center)) {
+    default <- .HS_CENTER_DEFAULT[caller]
+    return(if (is.na(default)) "none" else unname(default))
+  }
   if (is.logical(center))
-    stop(caller, ": 'center' takes a mode name, not a logical. Use ",
+    .hs_abort(caller, ": 'center' takes a mode name, not a logical. Use ",
          "center = \"allele_freq\" or center = \"none\".", call. = FALSE)
   match.arg(as.character(center)[1L], HS_CENTER_MODES)
 }
+
 
 # Per-marker locus mean:  mean_i = sum_a AlleleFreq(a) * Effect(a).
 # Built from the same frequency table "allele_freq" uses, aggregated one level
@@ -312,6 +320,7 @@ HS_CENTER_MODES <- c("none", "locus_mean", "allele_freq")
   lm_dt[, .(LocusMean = sum(AlleleFreq * Effect, na.rm = TRUE)), by = Marker]
 }
 
+
 # Pure-R path: reuse the archived update-join + grouped-sum on a COPY of the
 # cached long table (so the shared core is never mutated). Identical arithmetic
 # and grouping/summation order to the pre-refactor .compute_effect_size().
@@ -319,6 +328,7 @@ HS_CENTER_MODES <- c("none", "locus_mean", "allele_freq")
   .compute_effect_size(data.table::copy(core$long_core), eff,
                        center = center, freq_dt = core$freq_core)
 }
+
 
 # Rcpp path: build a per-(marker, code) contribution matrix in R (this is where
 # encoding is resolved), scatter-sum it per block in C++, then reshape to the
@@ -344,7 +354,7 @@ HS_CENTER_MODES <- c("none", "locus_mean", "allele_freq")
   contrib_mat <- matrix(0, nrow = n_markers, ncol = max(core$n_code, 1L))
   contrib_mat[cbind(ld$j, ld$code)] <- ld$contrib
 
-  res <- .gebv_kernel()(core$code_mat, contrib_mat, core$block_idx,
+  res <- .hs_kernel("local_gebv_block_sum_cpp")(core$code_mat, contrib_mat, core$block_idx,
                         length(core$block_levels))
   colnames(res) <- core$block_levels
   dt <- as.data.table(res)
@@ -358,6 +368,7 @@ HS_CENTER_MODES <- c("none", "locus_mean", "allele_freq")
   hap_dt[paste0(Sample, ".", Haplotype_idx) %in% core$present_copies]
 }
 
+
 .hap_effects <- function(core, eff, center, use_rcpp) {
   if (isTRUE(use_rcpp)) .hap_effects_rcpp(core, eff, center)
   else                  .hap_effects_r(core, eff, center)
@@ -367,6 +378,7 @@ HS_CENTER_MODES <- c("none", "locus_mean", "allele_freq")
 # ---------------------------------------------------------------------------
 # Wide-matrix assembly (identical for both engines and both levels)
 # ---------------------------------------------------------------------------
+
 
 # Turn (Sample, Haplotype_idx, Block, HapEffect) into the wide Block x {Sample |
 # SampleHap} data.table, preserving the pre-refactor ordering and fill semantics.
@@ -403,13 +415,13 @@ HS_CENTER_MODES <- c("none", "locus_mean", "allele_freq")
 }
 
 
-#' Local-GEBV engine: one trait's effects -> wide Block x {Sample|SampleHap}
+#' Local-GEBV engine: one trait's effects -> wide Block x Sample (or SampleHap) table
 #'
 #' The single seam both \code{compute_profile_localgebv()} and
 #' \code{compute_block_catalogue()} call. Dispatches the per-block summation to
 #' the Rcpp kernel or the pure-R path, then assembles the wide matrix.
 #'
-#' @param core     A \code{\link{.catalogue_core}} result.
+#' @param core     A \code{.catalogue_core()} result.
 #' @param eff      Standardised effect data.table (Marker, Allele, Effect).
 #' @param center   Centring mode: \code{"none"}, \code{"locus_mean"} or
 #'   \code{"allele_freq"} (see \code{HS_CENTER_MODES}). Already resolved by the
@@ -418,6 +430,7 @@ HS_CENTER_MODES <- c("none", "locus_mean", "allele_freq")
 #' @param fill_na  Fill value for absent (Block, Sample) cells.
 #' @param keep_blocks Optional character vector restricting output blocks.
 #' @keywords internal
+#' @noRd
 .local_gebv_engine <- function(core, eff, center = "none",
                                level = c("genotype", "haplotype"),
                                fill_na = 0, keep_blocks = NULL) {
@@ -428,7 +441,8 @@ HS_CENTER_MODES <- c("none", "locus_mean", "allele_freq")
   # cells read as 0; that matches the pure-R fill ONLY when fill_na == 0. For any
   # other fill value (a non-default direct call), use the pure-R path which omits
   # absent cells and lets dcast fill them. Requires the kernel + coded core.
-  use_rcpp <- .use_rcpp() && fill_na == 0 && !is.null(core$code_mat)
+  use_rcpp <- .hs_use_rcpp("local_gebv_block_sum_cpp") && fill_na == 0 &&
+    !is.null(core$code_mat)
   hap_dt   <- .hap_effects(core, eff, center, use_rcpp)
   if (nrow(hap_dt) == 0L) return(data.table(Block = character(0L)))
   .assemble_localgebv_wide(hap_dt, core, level, fill_na, keep_blocks)

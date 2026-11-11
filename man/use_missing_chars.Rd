@@ -32,7 +32,10 @@ Missing is decided \strong{per allele}, and the defaults are:
 \code{"nucleotide"} \tab \code{"" "NA" "N" "n" "." "-" "0"} \tab
 \strong{both} \code{"0"} (PLINK's code) and \code{"-"} \cr
 \code{"selectiontools"} \tab \code{"" "NA" "N" "n" "." "-" "0"} \tab
-\code{"0"} since 0.6.0 — a 1/2/3/4 file writes it for an absent call \cr
+\code{"0"} since 0.6.0 — a 1/2/3/4 file writes it for an absent call;
+\strong{deprecated as a registration mode since 0.9.0}: it reaches only
+\code{\link{st_convert}} and the \code{"ST"} preset, which translate the
+codes on the way in \cr
 \code{"numeric"} \tab \code{"" "NA" "N" "n" "." "-"} \tab
 \strong{never} \code{"0"} — that is a real genotype
 }
@@ -60,13 +63,21 @@ risk, rather than package-wide.
 
 The registration is a session option (\code{haploStack.missing_chars}) and is
 gone on restart — deliberately, because it is a statement about a file being
-read, not about the package. It applies everywhere at once: the readers, the
-\code{\link{is_geno_meta}} check, \code{\link{repair_geno_meta}}, and the
-frequency/IBS/clustering paths that still resolve missing themselves.
+read, not about the package.
 
-A container normalised while a registration was active records the vocabulary
-it was cleaned against in \code{metadata$missing_tokens}, so it stays
-self-describing in a later session where nothing is attached.
+Since 0.9.0 it is read in exactly one place: where a container is
+\strong{built or repaired} — the readers, \code{\link{build_geno_meta}},
+\code{\link{new_geno_meta}} and \code{\link{repair_geno_meta}}. Each of
+those also takes the same characters as its own \code{missing_chars}
+argument, which wins over the registry (\code{character(0)} ignores it for
+that call). The vocabulary a container was normalised against is recorded in
+\code{metadata$missing_tokens}, and from then on that stamp is what every
+consumer — \code{\link{is_geno_meta}}, the frequency, IBS and clustering
+paths — goes by. A character registered \emph{after} a container was built
+does not change how that container is read; repair it with
+\code{repair_geno_meta(meta, missing_chars = "#")} if it should. This is
+what lets two jobs in one process read different panels without one
+registration leaking into the other's numbers.
 }
 
 \examples{

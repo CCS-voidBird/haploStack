@@ -17,6 +17,30 @@
 #   .marker_signal_table()      — internal: marker x block table behind the plot
 # =============================================================================
 
+# Resolve the `sample_order` argument of plot_haplotype_alignment() to a validated
+# permutation of the panel's samples. Since 0.5.5 this is a thin wrapper over the
+# shared contract in R/plot_order.R (which added the broadcast option, the
+# provenance record and the intersect mode); the strict/alphabetical behaviour it
+# had before is preserved exactly by `subset = "strict"`, `default = "sorted"`.
+# @keywords internal
+.resolve_sample_order <- function(sample_order, samples,
+                                  caller = "plot_haplotype_alignment") {
+  .hs_resolve_sample_order(sample_order, samples, caller = caller,
+                           subset = "strict", default = "sorted")
+}
+
+
+# Chromosome names in natural order: those starting with an integer sort
+# numerically first ("1H" < "2H" < "10H"), the rest alphabetically after. Plain
+# alphabetical order — what order(chromosome, position) used before 0.5.0 —
+# puts "10H" ahead of "2H", which then reorders both the marker axis and the
+# chromosome sub-panels. Same intent as the chromosome ordering in
+# .create_genomic_positions(), but keyed on the leading digits so barley-style
+# "1H".."7H" labels sort as well as bare "1".."7".
+# @keywords internal
+.natural_chrom_levels <- function(x) hs_chrom_levels(x)   # 0.9.0: one rule (row 29 a)
+
+
 #' Plot a haplotype alignment-style heatmap from a GenoMeta object
 #'
 #' Generates a rectangular heatmap where each cell represents one marker allele
@@ -85,37 +109,6 @@
 #' @seealso \code{\link{plot_clustered_alignment}},
 #'   \code{\link{plot_localgebv_alignment}}
 #'
-# Resolve the `sample_order` argument of plot_haplotype_alignment() to a validated
-# permutation of the panel's samples. Since 0.5.5 this is a thin wrapper over the
-# shared contract in R/plot_order.R (which added the broadcast option, the
-# provenance record and the intersect mode); the strict/alphabetical behaviour it
-# had before is preserved exactly by `subset = "strict"`, `default = "sorted"`.
-# @keywords internal
-.resolve_sample_order <- function(sample_order, samples,
-                                  caller = "plot_haplotype_alignment") {
-  .hs_resolve_sample_order(sample_order, samples, caller = caller,
-                           subset = "strict", default = "sorted")
-}
-
-
-# Chromosome names in natural order: those starting with an integer sort
-# numerically first ("1H" < "2H" < "10H"), the rest alphabetically after. Plain
-# alphabetical order — what order(chromosome, position) used before 0.5.0 —
-# puts "10H" ahead of "2H", which then reorders both the marker axis and the
-# chromosome sub-panels. Same intent as the chromosome ordering in
-# .create_genomic_positions(), but keyed on the leading digits so barley-style
-# "1H".."7H" labels sort as well as bare "1".."7".
-# @keywords internal
-.natural_chrom_levels <- function(x) {
-  u <- unique(as.character(x))
-  u <- u[!is.na(u)]
-  if (length(u) == 0L) return(character(0L))
-  num <- suppressWarnings(as.numeric(
-    ifelse(grepl("^[0-9]+", u), sub("^([0-9]+).*$", "\\1", u), NA)))
-  u[order(is.na(num), num, u)]
-}
-
-
 #' @export
 plot_haplotype_alignment <- function(geno_meta,
                                       color_map               = NULL,
@@ -130,20 +123,19 @@ plot_haplotype_alignment <- function(geno_meta,
                                       show_chrom_labels       = TRUE,
                                       block_label_size        = 2.5) {
 
-  if (!is_geno_meta(geno_meta))
-    stop("plot_haplotype_alignment: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "plot_haplotype_alignment", "geno_meta")
   method <- match.arg(method, c("haplotype", "genotype"))
 
   # Read the genotype array directly — no profile materialisation.
   arr <- geno_meta$geno_arrays
   if (dim(arr)[1L] == 0L || dim(arr)[2L] == 0L)
-    stop("plot_haplotype_alignment: GenoMeta contains no data to plot.")
+    .hs_abort("plot_haplotype_alignment: GenoMeta contains no data to plot.")
   samples <- dimnames(arr)[[1L]]
   markers <- dimnames(arr)[[2L]]
   ploidy  <- dim(arr)[3L]
 
   if (method == "genotype" && ploidy != 2L)
-    stop("plot_haplotype_alignment: method = 'genotype' supports diploid data ",
+    .hs_abort("plot_haplotype_alignment: method = 'genotype' supports diploid data ",
          "only (ploidy = ", ploidy, ").")
 
   encoding <- geno_meta$metadata$encoding %||%
@@ -255,7 +247,7 @@ plot_haplotype_alignment <- function(geno_meta,
       expand = ggplot2::expansion(add = c(0.6, head_rows + 0.6))) +
     labs(subtitle = paste0(
            if (facet_chrom)
-             sprintf("%d chromosomes · %d markers · %d samples",
+             sprintf("%d chromosomes \u00B7 %d markers \u00B7 %d samples",
                      length(chrom_levels), length(ordered_markers), n_samp)
            else sprintf("Chr %s", chr),
            # Provenance: a clustered panel must not be mistaken for an
@@ -466,22 +458,22 @@ plot_localgebv_alignment <- function(localgebv,
 
   # 1. Validate localgebv -----------------------------------------------------
   if (!is.data.frame(localgebv) && !inherits(localgebv, "data.table"))
-    stop("plot_localgebv_alignment: 'localgebv' must be a data.frame/data.table ",
+    .hs_abort("plot_localgebv_alignment: 'localgebv' must be a data.frame/data.table ",
          "(the output of compute_profile_localgebv()).")
   lg <- as.data.table(localgebv)
   if (ncol(lg) < 2L || names(lg)[1L] != "Block")
-    stop("plot_localgebv_alignment: 'localgebv' must have 'Block' as its first ",
+    .hs_abort("plot_localgebv_alignment: 'localgebv' must have 'Block' as its first ",
          "column followed by sample columns.")
   sample_cols <- setdiff(names(lg), "Block")
   if (length(sample_cols) == 0L)
-    stop("plot_localgebv_alignment: 'localgebv' has no sample columns.")
+    .hs_abort("plot_localgebv_alignment: 'localgebv' has no sample columns.")
 
   # 2. Resolve method + column -> base-sample map -----------------------------
   is_hap_cols <- all(grepl("^.*\\.\\d+$", sample_cols))
   if (method == "auto")
     method <- if (is_hap_cols) "haplotype" else "genotype"
   if (method == "haplotype" && !is_hap_cols)
-    stop("plot_localgebv_alignment: method = 'haplotype' but columns are not in ",
+    .hs_abort("plot_localgebv_alignment: method = 'haplotype' but columns are not in ",
          "'<Sample>.<idx>' form; pass a haplotype-level localgebv.")
 
   base_sample <- if (method == "haplotype")
@@ -502,7 +494,7 @@ plot_localgebv_alignment <- function(localgebv,
     history    <- family$metadata$family_history
     block_info <- family$block_info
     if (is.null(history))
-      stop("plot_localgebv_alignment: GenoMeta carries no family history. ",
+      .hs_abort("plot_localgebv_alignment: GenoMeta carries no family history. ",
            "Run attach_family_history() first.")
   } else if (is.list(family) && length(family) > 0L &&
              all(vapply(family, function(g)
@@ -510,10 +502,10 @@ plot_localgebv_alignment <- function(localgebv,
                all(c("FID", "IID", "Label") %in% names(g)), logical(1L)))) {
     history    <- family
     block_info <- NULL
-    warning("plot_localgebv_alignment: a bare family-history list was supplied; ",
+    .hs_warn("plot_localgebv_alignment: a bare family-history list was supplied; ",
             "chromosome labels need a GenoMeta (block_info) and will be omitted.")
   } else {
-    stop("plot_localgebv_alignment: 'family' must be a GenoMeta or a ",
+    .hs_abort("plot_localgebv_alignment: 'family' must be a GenoMeta or a ",
          "trace_family_history() list (named gen_*, each with FID/IID/Label).")
   }
   if (is.null(names(history)))
@@ -524,12 +516,12 @@ plot_localgebv_alignment <- function(localgebv,
     selected_blocks <- as.character(selected_blocks)
     missing_blk <- setdiff(selected_blocks, lg$Block)
     if (length(missing_blk) > 0L)
-      warning("plot_localgebv_alignment: requested block(s) not present: ",
+      .hs_warn("plot_localgebv_alignment: requested block(s) not present: ",
               paste(missing_blk, collapse = ", "))
     lg <- lg[Block %in% selected_blocks]
   }
   if (nrow(lg) == 0L)
-    stop("plot_localgebv_alignment: no blocks to plot after selection.")
+    .hs_abort("plot_localgebv_alignment: no blocks to plot after selection.")
 
   # 5. Block -> chromosome map + X positions ----------------------------------
   ordered_blocks <- lg$Block
@@ -583,7 +575,7 @@ plot_localgebv_alignment <- function(localgebv,
 
       if (length(fam_cols) == 0L) {
         if (!warned_empty) {
-          warning("plot_localgebv_alignment: one or more families have no ",
+          .hs_warn("plot_localgebv_alignment: one or more families have no ",
                   "samples in 'localgebv'; those plots are skipped.")
           warned_empty <- TRUE
         }
@@ -610,8 +602,8 @@ plot_localgebv_alignment <- function(localgebv,
           labels = if (show_block_labels) blk_x$block else NULL,
           expand = c(0, 0)) +
         labs(
-          title    = sprintf("%s — %s", gen_name, fid),
-          subtitle = paste0(sprintf("%d offspring · %d founder(s)", n_off, n_fnd),
+          title    = sprintf("%s \u2014 %s", gen_name, fid),
+          subtitle = paste0(sprintf("%d offspring \u00B7 %d founder(s)", n_off, n_fnd),
                             .hs_order_suffix(order_res$desc)),
           x = "Block (genomic position)", y = "Sample") +
         theme_minimal(base_size = 11) +
@@ -656,10 +648,14 @@ plot_localgebv_alignment <- function(localgebv,
     if (length(gen_plots) > 0L) out[[gen_name]] <- gen_plots
   }
 
-  if (length(out) == 0L)
-    warning("plot_localgebv_alignment: no family matched the localgebv sample ",
+  if (length(out) == 0L) {
+    .hs_warn("plot_localgebv_alignment: no family matched the localgebv sample ",
             "columns; returning an empty list.")
-  out
+    return(out)
+  }
+  # 0.9.0 (D3.2): the nested generation -> family -> ggplot shape is kept; the
+  # class lets hs_render_figure() / write_outputs() write one file per leaf.
+  .hs_figure_set(out)
 }
 
 
@@ -738,10 +734,10 @@ plot_manhattan_effect <- function(effect_data,
 
   dt <- as.data.table(effect_data)
   if (!all(c("Chrom","Pos","Effect") %in% names(dt)))
-    stop("plot_manhattan_effect: need columns Chrom, Pos, Effect.")
+    .hs_abort("plot_manhattan_effect: need columns Chrom, Pos, Effect.")
 
   .plot_manhattan(dt, value_col = "Effect",
-                  title = paste0("Block Effect — ", trait_name, title_suffix),
+                  title = paste0("Block Effect \u2014 ", trait_name, title_suffix),
                   y_lab = "Effect", point_size = point_size, alpha = alpha,
                   zero_line = TRUE)
 }
@@ -772,10 +768,10 @@ plot_manhattan_variance <- function(variance_data,
 
   dt <- as.data.table(variance_data)
   if (!all(c("Chrom","Pos","BlockVariance") %in% names(dt)))
-    stop("plot_manhattan_variance: need columns Chrom, Pos, BlockVariance.")
+    .hs_abort("plot_manhattan_variance: need columns Chrom, Pos, BlockVariance.")
 
   .plot_manhattan(dt, value_col = "BlockVariance",
-                  title = paste0("Block Variance — ", trait_name),
+                  title = paste0("Block Variance \u2014 ", trait_name),
                   y_lab = "Block Effect Variance",
                   point_size = point_size, alpha = alpha)
 }
@@ -788,27 +784,54 @@ plot_manhattan_variance <- function(variance_data,
 #'   \code{"Negative"}), \code{Count}, and optionally \code{GEBV}.
 #' @param trait_name Character label for the plot title.
 #' @param x_text_size Font size for X-axis sample labels (default \code{6}).
+#' @param sample_order Optional character vector giving the bar order. Default
+#'   \code{NULL}: samples by their positive-block count (ascending), those with
+#'   no positive block first — the 0.8.8 order, now decided here rather than by
+#'   factor levels in the table. A factor \code{Sample} column keeps its levels.
+#'   The order drawn is tagged on the plot (\code{attr(p, "sample_order")}).
 #'
 #' @return A \code{ggplot} object.
 #'
 #' @export
 plot_block_counts <- function(haplotype_counts,
                                trait_name  = "Trait",
-                               x_text_size = 6) {
+                               x_text_size = 6,
+                               sample_order = NULL) {
 
   haplotype_counts$Label <- factor(
     haplotype_counts$Label,
     levels = c("Positive", "Zero", "Negative")
   )
 
-  ggplot(haplotype_counts,
+  # Bar order (0.9.0, viz/F22): the table's Sample is plain character since the
+  # catalogue stopped carrying the order as factor levels. Default = the 0.8.8
+  # order, samples by their positive-block count ascending, with samples that
+  # have no positive block first; an explicit sample_order wins; a factor
+  # Sample (an 0.8.8 table) keeps its levels.
+  if (!is.null(sample_order)) {
+    ord <- as.character(sample_order)
+    ord <- c(ord, setdiff(unique(as.character(haplotype_counts$Sample)), ord))
+    src <- "argument"
+  } else if (is.factor(haplotype_counts$Sample)) {
+    ord <- levels(haplotype_counts$Sample)
+    src <- "table"
+  } else {
+    smp <- as.character(haplotype_counts$Sample)
+    pos <- haplotype_counts[haplotype_counts$Label == "Positive", , drop = FALSE]
+    ord <- as.character(pos$Sample[order(pos$Count)])
+    ord <- c(rev(setdiff(unique(smp), ord)), ord)
+    src <- "positive_count"
+  }
+  haplotype_counts$Sample <- factor(as.character(haplotype_counts$Sample), levels = ord)
+
+  p <- ggplot(haplotype_counts,
          aes(x = Sample, y = Count, fill = Label)) +
     geom_bar(stat = "identity", position = "stack") +
     scale_fill_manual(
       values = c(Positive = "#2ca25f", Zero = "#d9d9d9", Negative = "#de2d26")
     ) +
     labs(
-      title = paste0("Block Haplotype Counts — ", trait_name),
+      title = paste0("Block Haplotype Counts \u2014 ", trait_name),
       x     = "Sample",
       y     = "Number of Blocks",
       fill  = "Block Effect"
@@ -818,6 +841,7 @@ plot_block_counts <- function(haplotype_counts,
       axis.text.x = element_text(angle = 90, hjust = 1,
                                   vjust = 0.5, size = x_text_size)
     )
+  .hs_tag_sample_order(p, list(order = ord, source = src))
 }
 
 
@@ -878,11 +902,11 @@ plot_block_counts <- function(haplotype_counts,
 #'   \code{Marker} and \code{Block} columns mapping markers to haplotype blocks;
 #'   overrides \code{geno_meta$block_marker_map_info} (e.g. from
 #'   \code{\link{attach_block_info}}).
-#' @param table_file Optional path; when given, the marker × block metrics table
-#'   backing the plot is written there with \code{fwrite()}. The table is always
-#'   available as \code{attr(p, "signal_table")}, and
-#'   \code{\link{save_marker_signal}} writes it beside the image under a matching
-#'   name.
+#' @param table_file \strong{Deprecated} (0.9.0): a plotter does not write
+#'   files. The marker × block table is always on the plot
+#'   (\code{\link{marker_signal_table}(p)}, i.e. \code{attr(p, "signal_table")})
+#'   and \code{\link{save_marker_signal}} writes it beside the image under a
+#'   matching name. A supplied path still writes this release, with a warning.
 #' @param title Optional plot title (implies \code{show_title = TRUE}).
 #'
 #' @return A \code{ggplot} object carrying the marker × block metrics table as
@@ -920,15 +944,15 @@ plot_marker_signal <- function(metrics,
 
   dt <- as.data.table(data.table::copy(metrics))
   if (!"Marker" %in% names(dt))
-    stop("plot_marker_signal: 'metrics' needs a 'Marker' column.")
+    .hs_abort("plot_marker_signal: 'metrics' needs a 'Marker' column.")
   if (!score %in% names(dt))
-    stop("plot_marker_signal: score column '", score, "' not found in 'metrics'.")
+    .hs_abort("plot_marker_signal: score column '", score, "' not found in 'metrics'.")
 
   # Resolve genomic position / chromosome when absent.
   if (!all(c("Chrom", "Pos") %in% names(dt))) {
     mi <- if (!is.null(map_info)) as.data.table(map_info)
           else if (!is.null(geno_meta)) as.data.table(geno_meta$map_info)
-          else stop("plot_marker_signal: 'metrics' lacks Chrom/Pos; supply ",
+          else .hs_abort("plot_marker_signal: 'metrics' lacks Chrom/Pos; supply ",
                     "'geno_meta' or 'map_info'.")
     mi <- mi[, .(Marker = as.character(Marker),
                  Chrom  = as.character(Chrom),
@@ -941,7 +965,7 @@ plot_marker_signal <- function(metrics,
   dt[, score_val := as.numeric(get(score))]
   dt <- dt[is.finite(score_val) & !is.na(Pos)]
   if (nrow(dt) == 0L)
-    stop("plot_marker_signal: no markers with a finite '", score, "' and position.")
+    .hs_abort("plot_marker_signal: no markers with a finite '", score, "' and position.")
 
   pos_info <- .create_genomic_positions(dt, "Chrom", "Pos")
   pdt      <- pos_info$data
@@ -960,8 +984,8 @@ plot_marker_signal <- function(metrics,
   use_signal  <- switch(
     highlight,
     signal   = if (length(sel_markers) == 0L)
-                 stop("plot_marker_signal: highlight = 'signal' but no signal ",
-                      "markers were supplied or stored on 'geno_meta' — run ",
+                 .hs_abort("plot_marker_signal: highlight = 'signal' but no signal ",
+                      "markers were supplied or stored on 'geno_meta' \u2014 run ",
                       "select_signal_markers() / attach_signal_markers() first.")
                else TRUE,
     quantile = FALSE,
@@ -969,7 +993,7 @@ plot_marker_signal <- function(metrics,
     auto     = length(sel_markers) > 0L)
 
   if (highlight == "auto" && !use_signal)
-    message("plot_marker_signal: no signal-marker selection found; ",
+    .hs_inform("plot_marker_signal: no signal-marker selection found; ",
             "highlighting the top ", if (is.null(quantile)) "(none)"
             else paste0(100 * (1 - quantile), "%"),
             " by ", score, " instead. See select_signal_markers().")
@@ -986,7 +1010,7 @@ plot_marker_signal <- function(metrics,
            else NULL
   if (isTRUE(show_blocks)) {
     if (is.null(bmm)) {
-      message("plot_marker_signal: no block map (block_marker_map / ",
+      .hs_inform("plot_marker_signal: no block map (block_marker_map / ",
               "geno_meta$block_marker_map_info); skipping block strip.")
     } else {
       bands <- .signal_block_bands(pdt, bmm)
@@ -1029,7 +1053,7 @@ plot_marker_signal <- function(metrics,
   # Title is opt-in (an explicit `title` implies it): a title eats the headroom
   # the vertical block labels grow into.
   draw_title <- isTRUE(show_title) || !is.null(title)
-  plot_title <- if (draw_title) title %||% paste0("Marker signal — ", score)
+  plot_title <- if (draw_title) title %||% paste0("Marker signal \u2014 ", score)
                 else NULL
 
   p <- p +
@@ -1098,11 +1122,30 @@ plot_marker_signal <- function(metrics,
   tab <- .marker_signal_table(pdt, bands, bmm, score)
   attr(p, "signal_table") <- tab
   if (!is.null(table_file)) {
+    # D5 ladder (0.9.0, viz/F24): a plotter does not write; the table is on the
+    # plot (marker_signal_table()) and save_marker_signal() writes it.
+    .hs_deprecated("table_file", "save_marker_signal()", "0.9.0",
+                   what = "argument", fn = "plot_marker_signal")
     data.table::fwrite(tab, table_file)
-    message("Marker-signal table written to: ", table_file)
+    .hs_inform("Marker-signal table written to: ", table_file)
   }
 
   p
+}
+
+#' The table behind a marker-signal or marker-effect plot
+#'
+#' \code{\link{plot_marker_signal}} and \code{\link{plot_marker_effects}} attach
+#' the table they drew to the returned ggplot. This accessor returns it, so a
+#' script writes it where and how it likes (\code{\link{save_marker_signal}}
+#' writes it beside the image under a matching name). Replaces the plotters'
+#' deprecated \code{table_file} argument (0.9.0).
+#'
+#' @param p A ggplot returned by one of the two plotters.
+#' @return A \code{data.table}; \code{NULL} when the plot carries none.
+#' @export
+marker_signal_table <- function(p) {
+  attr(p, "signal_table", exact = TRUE) %||% attr(p, "effect_table", exact = TRUE)
 }
 
 
@@ -1117,7 +1160,7 @@ plot_marker_signal <- function(metrics,
   }
   if (is.data.frame(signal_markers)) {
     if (!"Marker" %in% names(signal_markers))
-      stop("plot_marker_signal: 'signal_markers' table needs a 'Marker' column.")
+      .hs_abort("plot_marker_signal: 'signal_markers' table needs a 'Marker' column.")
     return(unique(as.character(signal_markers$Marker)))
   }
   unique(as.character(signal_markers))
@@ -1188,13 +1231,13 @@ plot_marker_signal <- function(metrics,
 save_marker_signal <- function(plot, file, width = 11, height = 4.5, dpi = 130,
                                table_ext = ".csv", ...) {
   if (!inherits(plot, "ggplot"))
-    stop("save_marker_signal: 'plot' must be a ggplot from plot_marker_signal().")
+    .hs_abort("save_marker_signal: 'plot' must be a ggplot from plot_marker_signal().")
 
   ggplot2::ggsave(file, plot, width = width, height = height, dpi = dpi, ...)
 
   tab <- attr(plot, "signal_table")
   if (is.null(tab)) {
-    warning("save_marker_signal: the plot carries no 'signal_table' attribute; ",
+    .hs_warn("save_marker_signal: the plot carries no 'signal_table' attribute; ",
             "only the image was written.")
     return(invisible(file))
   }
@@ -1202,7 +1245,7 @@ save_marker_signal <- function(plot, file, width = 11, height = 4.5, dpi = 130,
   stem       <- sub("\\.[^./\\\\]+$", "", file)
   table_path <- paste0(stem, table_ext)
   data.table::fwrite(tab, table_path)
-  message("Written: ", file, " and ", table_path)
+  .hs_inform("Written: ", file, " and ", table_path)
   invisible(c(file, table_path))
 }
 
@@ -1239,12 +1282,12 @@ plot_signal_precision_recall <- function(metrics,
   need <- c("Marker", "precision", "recall", "MAF")
   miss <- setdiff(need, names(dt))
   if (length(miss) > 0L)
-    stop("plot_signal_precision_recall: 'metrics' missing column(s): ",
+    .hs_abort("plot_signal_precision_recall: 'metrics' missing column(s): ",
          paste(miss, collapse = ", "))
 
   dt <- dt[is.finite(precision) & is.finite(recall)]
   if (nrow(dt) == 0L)
-    stop("plot_signal_precision_recall: no markers with finite precision & recall.")
+    .hs_abort("plot_signal_precision_recall: no markers with finite precision & recall.")
 
   lab <- if (top_n > 0L && score %in% names(dt))
     dt[is.finite(get(score))][order(-get(score))][seq_len(min(top_n, .N))]
@@ -1253,7 +1296,7 @@ plot_signal_precision_recall <- function(metrics,
   p <- ggplot(dt, aes(x = recall, y = precision, colour = MAF)) +
     geom_point(size = point_size, alpha = 0.85) +
     scale_color_gradient(low = "grey80", high = "#08519c", name = "MAF") +
-    labs(title = title %||% "Marker signal — precision vs recall",
+    labs(title = title %||% "Marker signal \u2014 precision vs recall",
          x = "Recall (sensitivity)", y = "Precision") +
     theme_bw(base_size = 12) +
     theme(panel.grid.minor = element_blank()) +
@@ -1284,17 +1327,15 @@ plot_signal_precision_recall <- function(metrics,
 #'   \code{GenomicPos} column) and \code{chr_info} (data.table with
 #'   \code{Chrom} and \code{mid} for X-axis breaks).
 #' @keywords internal
+#' @noRd
 .create_genomic_positions <- function(dt, chrom_col = "Chrom",
                                       pos_col = "Pos") {
   dt <- as.data.table(dt)
   dt[, Chrom_ := as.character(get(chrom_col))]
   dt[, Pos_   := as.numeric(get(pos_col))]
 
-  # Sort chromosomes by natural order (numeric then alphanumeric)
-  chr_order <- unique(dt$Chrom_)
-  chr_nums  <- suppressWarnings(as.integer(chr_order))
-  chr_order <- chr_order[order(!is.na(chr_nums), chr_nums,
-                                chr_order, na.last = FALSE)]
+  # Chromosomes in the one natural order (0.9.0, row 29 a)
+  chr_order <- hs_chrom_levels(dt$Chrom_)
 
   # Cumulative offset per chromosome
   # NB: precompute the reorder index in this frame. Doing the match() inside

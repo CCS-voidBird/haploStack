@@ -82,11 +82,13 @@
 #'   \code{"genotype"} counts distinct samples carrying the subtype on at least
 #'   one copy, so a homozygote counts once.
 #' @param center        Centring mode applied to the allele effects:
-#'   \code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
-#'   \code{\link{compute_profile_localgebv}} for what each preserves.
-#' @param center_by_freq Passed to \code{\link{compute_block_catalogue}} when
-#'   \code{trait} is given; centres allele effects by population frequency before
-#'   summing. Ignored when \code{trait} is \code{NULL}. Default \code{TRUE}.
+#'   \code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
+#'   \code{\link{compute_profile_localgebv}} for what each preserves.
+#' @param center_by_freq \strong{Deprecated} logical form of \code{center}
+#'   (\code{TRUE} = \code{"allele_freq"}, \code{FALSE} = \code{"none"}); warns on
+#'   every call. Used only when \code{trait} is given. The default centring is
+#'   \code{"none"} since 0.9.0 (it was \code{"allele_freq"} up to 0.8.8; pass
+#'   \code{center = "allele_freq"} to reproduce those numbers).
 #' @param output_file Optional path. When non-\code{NULL} the table is written
 #'   there as a tab-separated file via \code{data.table::fwrite()}; the table is
 #'   returned either way. Default \code{NULL}.
@@ -144,12 +146,10 @@ count_block_subtypes <- function(geno_meta,
                                  output_file    = NULL,
                                  fill_na        = NULL,
                                  .signatures    = NULL) {
-  center <- .resolve_center(center, center_by_freq, "count_block_subtypes",
-                            default = "allele_freq")
+  center <- .resolve_center(center, center_by_freq, "count_block_subtypes")
 
   count_by <- match.arg(count_by)
-  if (!is_geno_meta(geno_meta))
-    stop("count_block_subtypes: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "count_block_subtypes", "geno_meta")
 
   empty <- data.table(Trait   = character(0L), Block = character(0L),
                       Subtype = character(0L), Count = integer(0L),
@@ -174,7 +174,7 @@ count_block_subtypes <- function(geno_meta,
     known  <- unique(as.character(geno_meta$block_marker_map_info$Block))
     absent <- setdiff(req, known)
     if (length(absent) > 0L)
-      warning("count_block_subtypes: ", length(absent),
+      .hs_warn("count_block_subtypes: ", length(absent),
               " block(s) not found in this GenoMeta: ",
               paste(utils::head(absent, 5L), collapse = ", "),
               if (length(absent) > 5L) ", ..." else "")
@@ -199,9 +199,9 @@ count_block_subtypes <- function(geno_meta,
     me <- geno_meta$marker_effects
     if (!is.null(me)) {
       avail <- names(.as_effect_list(me))
-      message("count_block_subtypes: effects available for trait(s) ",
+      .hs_inform("count_block_subtypes: effects available for trait(s) ",
               paste(avail, collapse = ", "),
-              " — pass trait= to attach an Effect column.")
+              " \u2014 pass trait= to attach an Effect column.")
     }
   } else {
     # The UNFILTERED signature table is injected: compute_block_catalogue()
@@ -222,6 +222,7 @@ count_block_subtypes <- function(geno_meta,
 
   if (!is.null(output_file))
     data.table::fwrite(cnt, output_file, sep = "\t")
+  data.table::setattr(cnt, "hs_center", center)      # D3.5: the centre travels with the table
   cnt[]
 }
 
@@ -293,16 +294,15 @@ count_subtype_occurrence <- function(geno_meta, block, subtype,
                                      .signatures = NULL) {
 
   count_by <- match.arg(count_by)
-  if (!is_geno_meta(geno_meta))
-    stop("count_subtype_occurrence: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "count_subtype_occurrence", "geno_meta")
 
   block   <- as.character(block)
   subtype <- as.character(subtype)
   if (length(block) != 1L || is.na(block) || !nzchar(block))
-    stop("count_subtype_occurrence: 'block' must be a single non-empty block ID; ",
+    .hs_abort("count_subtype_occurrence: 'block' must be a single non-empty block ID; ",
          "use count_subtype_carriage() for several blocks.")
   if (length(subtype) != 1L || is.na(subtype))
-    stop("count_subtype_occurrence: 'subtype' must be a single non-NA signature ",
+    .hs_abort("count_subtype_occurrence: 'subtype' must be a single non-NA signature ",
          "string; use count_subtype_carriage() for several subtypes.")
 
   sigs <- .signatures
@@ -311,7 +311,7 @@ count_subtype_occurrence <- function(geno_meta, block, subtype,
 
   in_block <- sigs[Block == block]
   if (nrow(in_block) == 0L) {
-    warning("count_subtype_occurrence: block '", block,
+    .hs_warn("count_subtype_occurrence: block '", block,
             "' not found in this GenoMeta; returning 0.")
     return(0L)
   }
@@ -336,32 +336,32 @@ count_subtype_occurrence <- function(geno_meta, block, subtype,
   if (is.data.frame(subtypes)) {
     dt <- data.table::as.data.table(subtypes)
     if (!"Block" %in% names(dt))
-      stop(caller, ": 'subtypes' data.frame needs a 'Block' column.")
+      .hs_abort(caller, ": 'subtypes' data.frame needs a 'Block' column.")
     scol <- intersect(c("Subtype", "signature", "Signature"), names(dt))
     if (length(scol) == 0L)
-      stop(caller, ": 'subtypes' data.frame needs one of 'Subtype', ",
+      .hs_abort(caller, ": 'subtypes' data.frame needs one of 'Subtype', ",
            "'signature' or 'Signature'.")
     out <- data.table::data.table(Block   = as.character(dt[["Block"]]),
                                   Subtype = as.character(dt[[scol[1L]]]))
   } else if (is.character(subtypes) || is.factor(subtypes)) {
     nm <- names(subtypes)
     if (is.null(nm) || any(!nzchar(nm)))
-      stop(caller, ": a vector of 'subtypes' must be fully named, with the ",
+      .hs_abort(caller, ": a vector of 'subtypes' must be fully named, with the ",
            "block ID as each element's name.")
     out <- data.table::data.table(Block = nm, Subtype = as.character(subtypes))
   } else {
-    stop(caller, ": 'subtypes' must be a data.frame with 'Block' plus ",
+    .hs_abort(caller, ": 'subtypes' must be a data.frame with 'Block' plus ",
          "'Subtype'/'signature'/'Signature', or a named character vector ",
          "(names = block IDs).")
   }
 
   out <- out[!is.na(Block) & nzchar(Block) & !is.na(Subtype)]
   if (nrow(out) == 0L)
-    stop(caller, ": no usable (Block, Subtype) targets were supplied.")
+    .hs_abort(caller, ": no usable (Block, Subtype) targets were supplied.")
 
   n_dup <- sum(duplicated(out))
   if (n_dup > 0L) {
-    warning(caller, ": ", n_dup,
+    .hs_warn(caller, ": ", n_dup,
             " duplicate (Block, Subtype) target(s) dropped.")
     out <- unique(out)
   }
@@ -445,8 +445,7 @@ count_subtype_carriage <- function(geno_meta, subtypes,
                                    .signatures = NULL) {
 
   count_by <- match.arg(count_by)
-  if (!is_geno_meta(geno_meta))
-    stop("count_subtype_carriage: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "count_subtype_carriage", "geno_meta")
 
   tgt     <- .as_subtype_targets(subtypes, "count_subtype_carriage")
   samples <- dimnames(geno_meta$geno_arrays)[[1L]]
@@ -458,7 +457,7 @@ count_subtype_carriage <- function(geno_meta, subtypes,
 
   absent <- setdiff(unique(tgt$Block), unique(sigs$Block))
   if (length(absent) > 0L)
-    warning("count_subtype_carriage: ", length(absent),
+    .hs_warn("count_subtype_carriage: ", length(absent),
             " target block(s) not found in this GenoMeta (counted as 0): ",
             paste(utils::head(absent, 5L), collapse = ", "),
             if (length(absent) > 5L) ", ..." else "")
@@ -522,7 +521,7 @@ count_subtype_carriage <- function(geno_meta, subtypes,
       !is.null(catalogue$selected)) {
     sel <- data.table::as.data.table(catalogue$selected)
     if (!all(c("Block", "Subtype") %in% names(sel)))
-      stop(caller, ": the analysis result's 'selected' table needs 'Block' and ",
+      .hs_abort(caller, ": the analysis result's 'selected' table needs 'Block' and ",
            "'Subtype' columns.")
     ref <- unique(sel[, .(Block = as.character(Block),
                           Subtype = as.character(Subtype))], by = "Block")
@@ -544,19 +543,19 @@ count_subtype_carriage <- function(geno_meta, subtypes,
   } else if (is.list(catalogue) && !is.null(catalogue)) {
     nm <- names(catalogue)
     if (is.null(nm) || any(!nzchar(nm)))
-      stop(caller, ": a list 'catalogue' must be named (one element per trait).")
+      .hs_abort(caller, ": a list 'catalogue' must be named (one element per trait).")
     long <- data.table::rbindlist(lapply(nm, function(tr) {
       el <- catalogue[[tr]]
       hc <- if (is.data.frame(el)) el else el$hap_catalogue
       if (is.null(hc))
-        stop(caller, ": catalogue element '", tr, "' has no 'hap_catalogue'.")
+        .hs_abort(caller, ": catalogue element '", tr, "' has no 'hap_catalogue'.")
       d <- data.table::as.data.table(hc)
       d[, Trait := tr]
       d
     }), fill = TRUE)
   } else {
     if (is.null(geno_meta))
-      stop(caller, ": supply a 'catalogue', or a 'geno_meta' carrying effects.")
+      .hs_abort(caller, ": supply a 'catalogue', or a 'geno_meta' carrying effects.")
     long <- compute_block_catalogue(geno_meta, trait = trait,
                                     center   = center,
                                     group_by = "signature")
@@ -566,10 +565,10 @@ count_subtype_carriage <- function(geno_meta, subtypes,
 
   scol <- intersect(c("Subtype", "signature", "Signature"), names(long))
   if (length(scol) == 0L)
-    stop(caller, ": the catalogue needs a subtype column ('Subtype', ",
+    .hs_abort(caller, ": the catalogue needs a subtype column ('Subtype', ",
          "'signature' or 'Signature').")
   if (!"Effect" %in% names(long))
-    stop(caller, ": the catalogue needs an 'Effect' column to rank subtypes by.")
+    .hs_abort(caller, ": the catalogue needs an 'Effect' column to rank subtypes by.")
   if (!"Count" %in% names(long)) long[, Count := 1L]
 
   # .select_block_subtype() expects Block/Subtype/Count/Trait plus Vbase, and a
@@ -581,7 +580,7 @@ count_subtype_carriage <- function(geno_meta, subtypes,
                  Trait   = as.character(Trait),
                  Vbase   = as.numeric(Effect))]
   st <- st[!is.na(Block) & !is.na(Subtype)]
-  if (nrow(st) == 0L) stop(caller, ": the catalogue holds no usable subtypes.")
+  if (nrow(st) == 0L) .hs_abort(caller, ": the catalogue holds no usable subtypes.")
 
   traits <- unique(st$Trait)
   w      <- stats::setNames(rep(1, length(traits)), traits)
@@ -637,10 +636,13 @@ count_subtype_carriage <- function(geno_meta, subtypes,
 #'   sample; \code{"genotype"} counts each sample once per target carried. See
 #'   \code{\link{count_subtype_carriage}}.
 #' @param center        Centring mode applied to the allele effects:
-#'   \code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
-#'   \code{\link{compute_profile_localgebv}} for what each preserves.
-#' @param center_by_freq Passed to \code{\link{compute_block_catalogue}} when the
-#'   catalogue is computed here. Default \code{TRUE}.
+#'   \code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
+#'   \code{\link{compute_profile_localgebv}} for what each preserves.
+#' @param center_by_freq \strong{Deprecated} logical form of \code{center}
+#'   (\code{TRUE} = \code{"allele_freq"}, \code{FALSE} = \code{"none"}); warns on
+#'   every call. Used when the catalogue is computed here. The default centring
+#'   is \code{"none"} since 0.9.0 (it was \code{"allele_freq"} up to 0.8.8; pass
+#'   \code{center = "allele_freq"} to reproduce those numbers).
 #' @param fill_na Placeholder for an unobserved allele. Default \code{NULL} (the
 #'   \code{haploStack.fill_na} option).
 #' @param output_file Optional path; writes the \code{by_sample} table as a
@@ -695,12 +697,10 @@ count_favourable_subtypes <- function(geno_meta,
                                       output_file    = NULL) {
 
   center <- .resolve_center(center, center_by_freq,
-                            "count_favourable_subtypes",
-                            default = "allele_freq")
+                            "count_favourable_subtypes")
   if (!is.function(fitness_fn)) fitness_fn <- match.arg(fitness_fn)
   count_by <- match.arg(count_by)
-  if (!is_geno_meta(geno_meta))
-    stop("count_favourable_subtypes: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "count_favourable_subtypes", "geno_meta")
 
   ref <- .resolve_top_subtypes(catalogue, geno_meta, trait, fitness_fn,
                                min_count, center, fill_na)
@@ -713,7 +713,7 @@ count_favourable_subtypes <- function(geno_meta,
   if (!is.null(top_n)) {
     top_n <- as.integer(top_n)[1L]
     if (is.na(top_n) || top_n < 1L)
-      stop("count_favourable_subtypes: 'top_n' must be a positive integer.")
+      .hs_abort("count_favourable_subtypes: 'top_n' must be a positive integer.")
     if (top_n < nrow(ref)) ref <- ref[seq_len(top_n)]
   }
 
@@ -728,10 +728,11 @@ count_favourable_subtypes <- function(geno_meta,
 
   res$reference  <- ref[]
   res$fitness_fn <- if (is.function(fitness_fn)) "custom" else fitness_fn
+  attr(res, "hs_center") <- center                  # D3.5: the centre travels with the result
 
   if (!is.null(output_file)) {
     data.table::fwrite(res$by_sample, output_file, sep = "\t")
-    message("Favourable-subtype carriage written to: ", output_file)
+    .hs_inform("Favourable-subtype carriage written to: ", output_file)
   }
   res
 }

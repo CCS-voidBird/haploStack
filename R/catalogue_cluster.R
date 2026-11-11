@@ -41,9 +41,9 @@
   alleles <- prof$alleles                                # Sample, Haplotype_idx, <markers...>
   markers <- setdiff(names(alleles), c("Sample", "Haplotype_idx"))
   if (nrow(alleles) == 0L || length(markers) == 0L)
-    stop("cluster_samples: no genotype data to cluster after filtering.")
+    .hs_abort("cluster_samples: no genotype data to cluster after filtering.")
 
-  miss  <- .missing_tokens(prof$encoding)
+  miss  <- .missing_tokens(prof$encoding, .meta_extra_missing(geno_meta))
   n_cp  <- nrow(alleles)
   n_mk  <- length(markers)
   code  <- matrix(NA_integer_, n_cp, n_mk, dimnames = list(NULL, markers))
@@ -210,8 +210,7 @@ cluster_samples <- function(geno_meta, samples = NULL, markers = NULL,
                             linkage    = "ward.D2",
                             k          = NULL,
                             verbose    = FALSE) {
-  if (!is_geno_meta(geno_meta))
-    stop("cluster_samples: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "cluster_samples", "geno_meta")
   distance   <- match.arg(distance, c("hamming"))
   copy_merge <- match.arg(copy_merge)
 
@@ -223,7 +222,7 @@ cluster_samples <- function(geno_meta, samples = NULL, markers = NULL,
 
   cc <- .cluster_copy_codes(gm)
   if (length(cc$samples) < 2L)
-    stop("cluster_samples: need at least 2 samples to cluster (got ",
+    .hs_abort("cluster_samples: need at least 2 samples to cluster (got ",
          length(cc$samples), ").")
 
   if (copy_merge == "pool" && cc$ploidy == 2L) {
@@ -231,7 +230,7 @@ cluster_samples <- function(geno_meta, samples = NULL, markers = NULL,
     used_merge <- "pool"
   } else {
     if (copy_merge == "pool") {
-      warning("cluster_samples: copy_merge = 'pool' needs diploid data; ",
+      .hs_warn("cluster_samples: copy_merge = 'pool' needs diploid data; ",
               "falling back to 'average'.")
       used_merge <- "average"
     } else used_merge <- copy_merge
@@ -242,7 +241,7 @@ cluster_samples <- function(geno_meta, samples = NULL, markers = NULL,
 
   if (anyNA(dsamp)) {
     n_na <- sum(is.na(dsamp[upper.tri(dsamp)]))
-    warning("cluster_samples: ", n_na, " sample pair(s) share no comparable ",
+    .hs_warn("cluster_samples: ", n_na, " sample pair(s) share no comparable ",
             "marker; their distance was set to the maximum observed.")
     dsamp[is.na(dsamp)] <- max(dsamp[is.finite(dsamp)], 0)
     diag(dsamp) <- 0
@@ -257,14 +256,14 @@ cluster_samples <- function(geno_meta, samples = NULL, markers = NULL,
   if (!is.null(k)) {
     k <- as.integer(k)
     if (k < 1L || k > length(cc$samples))
-      stop("cluster_samples: 'k' must be between 1 and n_samples (",
+      .hs_abort("cluster_samples: 'k' must be between 1 and n_samples (",
            length(cc$samples), ").")
     clusters <- stats::cutree(hc, k = k)
     names(clusters) <- cc$samples
   }
 
   if (isTRUE(verbose))
-    message(sprintf("[cluster_samples] %d samples x %d markers | distance=%s | ",
+    .hs_inform(sprintf("[cluster_samples] %d samples x %d markers | distance=%s | ",
                     length(cc$samples), length(cc$markers), distance),
             sprintf("copy_merge=%s | linkage=%s%s", used_merge, linkage,
                     if (!is.null(k)) sprintf(" | k=%d", k) else ""))
@@ -364,13 +363,13 @@ plot_cluster_dendrogram <- function(x, orientation = c("horizontal", "vertical")
                                     line_width = 0.4, label_leaves = FALSE,
                                     leaf_expand = c(0.5, 0.5)) {
   if (!inherits(x, "hs_sample_clustering"))
-    stop("plot_cluster_dendrogram: 'x' must be an hs_sample_clustering ",
+    .hs_abort("plot_cluster_dendrogram: 'x' must be an hs_sample_clustering ",
          "(from cluster_samples()).")
   orientation <- match.arg(orientation)
   leaf_expand <- as.numeric(leaf_expand)
   if (length(leaf_expand) == 1L) leaf_expand <- rep(leaf_expand, 2L)
   if (length(leaf_expand) != 2L || anyNA(leaf_expand))
-    stop("plot_cluster_dendrogram: 'leaf_expand' must be one or two finite ",
+    .hs_abort("plot_cluster_dendrogram: 'leaf_expand' must be one or two finite ",
          "numbers.")
   leaf_exp <- ggplot2::expansion(mult = 0, add = leaf_expand)
   seg <- .hclust_segments(x$hclust)
@@ -457,8 +456,7 @@ plot_clustered_alignment <- function(geno_meta, clustering = NULL,
                                      method = c("genotype", "haplotype"),
                                      show_dendrogram = TRUE, rel_widths = c(1, 4),
                                      k = NULL, ...) {
-  if (!is_geno_meta(geno_meta))
-    stop("plot_clustered_alignment: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "plot_clustered_alignment", "geno_meta")
   method <- match.arg(method)
   if (is.null(clustering)) {
     # A broadcast clustering is used in preference to computing a fresh one:
@@ -468,27 +466,29 @@ plot_clustered_alignment <- function(geno_meta, clustering = NULL,
     bcast <- .hs_sample_order()
     if (inherits(bcast, "hs_sample_clustering")) {
       clustering <- bcast
-      message("plot_clustered_alignment: using the clustering broadcast by ",
+      .hs_inform("plot_clustered_alignment: using the clustering broadcast by ",
               "use_sample_order(); pass 'clustering' to override.")
     } else {
       clustering <- cluster_samples(geno_meta, k = k)
     }
   }
   if (!inherits(clustering, "hs_sample_clustering"))
-    stop("plot_clustered_alignment: 'clustering' must be an hs_sample_clustering.")
+    .hs_abort("plot_clustered_alignment: 'clustering' must be an hs_sample_clustering.")
 
   aln <- plot_haplotype_alignment(geno_meta, method = method,
                                   sample_order = clustering, ...)
 
   want_dendro <- isTRUE(show_dendrogram) && method == "genotype"
-  if (want_dendro && !requireNamespace("cowplot", quietly = TRUE)) {
-    warning("plot_clustered_alignment: 'cowplot' not installed; returning the ",
-            "row-ordered alignment without the dendrogram panel.")
-    want_dendro <- FALSE
-  }
+  # viz/F16 rule (0.9.0): a missing optional package is an error that names the
+  # install, never a silently different return class.
+  if (want_dendro && !requireNamespace("cowplot", quietly = TRUE))
+    .hs_abort("plot_clustered_alignment: the 'cowplot' package is required for ",
+              "show_dendrogram = TRUE. Install it, or pass show_dendrogram = FALSE.",
+              class = "hs_error_dependency",
+              data = list(hint = "install.packages(\"cowplot\")"))
   if (!want_dendro) {
     if (isTRUE(show_dendrogram) && method == "haplotype")
-      message("plot_clustered_alignment: dendrogram panel is genotype-level; ",
+      .hs_inform("plot_clustered_alignment: dendrogram panel is genotype-level; ",
               "returning the haplotype alignment ordered by the clustering.")
     return(aln)
   }

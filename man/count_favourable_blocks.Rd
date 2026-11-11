@@ -14,6 +14,7 @@ count_favourable_blocks(
   chromosomes = NULL,
   center = NULL,
   center_by_freq = NULL,
+  tol = 0,
   fill_na = 0,
   plot = TRUE,
   output_file = NULL
@@ -37,11 +38,17 @@ position. \code{NULL} (default) uses \code{geno_meta$marker_effects} (see
 \code{\link{compute_profile_localgebv}}.}
 
 \item{center}{Centring mode applied to the allele effects:
-�\code{"none"}, �\code{"locus_mean"} or �\code{"allele_freq"}. See
-�\code{\link{compute_profile_localgebv}} for what each preserves.}
+\code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
+\code{\link{compute_profile_localgebv}} for what each preserves.}
 
-\item{center_by_freq}{Logical; mean-centre allele effects by population
-frequency before summing per block. Default \code{TRUE} (see above).}
+\item{center_by_freq}{\strong{Deprecated} logical form of \code{center}
+(\code{TRUE} = \code{"allele_freq"}, \code{FALSE} = \code{"none"}); warns
+on every call. The default centring here is \code{"locus_mean"} since 0.9.0
+(see above).}
+
+\item{tol}{Non-negative number. A local GEBV with \code{|value| <= tol} counts
+as \code{Zero} rather than \code{Positive} / \code{Negative}. Default
+\code{0}: the strict sign rule of 0.8.8.}
 
 \item{fill_na}{Value for (block, copy) cells with no effect information.
 Default \code{0}, matching \code{\link{compute_profile_localgebv}} — every
@@ -94,12 +101,16 @@ block counts already exist as \code{\link{run_haplotype_catalogue}}'s
 and \code{nNegative} are reported either way, so one call describes both
 directions and \code{nPreferred} simply names the one being selected for.
 
-\strong{Centering matters to the sign.} \code{center_by_freq = TRUE} (the
-default here, as in \code{\link{run_haplotype_catalogue}}) mean-centres allele
-effects by their population frequency, so a positive local GEBV means
-\dQuote{above the panel mean for this block}. Without centering the sign
-mostly reflects which allele the effect file called the reference, and
-counting positive blocks stops being a breeding statement.
+\strong{Centering matters to the sign.} The default since 0.9.0 is
+\code{center = "locus_mean"} (decision-form row 15 c): each marker's allele
+effects are shifted by their frequency-weighted mean, so a positive local GEBV
+means \dQuote{above the panel mean for this block} while every haplotype of a
+block moves by the same amount and the block's subtype ranking is untouched.
+Without centering (\code{"none"}) the sign mostly reflects which allele the
+effect file called the reference, and counting positive blocks stops being a
+breeding statement. Up to 0.8.8 the default was \code{"allele_freq"}
+(\code{center_by_freq = TRUE}); pass \code{center = "allele_freq"} to
+reproduce those counts. A value within \code{tol} of zero is neither sign.
 }
 \examples{
 \dontrun{

@@ -92,11 +92,15 @@ test_that("read_gff3_genes parses genes, synonyms and the FASTA tail", {
   expect_false(is.null(attr(g, "hs_annotation_source")))
 })
 
-test_that("read_gff3_genes reads gzipped files and applies chr_map", {
+test_that("read_gff3_genes reads gzipped files and applies rename_seqid", {
   gff <- .write_toy_gff3(tempfile(fileext = ".gff3.gz"), gz = TRUE)
-  g <- read_gff3_genes(gff, chr_map = c("1" = "1H"))
+  g <- read_gff3_genes(gff, rename_seqid = c("1" = "1H"))
   expect_equal(nrow(g), 3L)
   expect_equal(sort(unique(g$chrom)), c("1H", "2"))
+  # the old spelling (file -> stored, the opposite of every other chr_map) warns
+  expect_warning(g2 <- read_gff3_genes(gff, chr_map = c("1" = "1H")),
+                 "rename_seqid", class = "hs_warning_deprecated")
+  expect_identical(as.data.frame(g2), as.data.frame(g))
 })
 
 test_that("read_gff3_genes errors usefully on a wrong feature type", {
@@ -180,8 +184,13 @@ test_that("compute_block_annotation warns on a vocabulary mismatch and chr_map f
   g  <- data.table::copy(tt$genes)
   g[, chrom := paste0(chrom, "H")]            # GFF3 says 1H/2H, container 1/2
 
+  # 0.9.0 (D5 §3.6 f): the vocabulary is checked before the overlap; the
+  # warning names the chromosomes and suggests the affix map (never applied)
   expect_warning(compute_block_annotation(tt$meta, g, flank_bp = 0),
-                 "no block overlaps any gene")
+                 'chr_map = c("1" = "1H", "2" = "2H")', fixed = TRUE,
+                 class = "hs_warning_input")
+  expect_error(compute_block_annotation(tt$meta, g, flank_bp = 0, strict = TRUE),
+               "no gene", class = "hs_error_input")
 
   ann <- compute_block_annotation(tt$meta, g, flank_bp = 0,
                                   chr_map = c("1" = "1H", "2" = "2H"))
@@ -332,7 +341,7 @@ test_that("phenotype / signal / recode transforms keep the annotation", {
   m_ph <- attach_phenotype(m2, ph)
   expect_identical(m_ph$annotation, m2$annotation)
 
-  m_rc <- recode_geno_meta(m2, to_type = "selectiontools")
+  m_rc <- recode_geno_meta(m2, to_type = "nucleotide")   # the old target is defunct (C-5)
   expect_identical(m_rc$annotation, m2$annotation)
 })
 

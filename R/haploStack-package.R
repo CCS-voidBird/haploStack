@@ -11,16 +11,30 @@
 #
 # Only packages used WITHOUT a `pkg::` prefix need a tag:
 #   - data.table : `:=`, `.N`, `.I`, bare column names (non-standard evaluation).
-#   - magrittr   : the `%>%` pipe (R/catalogue_blockmap.R).
 #   - ggplot2    : bare ggplot()/aes()/geom_*/scale_*/theme_* in the viz files.
-# dplyr is always called as `dplyr::` (DESCRIPTION Imports is enough); tidyr,
-# stringr, methods and reshape2 are not used and are intentionally not imported.
+#   - stats, utils, graphics : the few base helpers called without a prefix.
+# Every other Imports package (grDevices, grid, tools) is called as `pkg::`.
+# 0.9.0 dropped dplyr, magrittr, tidyr, reshape2, stringr and methods: the one
+# dplyr chain became data.table (.left_join_dt() in R/geno_meta_blocks.R)
+# and the others had no call site.
 # =============================================================================
 
+#' @section Getting started (people and AI agents):
+#' The package ships its own usage guide, written as an agent skill: run
+#' \code{hs_agent_guide()} to print it, and \code{hs_agent_guide("blocks")},
+#' \code{"genometa"}, \code{"simulation"} or \code{"troubleshooting"} for the
+#' reference pages. An AI coding agent that has only this package installed
+#' should read it before calling anything else. \code{hs_install_skill(path)}
+#' copies it into an agent's skills folder (for example
+#' \code{".claude/skills"}). The files are at
+#' \code{system.file("skills", "haplostack", package = "haploStack")}.
+#'
 #' @keywords internal
 #' @useDynLib haploStack, .registration = TRUE
 #' @importFrom Rcpp sourceCpp
 #' @import data.table
-#' @importFrom magrittr %>%
+#' @importFrom stats setNames runif reorder
+#' @importFrom utils head modifyList combn
+#' @importFrom graphics par
 #' @importFrom ggplot2 aes annotate element_blank element_line element_text facet_wrap geom_bar geom_col geom_density geom_hline geom_line geom_point geom_rect geom_text geom_tile geom_vline ggplot labs scale_color_gradient scale_color_manual scale_fill_gradient2 scale_fill_manual scale_x_continuous scale_y_continuous theme theme_bw theme_minimal
 "_PACKAGE"

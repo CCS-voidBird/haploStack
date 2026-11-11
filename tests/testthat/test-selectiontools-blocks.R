@@ -22,13 +22,14 @@
 
 library(testthat)
 library(haploStack)
+withr::local_options(list(haploStack.st_formats = TRUE))   # the gate (0.9.0)
 
 test_that("B1: planted LD groups come back as exactly those blocks", {
   skip_if_not_installed("SelectionTools")
   toy <- st_toy()
   r <- st_ld_blocks(toy, ld_threshold = 0.5, tolerance = 0,
                                     attach = FALSE, verbose = FALSE)
-  expect_named(r, c("block_marker_map", "block_info"))
+  expect_named(r, c("block_marker_map", "block_info", "provenance"))
   bm <- r$block_marker_map
   expect_setequal(bm$Marker, dimnames(toy$geno_arrays)[[2L]])
   expect_identical(unname(partition(bm)),
@@ -103,7 +104,8 @@ test_that("B5: the blocking rule is validated before SelectionTools is touched",
                  "tolerance", info = format(tol))
   expect_error(st_ld_blocks(list(a = 1)), "valid GenoMeta")
   f <- tempfile()
-  expect_error(st_ld_blocks_files(f, f, ld_threshold = 0), "ld_threshold")
+  expect_error(suppressWarnings(st_ld_blocks_files(f, f, ld_threshold = 0),
+                                classes = "hs_warning_deprecated"), "ld_threshold")
 })
 
 test_that("B6: no file lands in the working directory; temp dir handling; output_dir", {
@@ -153,8 +155,9 @@ test_that("B7: the file route keeps chromosome names and positions, and agrees w
                paste(toy$map_info$Marker, toy$map_info$Chrom, toy$map_info$Pos,
                      sep = "\t")), mf)
 
-  fr <- suppressMessages(st_ld_blocks_files(gf, mf, 0.5, 0,
-                                                 output_dir = file.path(d, "out")))
+  fr <- suppressWarnings(classes = "hs_warning_deprecated",
+        suppressMessages(st_ld_blocks_files(gf, mf, 0.5, 0,
+                                                 output_dir = file.path(d, "out"))))
   expect_setequal(unique(fr$block_marker_map$Chrom), c("1H", "2H", "3H"))
   expect_false(anyNA(fr$block_info$Start))
   expect_false(anyNA(fr$block_info$End))
@@ -163,7 +166,7 @@ test_that("B7: the file route keeps chromosome names and positions, and agrees w
                    unname(partition(mr$block_marker_map)))
 })
 
-test_that("B8: SelectionTools' global dirs — supplied when gone, refused when set", {
+test_that("B8: SelectionTools' global dirs — supplied when gone, restored when set; cwd untouched", {
   skip_if_not_installed("SelectionTools")
   requireNamespace("SelectionTools", quietly = TRUE)
   ge   <- globalenv()
@@ -182,22 +185,30 @@ test_that("B8: SelectionTools' global dirs — supplied when gone, refused when 
   expect_identical(length(unique(r$block_marker_map$Block)), 11L)
   expect_false(any(vapply(vars, exists, logical(1L), envir = ge, inherits = FALSE)))
 
-  # set to a directory, as SelectionTools' manual shows: refused, remedy named
+  # set to a directory, as SelectionTools' manual shows: used to be refused;
+  # since 0.9.0 (D1-8) the bridge points both at its private directory for the
+  # call and restores the user's values afterwards
   assign("st.input.dir", "input", envir = ge)
   assign("st.output.dir", "", envir = ge)
-  expect_error(st_ld_blocks(toy, 0.5, 0, attach = FALSE, verbose = FALSE),
-               "st.input.dir <- \"\"", fixed = TRUE)
-  expect_identical(get("st.input.dir", envir = ge), "input")   # left as found
+  r2 <- st_ld_blocks(toy, 0.5, 0, attach = FALSE, verbose = FALSE)
+  expect_identical(r2$block_marker_map, r$block_marker_map)
+  expect_identical(get("st.input.dir", envir = ge), "input")   # restored
+  expect_identical(get("st.output.dir", envir = ge), "")
+
+  # the working directory is neither changed nor written to
+  wd <- withr::local_tempdir()
+  withr::local_dir(wd)
+  r3 <- st_ld_blocks(toy, 0.5, 0, attach = FALSE, verbose = FALSE)
+  expect_identical(normalizePath(getwd()), normalizePath(wd))
+  expect_identical(list.files(wd, all.files = TRUE, no.. = TRUE), character(0L))
+  expect_identical(r3$block_marker_map, r$block_marker_map)
 })
 
-test_that("B9: the pre-0.7.10 names warn and return what the new names return", {
+test_that("B9: the pre-0.7.10 names are defunct (0.9.0); the file route still matches st_ld_blocks()", {
   skip_if_not_installed("SelectionTools")
   toy <- st_toy()
-  new_r <- st_ld_blocks(toy, 0.5, 0, attach = FALSE, verbose = FALSE)
-  expect_warning(old_r <- define_haplotype_blocks_meta(toy, 0.5, 0, attach = FALSE,
-                                                       verbose = FALSE),
-                 "st_ld_blocks()", class = "deprecatedWarning", fixed = TRUE)
-  expect_identical(old_r, new_r)
+  expect_error(define_haplotype_blocks_meta(toy, 0.5, 0, attach = FALSE, verbose = FALSE),
+               "st_ld_blocks()", class = "hs_error_defunct", fixed = TRUE)
 
   d <- tempfile("st_dep_"); dir.create(d)
   arr <- toy$geno_arrays
@@ -210,10 +221,12 @@ test_that("B9: the pre-0.7.10 names warn and return what the new names return", 
   writeLines(c("name\tchrom\tpos",
                paste(toy$map_info$Marker, toy$map_info$Chrom, toy$map_info$Pos,
                      sep = "\t")), mf)
-  new_f <- suppressMessages(st_ld_blocks_files(gf, mf, 0.5, 0,
-                                               output_dir = file.path(d, "new")))
-  expect_warning(old_f <- suppressMessages(define_haplotype_blocks(
-                   gf, mf, 0.5, 0, output_dir = file.path(d, "old"))),
-                 "st_ld_blocks_files()", class = "deprecatedWarning", fixed = TRUE)
-  expect_identical(old_f, new_f)
+  expect_warning(new_f <- suppressMessages(st_ld_blocks_files(gf, mf, 0.5, 0,
+                                               output_dir = file.path(d, "new"))),
+                 class = "hs_warning_deprecated")      # row 27 a
+  expect_error(define_haplotype_blocks(gf, mf, 0.5, 0, output_dir = file.path(d, "old")),
+               class = "hs_error_defunct")
+  # the file route is st_convert() + st_ld_blocks(): same tables as the container route
+  new_r <- st_ld_blocks(toy, 0.5, 0, attach = FALSE, verbose = FALSE)
+  expect_identical(new_f$block_marker_map, new_r$block_marker_map)
 })

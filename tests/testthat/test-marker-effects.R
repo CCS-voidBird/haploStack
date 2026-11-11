@@ -242,12 +242,15 @@ test_that("plot_manhattan_effect is left untouched by the new marker plot", {
                "^Block Effect")
 })
 
-test_that("table_file writes the plotted table", {
+test_that("table_file still writes the plotted table but is deprecated (0.9.0)", {
   m <- eff_meta()
   f <- file.path(withr::local_tempdir(), "eff.txt")
-  p <- suppressMessages(plot_marker_effects(m, trait = "Yield",
-                                            table_file = f))
+  expect_warning(p <- suppressMessages(plot_marker_effects(m, trait = "Yield",
+                                                           table_file = f)),
+                 class = "hs_warning_deprecated")
   back <- data.table::fread(f)
   expect_identical(nrow(back), nrow(attr(p, "effect_table")))
   expect_equal(back$Effect, attr(p, "effect_table")$Effect)
+  # the accessor reads the effect table too
+  expect_identical(marker_signal_table(p), attr(p, "effect_table"))
 })

@@ -9,84 +9,80 @@ st_ld_blocks_files(
   geno_map_file,
   ld_threshold = 0.5,
   tolerance = 0,
-  output_dir = "haplotype"
+  output_dir = "haplotype",
+  st_formats = NULL,
+  progress = NULL
 )
 }
 \arguments{
 \item{geno_data_file}{Path to a genotype file in SelectionTools' own matrix
 format (\code{st.read.marker.data(format = "m")}): markers in rows, the
 first row the individual names, fields separated by a tab, a blank or
-\code{;} — \strong{not a comma}, so the CSV that
-\code{write_geno_meta(output_format = "st")} writes is not one. Starting
-from a \code{GenoMeta}, use \code{\link{st_ld_blocks}}.}
+\code{;} (not a comma). Starting from a \code{GenoMeta}, use
+\code{\link{st_ld_blocks}}.}
 
 \item{geno_map_file}{Path to the map, SelectionTools format \code{"mcp"}
-with a header line: columns \code{name, chrom, pos}. SelectionTools keeps
-only the leading integer of a chromosome name; the returned tables take
-\code{Chrom} (e.g. \code{"1H"}) from this file.}
+with a header line: columns \code{name, chrom, pos}. The returned tables
+take \code{Chrom} (e.g. \code{"1H"}) from this file.}
 
-\item{ld_threshold}{Minimum LD (\code{r^2}) to merge adjacent markers; one
-number in \eqn{(0, 1]}. Default \code{0.5}. \code{0} is refused:
+\item{ld_threshold}{\eqn{r^2} above which flanking markers stay in one
+block; one number in \eqn{(0, 1]}. Default \code{0.5}. \code{0} is refused:
 SelectionTools aborts the R session on it.}
 
-\item{tolerance}{Tolerance for \code{st.def.hblocks()}; a whole number
-\eqn{\ge 0}. Default \code{0}.}
+\item{tolerance}{Whole number \eqn{\ge 0}: how many markers below the
+threshold a block may absorb (SelectionTools' \code{tolerance}). Default
+\code{0}.}
 
-\item{output_dir}{Directory where block-map files are written.}
+\item{output_dir}{Directory where the two block files are written.}
+
+\item{st_formats}{\code{TRUE} enables SelectionTools formats for this call;
+\code{NULL} (default) takes the session switch
+(\code{\link{use_st_formats}}, off by default: SelectionTools is being
+retired from haploStack).}
+
+\item{progress}{\code{NULL} (default) or a function of one argument (the
+package's progress contract, 0.9.0). SelectionTools' C code cannot be
+interrupted, so there are two events only: \code{unit = "run"},
+\code{i = 1} (\code{"start"}) before the run and \code{i = 2}
+(\code{"done"}, \code{payload$n_blocks}) after it; returning \code{FALSE}
+at \code{"start"} cancels with an \code{hs_error_cancelled} error (no
+partial result).}
 }
 \value{
-A named list with:
-\describe{
-\item{\code{block_info}}{data.table: \code{Chrom, Block, Start, End}.}
-\item{\code{block_marker_map}}{data.table: \code{Chrom, Marker, Block}.}
-}
+A named list with \code{block_marker_map} (\code{Chrom, Marker,
+  Block}), \code{block_info} (\code{Chrom, Block, Start, End, Pos, Num_SNPs,
+  Block_length}) and \code{provenance}, as \code{st_ld_blocks(attach =
+  FALSE)} returns it.
 }
 \description{
 The file route of the SelectionTools resolver, for genotype and map files
-already in SelectionTools' own formats. Named
+already in SelectionTools' own formats: \code{\link{st_convert}} reads them
+into a \code{GenoMeta}, \code{\link{st_ld_blocks}} blocks it, and the two
+canonical block files are written to \code{output_dir}. Named
 \code{define_haplotype_blocks()} up to 0.7.9; that name still works, with a
-deprecation warning. For data in a \code{GenoMeta} use
-\code{\link{st_ld_blocks}}. Before either, check whether you need LD
-blocking at all: the recommended route is a block map you already have
-(\code{\link{attach_block_info}}), and the default local resolver is
-\code{\link{hapS_ld_blocks}}. Experimental, for the reasons
-\code{\link{st_ld_blocks}} gives.
+deprecation warning. SelectionTools is being retired from haploStack:
+\strong{this function is deprecated since 0.9.0} (it warns on every call
+and goes in 0.10; it is \code{\link{st_convert}} followed by
+\code{\link{st_ld_blocks}}), it is behind \code{\link{use_st_formats}}
+(off by default), and
+SelectionTools' own side files (\code{<tag>.ld.txt},
+\code{<tag>.haplotype_map.txt}, written up to 0.8.8) are no longer produced.
+Before using it, check whether you need LD blocking at all: the recommended
+route is a block map you already have (\code{\link{attach_block_info}}), and
+the default local resolver is \code{\link{hapS_ld_blocks}}.
 }
 \details{
-Four files are written to \code{output_dir}, named after the genotype file
+Two files are written to \code{output_dir}, named after the genotype file
 and the rule (\code{<tag>} = \code{<geno>_<ld_threshold>_t<tolerance>}):
-\describe{
-\item{\code{<tag>_block_info.csv}}{Block coordinate table:
-\code{Chrom, Block, Start, End}.}
-\item{\code{<tag>_block_marker_map.csv}}{Canonical marker-level table:
-\code{Chrom, Marker, Block}.}
-\item{\code{<tag>.ld.txt}}{SelectionTools' block table, as
-\code{st.def.hblocks()} returns it.}
-\item{\code{<tag>.haplotype_map.txt}}{Per-marker haplotype-allele map
-from \code{st.recode.hil()}.}
-}
+\code{<tag>_block_info.csv} and \code{<tag>_block_marker_map.csv}, the
+canonical tables (see \code{\link{build_block_location_info}}).
 
 Requires the \pkg{SelectionTools} package. If not installed, an informative
 error is raised so the user can supply a pre-computed block map instead.
-
-SelectionTools runs in a private temporary directory (its side files —
-\code{ld}, \code{blocks.hmap}, \code{blocks.hall}, the \code{.srt} map — never
-touch the working directory or the input folder) and on the data set
-\code{"ld.blocks"}; its \code{"default"} data set is left alone (0.7.9).
-SelectionTools' \code{st.input.dir} / \code{st.output.dir} are handled as
-\code{\link{st_ld_blocks}} describes.
-
-After calling this function, pass the \code{block_marker_map} element of
-the returned list to \code{\link{attach_block_info}} to register the block
-assignments in a \code{GenoMeta} object:
-\preformatted{
-  blocks <- st_ld_blocks_files("geno.txt", "map.txt")
-  meta   <- attach_block_info(meta, blocks$block_marker_map)
-}
 }
 \seealso{
 \code{\link{st_ld_blocks}} (start from a \code{GenoMeta}),
+\code{\link{st_convert}} (the format converter),
 \code{\link{hapS_ld_blocks}} (the default resolver),
-\code{\link{attach_block_info}}, \code{\link{run_haplotype_catalogue}},
-\code{\link{build_block_location_info}}, \code{\link{expand_block_info}}
+\code{\link{attach_block_info}}, \code{\link{build_block_location_info}}
 }

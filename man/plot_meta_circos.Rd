@@ -14,7 +14,7 @@ plot_meta_circos(
   start_degree = 90,
   chr_colors = NULL,
   legend = TRUE,
-  draw = TRUE,
+  draw = FALSE,
   legend_position = c("center", "bottomright", "bottomleft", "topright", "topleft",
     "bottom", "none"),
   outer_labels = NULL
@@ -41,10 +41,15 @@ parameters.}
 \item{chr_colors}{Optional named colours per chromosome (default
 Okabe–Ito in natural order).}
 
-\item{legend}{Draw the legend (default \code{TRUE}); \code{FALSE} is
-\code{legend_position = "none"}.}
+\item{legend}{Deprecated since 0.9.0 (warns when supplied):
+\code{FALSE} is \code{legend_position = "none"}.}
 
-\item{draw}{Render now on the current device (default \code{TRUE}).}
+\item{draw}{Render now on the current device. Default \code{FALSE} since
+0.9.0: the function returns the figure object, and drawing happens when
+it is printed (a console call auto-prints, as a ggplot does) or rendered
+to a file with \code{\link{hs_render_figure}} /
+\code{\link{save_journal_figure}}. \code{TRUE} draws at once and returns
+the object invisibly, as 0.8.8 did.}
 
 \item{legend_position}{Where the legend goes: \code{"center"} (default;
 \code{"centre"} also accepted) inside the hole, skipped with a message
@@ -69,9 +74,12 @@ message names the \code{height_mm} that fits when the longest drawn
 name would run off the page.}
 }
 \value{
-Invisibly, an \code{hs_meta_circos} object: \code{$render(width_mm)}
+An \code{hs_meta_circos} object, returned visibly (so a bare call at
+the console prints it, which draws it; \code{print()} / \code{plot()}
+methods render on the current device) or invisibly when
+\code{draw = TRUE}. Its fields: \code{$render(width_mm)}
 re-draws the figure at any declared width (what
-\code{\link{save_journal_figure}} calls), \code{$height_mm(width_mm)}
+\code{\link{hs_render_figure}} calls), \code{$height_mm(width_mm)}
 gives the figure height at that width (the width itself unless an
 outside legend needs room), \code{$legend} the legend entry names in
 order, \code{$tracks} the ring names outermost first (an

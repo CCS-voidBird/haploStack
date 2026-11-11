@@ -14,6 +14,7 @@ fit_genomic_prediction(
   nIter = 12000L,
   burnIn = 2000L,
   verbose = FALSE,
+  seed = NULL,
   ...
 )
 }
@@ -38,11 +39,21 @@ first numeric trait column.}
 \code{NULL} (default) uses \code{paste0("GEBV_", trait)}.}
 
 \item{impute}{Missing-dosage handling passed to the dosage transform:
-\code{"mean"} (default) or \co\code{"none"}.}
+\code{"mean"} (default) or \code{"none"}.}
 
-\item{nIter, burnIn}{BGLR sampler length and burn-in (\code{"bayesc"} only).}
+\item{nIter, burnIn}{BGLR sampler length and burn-in (\code{"bayesc"} only).
+BGLR's chain files go to a private temporary directory that is removed
+when the call returns (0.9.0); pass \code{saveAt =} through \code{...}
+to keep them.}
 
 \item{verbose}{Logical; print backend progress. Default \code{FALSE}.}
+
+\item{seed}{Optional seed for the BGLR sampler (\code{"bayesc"}),
+drawn under a local seed; with \code{NULL} the sampler draws from the
+session stream, which is restored when the call returns (0.9.0),
+applied locally so the caller's random stream is left untouched.
+\code{NULL} (default) samples on the current stream. rrBLUP models are
+deterministic and ignore it.}
 
 \item{...}{Extra arguments forwarded to the backend
 (\code{mixed.solve} / \code{kin.blup} / \code{BGLR}).}

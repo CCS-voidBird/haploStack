@@ -32,10 +32,12 @@
 # Fail early, with the install route and the alternatives.
 .hapS_require <- function(caller) {
   if (!requireNamespace("HapSelect", quietly = TRUE))
-    stop(caller, " requires the HapSelect package, which is not installed:\n",
+    .hs_abort(class = "hs_error_dependency",
+         data = list(hint = "remotes::install_github(\"wrshf7/HapSelect\")"),
+         caller, " requires the HapSelect package, which is not installed:\n",
          "  remotes::install_github(\"wrshf7/HapSelect\")   ",
          "# builds C++: Rtools on Windows\n",
-         "Or skip local LD blocking — the recommended route: give a block map ",
+         "Or skip local LD blocking \u2014 the recommended route: give a block map ",
          "to read_plink_ped(block_file =), build_geno_meta(blocks =) or ",
          "attach_block_info().", call. = FALSE)
   invisible(TRUE)
@@ -52,10 +54,10 @@
   if (!anyNA(num_direct) && all(num_direct == round(num_direct))) {
     codes <- as.integer(num_direct)
   } else {
-    digits <- suppressWarnings(as.numeric(gsub("[^0-9.]", "", chroms)))
-    ord    <- if (anyNA(digits)) order(chroms) else order(digits, chroms)
-    codes  <- integer(length(chroms))
-    codes[ord] <- seq_along(chroms)
+    # 0.9.0 (row 29 a, blk/F21): the one natural chromosome order. Block ids
+    # embed this key, so they change on panels with >= 10 numbered chromosomes
+    # plus a scaffold, or chr-prefixed names; barley 1H-7H(+Un) is unchanged.
+    codes <- match(chroms, hs_chrom_levels(chroms))
   }
   key <- data.frame(Chrom = chroms, Chromosome = as.integer(codes),
                     stringsAsFactors = FALSE)
@@ -65,17 +67,34 @@
 # The genotype frame HapSelect reads: SNP, Chromosome, Position, then one
 # dosage column per sample; rows in genomic order. `markers` are the placed
 # markers. Also returns how many alleles each marker carries.
+# HapSelect's one-row-per-block table ("m1;m2;...", Block_ID "<key>:<n>") ->
+# the (Chrom, Marker, Block) block-marker map with the container's chromosome
+# names. Also the partial result of a cancelled per-chromosome run.
+.hapS_blocks_to_bm <- function(hb, chrom_key) {
+  if (is.null(hb) || !nrow(hb))
+    return(data.frame(Chrom = character(), Marker = character(),
+                      Block = character(), stringsAsFactors = FALSE))
+  members <- strsplit(as.character(hb$Block), ";", fixed = TRUE)
+  n_each  <- lengths(members)
+  data.frame(
+    Chrom  = chrom_key$Chrom[match(rep(hb$Chrom, n_each),
+                                   chrom_key$Chromosome)],
+    Marker = unlist(members, use.names = FALSE),
+    Block  = rep(as.character(hb$Block_ID), n_each),
+    stringsAsFactors = FALSE)
+}
+
 .hapS_dosage_frame <- function(geno_meta, markers, chrom_key) {
   arr     <- geno_meta$geno_arrays[, markers, , drop = FALSE]
   samples <- dimnames(arr)[[1L]]
   n_s <- dim(arr)[1L]; n_m <- dim(arr)[2L]; ploidy <- dim(arr)[3L]
-  miss <- .missing_tokens(geno_meta$metadata$encoding %||%
-                            geno_meta$metadata$source_format)
+  # Inside a GenoMeta a missing allele is NA and nothing else (the constructor
+  # normalises every route), so NA is the only value left out of the levels.
 
   # Allele counts per marker; the counted allele is the least frequent one
   # observed, ties broken alphabetically (so it never equals the other allele
   # of a perfectly balanced marker).
-  levs   <- sort(setdiff(unique(as.vector(arr)), c(NA_character_, miss)))
+  levs   <- .hs_sort(setdiff(unique(as.vector(arr)), NA_character_))
   counts <- matrix(0L, nrow = n_m, ncol = length(levs))
   for (k in seq_len(ploidy)) {
     layer <- matrix(arr[, , k], nrow = n_s, ncol = n_m)
@@ -96,7 +115,7 @@
   na_ct <- matrix(FALSE, nrow = n_s, ncol = n_m)
   for (k in seq_len(ploidy)) {
     layer    <- matrix(arr[, , k], nrow = n_s, ncol = n_m)
-    layer_na <- is.na(layer) | layer %in% miss
+    layer_na <- is.na(layer)
     na_ct    <- na_ct | layer_na
     hit      <- !layer_na & layer == counted[col(layer)]
     hit[is.na(hit)] <- FALSE          # a marker with no observed allele
@@ -194,6 +213,16 @@
 #'   \code{FALSE}.
 #' @param verbose      \code{TRUE} (default) prints a summary (and HapSelect's
 #'   progress bar where \pkg{progressr} shows one); \code{FALSE} is silent.
+#' @param progress     \code{NULL} (default) or a function of one argument,
+#'   called after each chromosome with the event
+#'   \code{list(stage = "ld_blocks", unit = "chromosome", i, n, label =
+#'   <chromosome>, elapsed, payload = list(chrom, n_blocks))} (the one
+#'   progress contract of the package, 0.9.0). LD and blocks are computed per
+#'   chromosome, which gives the same tables and block IDs as one call over
+#'   the panel (HapSelect never pairs markers across chromosomes). A callback
+#'   that returns \code{FALSE} stops the run with an \code{hs_error_cancelled}
+#'   error whose \code{partial} field holds the finished chromosomes' block
+#'   marker map.
 #'
 #' @return With \code{attach = TRUE}, the \code{GenoMeta} with
 #'   \code{block_marker_map_info} / \code{block_info} set. With
@@ -231,37 +260,39 @@ hapS_ld_blocks <- function(geno_meta,
                            output_dir   = NULL,
                            prefix       = "hapS_blocks",
                            parallelize  = FALSE,
-                           verbose      = TRUE) {
+                           verbose      = TRUE,
+                           progress     = NULL) {
   caller <- "hapS_ld_blocks"
-  if (!is_geno_meta(geno_meta, verbose = FALSE))
-    stop(caller, ": 'geno_meta' must be a valid GenoMeta.", call. = FALSE)
+  .hs_check_meta(geno_meta, caller, "geno_meta")
   .ld_check_rule(ld_threshold, tolerance, caller)
   if (!is.logical(tol_reset) || length(tol_reset) != 1L || is.na(tol_reset))
-    stop(caller, ": 'tol_reset' must be TRUE or FALSE.", call. = FALSE)
+    .hs_abort(caller, ": 'tol_reset' must be TRUE or FALSE.", call. = FALSE)
   method <- match.arg(method)
   start  <- match.arg(start)
   .hapS_require(caller)
   d <- dim(geno_meta$geno_arrays)
   if (d[1L] < 2L)
-    stop(caller, ": LD needs at least 2 samples.", call. = FALSE)
+    .hs_abort(caller, ": LD needs at least 2 samples.", call. = FALSE)
 
   placed <- .ld_placed_markers(geno_meta$map_info)
   n_unplaced <- d[2L] - length(placed)
   if (length(placed) < 2L)
-    stop(caller, ": fewer than 2 markers carry a usable position.",
+    .hs_abort(caller, ": fewer than 2 markers carry a usable position.",
          call. = FALSE)
 
-  # Contain HapSelect's global side effects (see the file header).
-  old_handlers <- getOption("progressr.handlers")
-  on.exit(options(progressr.handlers = old_handlers), add = TRUE)
-  if (!isTRUE(verbose)) {
-    old_enable <- options(progressr.enable = FALSE)
-    on.exit(options(old_enable), add = TRUE)
-  }
-  if (isTRUE(parallelize)) {
-    old_plan <- future::plan()
-    on.exit(future::plan(old_plan), add = TRUE)
-  }
+  # Contain HapSelect's global side effects (see the file header): progressr's
+  # options are put back on exit (state.R owns the read, hygiene H1), and each
+  # HapSelect call runs under .hs_keep_plan() (parallelize = TRUE replaces the
+  # caller's future plan).
+  old_opts <- .hs_options_get(c("progressr.handlers", "progressr.enable"))
+  on.exit(options(old_opts), add = TRUE)
+  if (!isTRUE(verbose)) options(progressr.enable = FALSE)
+  if (isTRUE(parallelize) && !requireNamespace("future", quietly = TRUE))
+    .hs_abort(class = "hs_error_dependency",
+         data = list(hint = "install.packages(\"future\")"),
+         "parallelize = TRUE needs the 'future' package: ",
+         "install.packages(\"future\"), or use parallelize = FALSE.",
+         call. = FALSE)
 
   t0 <- Sys.time()
   chrom_key <- .hapS_chrom_key(geno_meta$map_info$Chrom[
@@ -270,7 +301,7 @@ hapS_ld_blocks <- function(geno_meta,
   geno <- fr$geno
   multi <- geno$SNP[fr$n_alleles > 2L]
   if (length(multi))
-    warning(caller, ": ", length(multi), " marker(s) carry more than two ",
+    .hs_warn(caller, ": ", length(multi), " marker(s) carry more than two ",
             "alleles; their LD is computed on the dosage of one allele ",
             "against all others (e.g. ", paste(utils::head(multi, 3L),
             collapse = ", "), ").", call. = FALSE)
@@ -282,39 +313,58 @@ hapS_ld_blocks <- function(geno_meta,
     length(unique(x[!is.na(x)])) <= 1L)]
   rm(dose)
 
+  # LD and blocks per chromosome (0.9.0, D1-5): HapSelect never pairs markers
+  # across chromosomes, so the per-chromosome tables and block ids are
+  # identical to the whole-panel call (probe 2026-11-10, three panels; the
+  # test pins it), and the progress callback gets one event per chromosome
+  # with the finished chromosomes' blocks as the partial result.
+  chrom_codes <- unique(geno$Chromosome)             # sorted integer keys
   n_zero_sd <- 0L
-  ld <- withCallingHandlers(
-    HapSelect::pairwise_ld(geno, parallelize = isTRUE(parallelize)),
-    warning = function(w) {
-      if (grepl("standard deviation is zero", conditionMessage(w),
-                fixed = TRUE)) {
-        n_zero_sd <<- n_zero_sd + 1L
-        invokeRestart("muffleWarning")
-      }
+  trk <- .hs_progress_tracker(progress, "ld_blocks", "chromosome",
+                              length(chrom_codes))
+  hb_parts <- vector("list", length(chrom_codes))
+  for (ci in seq_along(chrom_codes)) {
+    code <- chrom_codes[ci]
+    g <- geno[geno$Chromosome == code, , drop = FALSE]
+    m <- map[map$Chromosome == code, , drop = FALSE]
+    rownames(g) <- NULL
+    rownames(m) <- NULL
+    hb_parts[[ci]] <- .hs_keep_plan({
+      ld <- withCallingHandlers(
+        HapSelect::pairwise_ld(g, parallelize = isTRUE(parallelize)),
+        warning = function(w) {
+          if (grepl("standard deviation is zero", conditionMessage(w),
+                    fixed = TRUE)) {
+            n_zero_sd <<- n_zero_sd + 1L
+            invokeRestart("muffleWarning")
+          }
+        })
+      blocks <- HapSelect::def_blocks(ld, m, method = method,
+                                      tolerance = as.integer(tolerance),
+                                      tol_reset = tol_reset,
+                                      threshold = ld_threshold, start = start)
+      HapSelect::block_obj_to_df(blocks, m)
     })
-  blocks <- HapSelect::def_blocks(ld, map, method = method,
-                                  tolerance = as.integer(tolerance),
-                                  tol_reset = tol_reset,
-                                  threshold = ld_threshold, start = start)
-  hb <- HapSelect::block_obj_to_df(blocks, map)
+    chrom_name <- chrom_key$Chrom[match(code, chrom_key$Chromosome)]
+    trk$tick(ci, label = chrom_name,
+             payload = list(chrom = chrom_name, n_blocks = nrow(hb_parts[[ci]])),
+             partial = function() .hapS_blocks_to_bm(
+               do.call(rbind, hb_parts[seq_len(ci)]), chrom_key))
+  }
+  hb <- do.call(rbind, hb_parts)
+  rownames(hb) <- NULL
 
-  members <- strsplit(as.character(hb$Block), ";", fixed = TRUE)
-  n_each  <- lengths(members)
-  bm <- data.frame(
-    Chrom  = chrom_key$Chrom[match(rep(hb$Chrom, n_each),
-                                   chrom_key$Chromosome)],
-    Marker = unlist(members, use.names = FALSE),
-    Block  = rep(as.character(hb$Block_ID), n_each),
-    stringsAsFactors = FALSE)
+  bm <- .hapS_blocks_to_bm(hb, chrom_key)
   if (anyDuplicated(bm$Marker) || !setequal(bm$Marker, geno$SNP))
-    stop(caller, ": HapSelect's blocks do not cover each placed marker ",
+    .hs_abort(class = "hs_error_internal",
+         caller, ": HapSelect's blocks do not cover each placed marker ",
          "exactly once (", length(unique(bm$Marker)), " of ", nrow(geno),
          " covered).", call. = FALSE)
   bm <- bm[order(match(bm$Marker, geno$SNP)), , drop = FALSE]
   rownames(bm) <- NULL
 
   if (isTRUE(verbose))
-    message(sprintf(paste0(
+    .hs_inform(sprintf(paste0(
       "%s: HapSelect blocks (r^2 >= %s, tolerance %d%s, %s): %s; %d unplaced ",
       "marker(s) left unblocked%s; %.1f s"),
       caller, format(ld_threshold), as.integer(tolerance),
@@ -331,5 +381,9 @@ hapS_ld_blocks <- function(geno_meta,
                         Chrom  = chrom_key$Chrom[match(geno$Chromosome,
                                                        chrom_key$Chromosome)],
                         Pos    = geno$Position, stringsAsFactors = FALSE),
-             attach, output_dir, prefix, caller)
+             attach, output_dir, prefix, caller,
+             rule = list(backend = "hapS_ld_blocks", ld_threshold = ld_threshold,
+                         tolerance = tolerance, tol_reset = tol_reset,
+                         method = method, start = start,
+                         n_unplaced = n_unplaced))
 }

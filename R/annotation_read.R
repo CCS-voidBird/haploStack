@@ -60,27 +60,40 @@
 #' @param path         Path to the GFF3 file (plain or \code{.gz}).
 #' @param feature_type GFF3 type (column 3) to keep, case-insensitive.
 #'   Default \code{"gene"} — the only type the local annotation route uses.
-#' @param chr_map      Optional named character vector renaming the GFF3
-#'   seqids (names = seqid as the file spells it, values = the name to store).
-#'   Usually left \code{NULL}: \code{\link{compute_block_annotation}} maps the
-#'   \emph{container's} chromosome names onto the GFF3 vocabulary instead,
-#'   which is the direction the Python route uses.
+#' @param rename_seqid Optional named character vector renaming the GFF3
+#'   seqids as they are stored (names = seqid as the file spells it, values =
+#'   the name to store). Usually left \code{NULL}:
+#'   \code{\link{compute_block_annotation}} maps the \emph{container's}
+#'   chromosome names onto the GFF3 vocabulary with its \code{chr_map}
+#'   instead, which is the direction every haploStack \code{chr_map} uses
+#'   (container spelling -> the other table's spelling).
+#' @param chr_map      Deprecated since 0.9.0 (warns): the old name of
+#'   \code{rename_seqid}, which renames in the opposite direction to every
+#'   other \code{chr_map} in the package.
 #'
 #' @return A \code{data.table} with columns \code{chrom}, \code{start},
-#'   \code{end} (integer, 1-based inclusive), \code{strand}, \code{gene_id},
+#'   \code{end} (numeric, 1-based inclusive), \code{strand}, \code{gene_id},
 #'   \code{gene_name}, \code{biotype} (character; \code{NA} where the
-#'   attribute is absent), in file order. The source path, file size and
-#'   modification time are recorded in the \code{"hs_annotation_source"}
-#'   attribute for provenance.
+#'   attribute is absent) and \code{feature_type} (the file's spelling of the
+#'   type kept), in file order. The source is recorded in the
+#'   \code{"hs_annotation_source"} attribute for provenance as \code{file}
+#'   (the base name), \code{md5}, \code{size} and \code{n}; no absolute path
+#'   and no modification time, so two reads of one file give one record.
 #'
 #' @seealso \code{\link{compute_block_annotation}}, \code{\link{read_gene_xrefs}}
 #' @export
-read_gff3_genes <- function(path, feature_type = "gene", chr_map = NULL) {
+read_gff3_genes <- function(path, feature_type = "gene", rename_seqid = NULL,
+                            chr_map = NULL) {
   path <- as.character(path)
   if (!file.exists(path))
-    stop("read_gff3_genes: file not found: ", path)
+    .hs_abort("read_gff3_genes: file not found: ", path)
+  if (!is.null(chr_map)) {                      # deprecated since 0.9.0 (D5 X1)
+    .hs_deprecated("chr_map", "rename_seqid", "0.9.0", what = "argument",
+                   fn = "read_gff3_genes")
+    if (is.null(rename_seqid)) rename_seqid <- chr_map
+  }
   if (!is.character(feature_type) || length(feature_type) != 1L)
-    stop("read_gff3_genes: 'feature_type' must be a single character value.")
+    .hs_abort("read_gff3_genes: 'feature_type' must be a single character value.")
 
   con <- gzfile(path, "rt")
   on.exit(close(con), add = TRUE)
@@ -93,56 +106,68 @@ read_gff3_genes <- function(path, feature_type = "gene", chr_map = NULL) {
 
   lines <- lines[nzchar(lines) & !startsWith(lines, "#")]
   if (length(lines) == 0L)
-    stop("read_gff3_genes: no annotation rows in ", path)
+    .hs_abort("read_gff3_genes: no annotation rows in ", path)
 
-  fields <- strsplit(lines, "\t", fixed = TRUE)
-  nfield <- lengths(fields)
-  keep   <- nfield >= 9L
-  fields <- fields[keep]
-  if (length(fields) == 0L)
-    stop("read_gff3_genes: no 9-column GFF3 rows in ", path)
-
-  type <- vapply(fields, `[[`, character(1L), 3L)
-  sel  <- tolower(type) == tolower(feature_type)
-  fields <- fields[sel]
+  # Pre-filter (ann/F12): only lines that can hold the feature type in a
+  # tab-delimited column are split. A superset (column 2 could match too), so
+  # the exact type test below stays and the result is identical; the peak on
+  # MorexV3 drops from about 400 MB to under 100 MB.
+  ft_rx <- paste0("\t", gsub("([][{}()+*^$|\\\\?.])", "\\\\\\1", feature_type), "\t")
+  cand   <- lines[grepl(ft_rx, lines, ignore.case = TRUE)]
+  fields <- strsplit(cand, "\t", fixed = TRUE)
+  fields <- fields[lengths(fields) >= 9L]
+  type   <- vapply(fields, `[[`, character(1L), 3L)
+  fields <- fields[tolower(type) == tolower(feature_type)]
   if (length(fields) == 0L) {
-    types <- sort(unique(tolower(type)))
-    stop("read_gff3_genes: no '", feature_type, "' rows in ", path,
+    all_f <- strsplit(lines, "\t", fixed = TRUE)
+    all_f <- all_f[lengths(all_f) >= 9L]
+    if (length(all_f) == 0L)
+      .hs_abort("read_gff3_genes: no 9-column GFF3 rows in ", path)
+    types <- .hs_sort(unique(tolower(vapply(all_f, `[[`, character(1L), 3L))))
+    .hs_abort("read_gff3_genes: no '", feature_type, "' rows in ", path,
          ". Feature types present: ",
          paste(utils::head(types, 10L), collapse = ", "),
          if (length(types) > 10L) " ..." else "", ".")
   }
+  type <- vapply(fields, `[[`, character(1L), 3L)
 
   attrs <- vapply(fields, `[[`, character(1L), 9L)
   out <- data.table::data.table(
     chrom     = vapply(fields, `[[`, character(1L), 1L),
-    start     = as.integer(vapply(fields, `[[`, character(1L), 4L)),
-    end       = as.integer(vapply(fields, `[[`, character(1L), 5L)),
+    start     = as.numeric(vapply(fields, `[[`, character(1L), 4L)),
+    end       = as.numeric(vapply(fields, `[[`, character(1L), 5L)),
     strand    = vapply(fields, `[[`, character(1L), 7L),
     gene_id   = data.table::fcoalesce(.gff3_attr(attrs, "ID"),
                                       .gff3_attr(attrs, "gene_id")),
     gene_name = data.table::fcoalesce(.gff3_attr(attrs, "Name"),
                                       .gff3_attr(attrs, "gene_name")),
     biotype   = data.table::fcoalesce(.gff3_attr(attrs, "biotype"),
-                                      .gff3_attr(attrs, "gene_biotype"))
+                                      .gff3_attr(attrs, "gene_biotype")),
+    feature_type = type
   )
 
   if (anyNA(out$start) || anyNA(out$end))
-    stop("read_gff3_genes: non-numeric start/end coordinate in ", path)
+    .hs_abort("read_gff3_genes: non-numeric start/end coordinate in ", path)
 
-  if (!is.null(chr_map)) {
-    if (is.null(names(chr_map)) || any(!nzchar(names(chr_map))))
-      stop("read_gff3_genes: 'chr_map' must be a fully named character vector.")
-    hit <- out$chrom %in% names(chr_map)
-    out$chrom[hit] <- unname(chr_map[out$chrom[hit]])
+  if (!is.null(rename_seqid)) {
+    if (is.null(names(rename_seqid)) || any(!nzchar(names(rename_seqid))))
+      .hs_abort("read_gff3_genes: 'rename_seqid' must be a fully named character vector.")
+    hit <- out$chrom %in% names(rename_seqid)
+    out$chrom[hit] <- unname(rename_seqid[out$chrom[hit]])
   }
 
-  data.table::setattr(out, "hs_annotation_source",
-                      list(path  = normalizePath(path, winslash = "/"),
-                           size  = file.size(path),
-                           mtime = format(file.mtime(path)),
-                           n     = nrow(out)))
+  data.table::setattr(out, "hs_annotation_source", .hs_source_record(path, nrow(out)))
   out[]
+}
+
+# The provenance record of an annotation input (ann/F6, F20): base name, md5,
+# size and row count. No absolute path (a container travels between machines)
+# and no modification time (two reads of one file are one record).
+.hs_source_record <- function(path, n) {
+  list(file = basename(path),
+       md5  = unname(tools::md5sum(path)),
+       size = as.numeric(file.size(path)),
+       n    = as.integer(n))
 }
 
 
@@ -181,7 +206,7 @@ read_gff3_genes <- function(path, feature_type = "gene", chr_map = NULL) {
 read_gene_xrefs <- function(path) {
   path <- as.character(path)
   if (!file.exists(path))
-    stop("read_gene_xrefs: file not found: ", path)
+    .hs_abort("read_gene_xrefs: file not found: ", path)
 
   need <- c("gene_stable_id", "xref_id", "xref_label", "description", "db_name")
   xr <- data.table::fread(path, sep = "\t", select = need,
@@ -189,14 +214,14 @@ read_gene_xrefs <- function(path) {
                           showProgress = FALSE)
   miss <- setdiff(need, names(xr))
   if (length(miss) > 0L)
-    stop("read_gene_xrefs: required column(s) missing from ", path, ": ",
+    .hs_abort("read_gene_xrefs: required column(s) missing from ", path, ": ",
          paste(miss, collapse = ", "))
   for (j in need) data.table::set(xr, j = j,
                                   value = data.table::fifelse(is.na(xr[[j]]),
                                                               "", xr[[j]]))
   xr <- xr[nzchar(gene_stable_id)]
   if (nrow(xr) == 0L)
-    stop("read_gene_xrefs: no xref rows with a gene_stable_id in ", path)
+    .hs_abort("read_gene_xrefs: no xref rows with a gene_stable_id in ", path)
 
   dbu <- toupper(xr$db_name)
 
@@ -241,39 +266,51 @@ read_gene_xrefs <- function(path) {
                       interpro_domains = grab(ipr))]
 
   if (!any(nzchar(out$interpro_domains)))
-    warning("read_gene_xrefs: no InterPro entries in this xref dump — ",
+    .hs_warn("read_gene_xrefs: no InterPro entries in this xref dump \u2014 ",
             "Ensembl ships protein domains in a separate file, so ",
             "'interpro_domains' stays empty.")
 
-  data.table::setattr(out, "hs_annotation_source",
-                      list(path  = normalizePath(path, winslash = "/"),
-                           size  = file.size(path),
-                           mtime = format(file.mtime(path)),
-                           n     = nrow(out)))
+  data.table::setattr(out, "hs_annotation_source", .hs_source_record(path, nrow(out)))
   out[]
 }
 
 
 # Internal: read a 4-column QTL BED (chrom, start, end, name). Comment lines
-# ("#...") are skipped. Coordinates are used exactly as stored — the Python
-# route applies no 0-based/half-open correction, and parity (Q25.c) pins that
-# choice; a caller holding true BED semantics shifts start before writing.
+# ("#..."), "track" and "browser" lines are skipped before parsing (ann/F27).
+# Coordinates are used exactly as stored — the Python route applies no
+# 0-based/half-open correction, and parity (Q25.c) pins that choice; a caller
+# holding true BED semantics shifts start before writing. A non-numeric or
+# missing coordinate, or start > end, is refused with hs_error_format.
 .read_qtl_bed <- function(path) {
   path <- as.character(path)
   if (!file.exists(path))
-    stop(".read_qtl_bed: file not found: ", path)
-  bed <- data.table::fread(path, sep = "\t", header = FALSE,
-                           colClasses = "character", data.table = TRUE,
-                           showProgress = FALSE, skip = 0L)
-  bed <- bed[!startsWith(V1, "#")]
-  if (ncol(bed) < 4L)
-    stop(".read_qtl_bed: a QTL BED needs 4 columns (chrom start end name); ",
-         path, " has ", ncol(bed), ".")
-  out <- data.table::data.table(chrom = bed[[1L]],
-                                start = as.numeric(bed[[2L]]),
-                                end   = as.numeric(bed[[3L]]),
-                                name  = bed[[4L]])
-  if (anyNA(out$start) || anyNA(out$end))
-    stop(".read_qtl_bed: non-numeric start/end in ", path)
+    .hs_abort(".read_qtl_bed: file not found: ", path)
+  lines <- readLines(path, warn = FALSE)
+  lines <- lines[nzchar(trimws(lines)) & !startsWith(lines, "#") &
+                   !grepl("^(track|browser)([[:space:]]|$)", lines)]
+  if (length(lines) == 0L)
+    .hs_abort(class = c("hs_error_format", "hs_error_input"),
+              ".read_qtl_bed: no QTL rows in ", path, ".")
+  fields <- strsplit(lines, "\t", fixed = TRUE)
+  if (any(lengths(fields) < 4L))
+    .hs_abort(class = c("hs_error_format", "hs_error_input"),
+              ".read_qtl_bed: a QTL BED needs 4 tab-separated columns ",
+              "(chrom start end name); line ",
+              which(lengths(fields) < 4L)[1L], " of ", path, " has ",
+              min(lengths(fields)), ".")
+  out <- data.table::data.table(chrom = vapply(fields, `[[`, "", 1L),
+                                start = suppressWarnings(as.numeric(vapply(fields, `[[`, "", 2L))),
+                                end   = suppressWarnings(as.numeric(vapply(fields, `[[`, "", 3L))),
+                                name  = vapply(fields, `[[`, "", 4L))
+  bad <- which(is.na(out$start) | is.na(out$end))
+  if (length(bad))
+    .hs_abort(class = c("hs_error_format", "hs_error_input"),
+              ".read_qtl_bed: non-numeric start/end on line ", bad[1L], " of ", path, ".")
+  rev <- which(out$start > out$end)
+  if (length(rev))
+    .hs_abort(class = c("hs_error_format", "hs_error_input"),
+              ".read_qtl_bed: start > end on line ", rev[1L], " of ", path,
+              " (", out$name[rev[1L]], ").")
+  data.table::setattr(out, "hs_annotation_source", .hs_source_record(path, nrow(out)))
   out
 }

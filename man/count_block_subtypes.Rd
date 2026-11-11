@@ -34,12 +34,14 @@ subtypes and \code{sum(Count)} within a block is \code{n_samples * ploidy}.
 one copy, so a homozygote counts once.}
 
 \item{center}{Centring mode applied to the allele effects:
-�\code{"none"}, �\code{"locus_mean"} or �\code{"allele_freq"}. See
-�\code{\link{compute_profile_localgebv}} for what each preserves.}
+\code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
+\code{\link{compute_profile_localgebv}} for what each preserves.}
 
-\item{center_by_freq}{Passed to \code{\link{compute_block_catalogue}} when
-\code{trait} is given; centres allele effects by population frequency before
-summing. Ignored when \code{trait} is \code{NULL}. Default \code{TRUE}.}
+\item{center_by_freq}{\strong{Deprecated} logical form of \code{center}
+(\code{TRUE} = \code{"allele_freq"}, \code{FALSE} = \code{"none"}); warns on
+every call. Used only when \code{trait} is given. The default centring is
+\code{"none"} since 0.9.0 (it was \code{"allele_freq"} up to 0.8.8; pass
+\code{center = "allele_freq"} to reproduce those numbers).}
 
 \item{output_file}{Optional path. When non-\code{NULL} the table is written
 there as a tab-separated file via \code{data.table::fwrite()}; the table is

@@ -1,7 +1,7 @@
 # =============================================================================
 # marker_effects.R
 #
-# .hs_safe_file_part()     — internal: sanitise a string for use in a file name
+# .hs_safe_file_part()     — internal: sanitise a string for use in a file name (R/results.R)
 # .marker_locus_table()    — internal: Marker -> Chrom/Pos/Block lookup
 # .effect_trait_list()     — internal: resolve geno_meta$marker_effects to traits
 # export_marker_effects()  — exported: marker effects as a table / per-trait files
@@ -20,18 +20,7 @@
 # A message is emitted when the result differs from the input so a user whose
 # trait is called e.g. "Yield (t/ha)" can see which file was actually written.
 # @keywords internal
-.hs_safe_file_part <- function(x) {
-  orig <- as.character(x)[1L]
-  safe <- gsub("[^A-Za-z0-9._-]+", "_", orig)
-  safe <- gsub("_+", "_", safe)
-  safe <- gsub("^[_.]+|_+$", "", safe)
-  if (!nzchar(safe))
-    stop("cannot build a file name from '", orig,
-         "': no usable characters remain after sanitising.")
-  if (!identical(safe, orig))
-    message("Trait '", orig, "' sanitised to '", safe, "' for the file name.")
-  safe
-}
+# .hs_safe_file_part() now lives in R/results.R beside .hs_file_stem().
 
 
 # Marker -> genomic locus + block lookup, built from the GenoMeta's map tables.
@@ -40,8 +29,11 @@
 # table (an O(n_samples x n_markers) melt over the genotype array) to expose the
 # same three fields. Marker effects need only the map, so reading map_info and
 # block_marker_map_info directly keeps this lookup linear in the marker count.
+# `keyed = TRUE` (the default) keys the table on Marker for lookups, which
+# sorts it; `keyed = FALSE` keeps the map's row order (the annotation pairs
+# need it, D5 §3.6 c).
 # @keywords internal
-.marker_locus_table <- function(geno_meta) {
+.marker_locus_table <- function(geno_meta, keyed = TRUE) {
   mi <- data.table::as.data.table(geno_meta$map_info)
   loc <- mi[, .(Marker = as.character(Marker),
                 Chrom  = as.character(Chrom),
@@ -58,14 +50,14 @@
     loc[bt, on = "Marker", Block := i.Block]
   }
 
-  data.table::setkeyv(loc, "Marker")
+  if (isTRUE(keyed)) data.table::setkeyv(loc, "Marker")
   loc[]
 }
 
 
 # Resolve a GenoMeta's marker_effects to a named list of per-trait tables.
 #
-# Normalisation is delegated to .as_effect_list() (R/format_helper.R), so the
+# Normalisation is delegated to .as_effect_list() (R/geno_meta_core.R), so the
 # canonical named list, a bare data.frame, and a data.frame carrying a `Trait`
 # column are all accepted exactly as new_geno_meta() accepts them.
 #
@@ -78,18 +70,18 @@
                                single = FALSE) {
   me <- geno_meta$marker_effects
   if (is.null(me))
-    stop(caller, ": no marker effects on this GenoMeta — attach ",
+    .hs_abort(caller, ": no marker effects on this GenoMeta \u2014 attach ",
          "'marker_effects' (e.g. via fit_genomic_prediction()) before exporting.")
 
   lst <- .as_effect_list(me)
   if (length(lst) == 0L)
-    stop(caller, ": 'marker_effects' is present but empty.")
+    .hs_abort(caller, ": 'marker_effects' is present but empty.")
 
   if (!is.null(traits)) {
     want <- as.character(traits)
     bad  <- setdiff(want, names(lst))
     if (length(bad) > 0L)
-      stop(caller, ": trait(s) not in geno_meta$marker_effects: ",
+      .hs_abort(caller, ": trait(s) not in geno_meta$marker_effects: ",
            paste(bad, collapse = ", "), ". Available: ",
            paste(names(lst), collapse = ", "), ".")
     lst <- lst[want]
@@ -98,7 +90,7 @@
   if (!single) return(lst)
 
   if (length(lst) > 1L)
-    stop(caller, ": geno_meta$marker_effects holds multiple traits (",
+    .hs_abort(caller, ": geno_meta$marker_effects holds multiple traits (",
          paste(names(lst), collapse = ", "), "); set 'trait' to choose one.")
   list(name = names(lst)[1L], table = lst[[1L]])
 }
@@ -180,11 +172,10 @@ export_marker_effects <- function(geno_meta,
                                   output_file = NULL,
                                   annotate    = FALSE) {
 
-  if (!is_geno_meta(geno_meta))
-    stop("export_marker_effects: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "export_marker_effects", "geno_meta")
   if (!is.null(output_dir) && !is.null(output_file))
-    stop("export_marker_effects: 'output_dir' and 'output_file' are mutually ",
-         "exclusive — 'output_dir' writes one file per trait, 'output_file' ",
+    .hs_abort("export_marker_effects: 'output_dir' and 'output_file' are mutually ",
+         "exclusive \u2014 'output_dir' writes one file per trait, 'output_file' ",
          "writes a single named file.")
 
   eff_list <- .effect_trait_list(geno_meta, traits, "export_marker_effects")
@@ -201,34 +192,46 @@ export_marker_effects <- function(geno_meta,
   }
 
   # Written files keep the GenoMeta's own columns; the trait lives in the name.
+  # One writer (D5 §3.6 h): the 0.8.8 `files` attribute is kept as given, the
+  # manifest (absolute paths, bytes) is `hs_files`, renames are `hs_notes`.
   stored_cols <- c("Marker", "Allele", "Effect")
   written     <- character(0L)
+  manifest    <- .hs_manifest()
+  notes       <- character(0L)
 
   if (!is.null(output_file)) {
     if (length(eff_list) > 1L)
-      stop("export_marker_effects: 'output_file' writes a single file but ",
+      .hs_abort("export_marker_effects: 'output_file' writes a single file but ",
            length(eff_list), " traits were selected (",
            paste(names(eff_list), collapse = ", "),
            "). Use 'output_dir' (one file per trait) or restrict 'traits'.")
-    data.table::fwrite(out[, stored_cols, with = FALSE], output_file, sep = "\t")
-    message("Marker effects (", names(eff_list)[1L], ") written to: ",
+    w <- .hs_write_tables(stats::setNames(list(out[, stored_cols, with = FALSE]),
+                                          basename(output_file)),
+                          dirname(output_file), sep = "\t")
+    .hs_inform("Marker effects (", names(eff_list)[1L], ") written to: ",
             output_file)
-    written <- output_file
+    written  <- output_file
+    manifest <- w$manifest
 
   } else if (!is.null(output_dir)) {
-    if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
     for (tr in names(eff_list)) {
-      path <- file.path(output_dir,
-                        paste0(prefix, "_", .hs_safe_file_part(tr), ".txt"))
-      data.table::fwrite(out[Trait == tr, stored_cols, with = FALSE], path,
-                         sep = "\t")
-      message("Marker effects (", tr, ") written to: ", path)
-      written <- c(written, path)
+      safe <- .hs_safe_file_part(tr)
+      if (!identical(safe, tr))
+        notes <- c(notes, paste0("trait '", tr, "' written as '", safe, "'"))
+      fname <- paste0(prefix, "_", safe, ".txt")
+      w <- .hs_write_tables(stats::setNames(list(out[Trait == tr, stored_cols, with = FALSE]),
+                                            fname), output_dir, sep = "\t")
+      path <- file.path(output_dir, fname)
+      .hs_inform("Marker effects (", tr, ") written to: ", path)
+      written  <- c(written, path)
+      manifest <- rbind(manifest, w$manifest)
     }
   }
 
   out <- out[]
   data.table::setattr(out, "files", written)
+  data.table::setattr(out, "hs_files", manifest)
+  data.table::setattr(out, "hs_notes", notes)
   out
 }
 
@@ -267,8 +270,11 @@ export_marker_effects <- function(geno_meta,
 #' @param alpha Point transparency. Default \code{0.8}.
 #' @param title Optional plot title, replacing the default
 #'   \code{"Marker Effect — <trait>"}.
-#' @param table_file Optional path; when non-\code{NULL} the plotted table is
-#'   written there as a tab-separated file. Default \code{NULL}.
+#' @param table_file \strong{Deprecated} (0.9.0): a plotter does not write
+#'   files. The plotted table is on the plot (\code{\link{marker_signal_table}(p)},
+#'   i.e. \code{attr(p, "effect_table")}); write it with \code{data.table::fwrite()}.
+#'   A supplied path still writes this release, with a warning. Default
+#'   \code{NULL}.
 #'
 #' @return A \code{ggplot} object. The plotted table is attached as
 #'   \code{attr(p, "effect_table")}, a \code{data.table} with columns
@@ -300,8 +306,7 @@ plot_marker_effects <- function(geno_meta,
                                 table_file = NULL) {
 
   collapse <- match.arg(collapse)
-  if (!is_geno_meta(geno_meta))
-    stop("plot_marker_effects: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "plot_marker_effects", "geno_meta")
 
   res <- .effect_trait_list(geno_meta, trait, "plot_marker_effects",
                             single = TRUE)
@@ -314,14 +319,14 @@ plot_marker_effects <- function(geno_meta,
   off <- dt[is.na(Chrom) | is.na(Pos)]
   if (nrow(off) > 0L) {
     nm <- unique(off$Marker)
-    warning("plot_marker_effects: ", nrow(off), " effect row(s) for ",
+    .hs_warn("plot_marker_effects: ", nrow(off), " effect row(s) for ",
             length(nm), " marker(s) absent from map_info were dropped: ",
             paste(utils::head(nm, 5L), collapse = ", "),
             if (length(nm) > 5L) ", ..." else "")
     dt <- dt[!is.na(Chrom) & !is.na(Pos)]
   }
   if (nrow(dt) == 0L)
-    stop("plot_marker_effects: no marker effects have a genomic position — ",
+    .hs_abort("plot_marker_effects: no marker effects have a genomic position \u2014 ",
          "check that the effect table's Marker IDs match geno_meta$map_info$Marker.")
 
   data.table::setorder(dt, Chrom, Pos, Marker, Allele)
@@ -333,13 +338,17 @@ plot_marker_effects <- function(geno_meta,
 
   p <- .plot_manhattan(
     dt, value_col = "Effect",
-    title      = title %||% paste0("Marker Effect — ", res$name),
+    title      = title %||% paste0("Marker Effect \u2014 ", res$name),
     y_lab      = "Marker effect",
     point_size = point_size, alpha = alpha, zero_line = TRUE)
 
   if (!is.null(table_file)) {
+    # D5 ladder (0.9.0, viz/F24): a plotter does not write; the table is on the
+    # plot (marker_signal_table()).
+    .hs_deprecated("table_file", "marker_signal_table()", "0.9.0",
+                   what = "argument", fn = "plot_marker_effects")
     data.table::fwrite(dt, table_file, sep = "\t")
-    message("Marker effect table written to: ", table_file)
+    .hs_inform("Marker effect table written to: ", table_file)
   }
 
   attr(p, "effect_table") <- dt[]

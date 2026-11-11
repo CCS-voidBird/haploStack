@@ -38,6 +38,33 @@
 
 
 # ---------------------------------------------------------------------------
+# Internal — the haplotype column names of a wide local-GEBV table (sc/F24)
+# ---------------------------------------------------------------------------
+
+# The one parser of "<Sample>.<haplotype_idx>" column names (0.9.0, D4-1): the
+# eight hand-written `sub("\\.[0-9]+$", "", ...)` copies of 0.8.8 went through
+# this function, with the same regex, so nothing moves. `cols` are the sample
+# columns of the table (everything but "Block"). Returns
+#   cols     the input
+#   base     the sample name of every column
+#   idx      the haplotype index of every column (integer; NA when absent)
+#   samples  unique(base), in first-appearance order
+#   ploidy   `ploidy` when given, else the largest number of columns one
+#            sample has (the 0.8.8 inference)
+.hap_cols <- function(cols, ploidy = NULL) {
+  cols <- as.character(cols)
+  base <- sub("\\.[0-9]+$", "", cols)
+  idx  <- suppressWarnings(as.integer(sub("^.*\\.([0-9]+)$", "\\1", cols)))
+  idx[!grepl("\\.[0-9]+$", cols)] <- NA_integer_
+  samples <- unique(base)
+  if (is.null(ploidy))
+    ploidy <- if (length(cols)) max(tabulate(match(base, samples))) else 0L
+  list(cols = cols, base = base, idx = idx, samples = samples,
+       ploidy = as.integer(ploidy))
+}
+
+
+# ---------------------------------------------------------------------------
 # Internal — per-sample total local GEBV from a haplotype-level table
 # ---------------------------------------------------------------------------
 
@@ -105,6 +132,152 @@
 
 
 # ---------------------------------------------------------------------------
+# Internal — the scheme registry (0.9.0, D4 §3.5; sc/F07)
+# ---------------------------------------------------------------------------
+
+# One entry per selection scheme. Up to 0.8.8 the scheme name was matched as a
+# string at twelve sites of this file; every one of them now reads the registry:
+#   parents             selector under selection_unit = "parents":
+#                       function(lg, geno_meta, n, ideal, opts) -> parent names
+#   pairs               family scorer under selection_unit = "pairs":
+#                       function(lg, geno_meta, ideal, opts) -> pair_selection,
+#                       or NULL when the scheme has no family form (OCS, until
+#                       the KCT rename)
+#   needs_ideal         the scheme selects against the ideal genotype (so the
+#                       ideal is built whatever `metrics` says)
+#   direction           selection direction the scheme honours: "both",
+#                       "high", or "argmax" (= "high" unless the ideal builder
+#                       is argmax; form row 19, D4-6)
+#   pin_founder_blocks  under ideal_scope = "founder" the scheme is scored on
+#                       the founders' block set
+#   in_default          the scheme is in the driver's default `scheme` vector
+# The selector bodies are the 0.8.8 switch() arms, moved verbatim.
+# `.STK_BASELINE` is the scheme of selfing generations and of the decision
+# cycles before `ga_start_by`.
+
+.STK_BASELINE <- "TS"
+
+.stk_sel_ts <- function(lg, geno_meta, n, ideal, opts)
+  .stk_select_truncation(lg, n, opts$select_priority)
+
+# The GA controls of the spec (`ga_control`, sc/F30): the engines' own defaults
+# when the list is empty, so nothing moves without it.
+.stk_ga <- function(opts) {
+  ga <- opts$ga_control
+  list(pop_size = ga$pop_size %||% 100L,
+       n_generations = ga$n_generations %||% 200L,
+       mutation_rate = ga$mutation_rate %||% 0.1)
+}
+
+.stk_sel_ohs <- function(lg, geno_meta, n, ideal, opts) {
+  ga <- .stk_ga(opts)
+  ohs_selection(lg, n_parents = n, method = opts$ohs_method,
+                elite_ratio = opts$ohs_elite_ratio,
+                elite_level = opts$ohs_elite_level,
+                pop_size = ga$pop_size, n_generations = ga$n_generations,
+                mutation_rate = ga$mutation_rate,
+                seed = opts$seed)
+}
+
+.stk_sel_ocs <- function(lg, geno_meta, n, ideal, opts) {
+  v   <- .stk_total_gebv(lg)
+  grm <- tryCatch(suppressMessages(compute_grm(geno_meta)),
+                  error = function(e) {
+                    .hs_note("selection", "ocs_grm_failed",
+                             paste0("compute_grm() failed (", conditionMessage(e),
+                                    "); OCS ran as truncation on GEBV."))
+                    NULL
+                  })
+  ocs_selection(v, kinship_matrix = grm, n_parents = n,
+                max_kinship = opts$max_kinship,
+                freq_penalty_weight = opts$freq_penalty_weight,
+                seed = opts$seed)
+}
+
+.stk_sel_gbs <- function(lg, geno_meta, n, ideal, opts)
+  gbs_selection(lg, ideal_genotypes = ideal, n_parents = n,
+                gbs_method = opts$gbs_method,
+                gbs_objective = opts$gbs_objective,
+                gbs_engine = opts$gbs_engine,
+                penalty_mode = opts$penalty_mode,
+                gbs_penalty = opts$gbs_penalty,
+                penalty_scale = opts$penalty_scale,
+                penalty_rank_scale = opts$penalty_rank_scale,
+                gbs_effect_weight = opts$gbs_effect_weight,
+                select_priority = opts$select_priority,
+                ga_control = if (is.null(opts$ga_control)) list() else opts$ga_control,
+                seed = opts$seed)
+
+.stk_pairs_ts <- function(lg, geno_meta, ideal, opts)
+  .stk_pairs_truncation(lg, opts$pair_budget, opts)
+
+.stk_pairs_ohs <- function(lg, geno_meta, ideal, opts) {
+  b  <- opts$pair_budget
+  ga <- .stk_ga(opts)
+  ohs_pair_selection(lg, pair_budget = b$pair_budget,
+                     top_founders = b$n_parents_ref,
+                     allow_selfing = b$allow_selfing,
+                     ohs_method = opts$ohs_method,
+                     elite_ratio = opts$ohs_elite_ratio,
+                     elite_level = opts$ohs_elite_level,
+                     shortlist_families = opts$ohs_shortlist_families,
+                     max_use = opts$max_use, overshoot = opts$overshoot,
+                     pop_size = ga$pop_size, n_generations = ga$n_generations,
+                     mutation_rate = ga$mutation_rate,
+                     seed = opts$seed)
+}
+
+.stk_pairs_gbs <- function(lg, geno_meta, ideal, opts) {
+  b <- opts$pair_budget
+  gbs_pair_selection(lg, ideal_genotypes = ideal,
+                     pair_budget = b$pair_budget,
+                     top_founders = b$n_parents_ref,
+                     num_offspring = opts$num_offspring,
+                     allow_selfing = b$allow_selfing,
+                     gbs_method = opts$gbs_method,
+                     gbs_objective = opts$gbs_objective,
+                     penalty_mode = opts$penalty_mode,
+                     gbs_penalty = opts$gbs_penalty,
+                     penalty_scale = opts$penalty_scale,
+                     penalty_rank_scale = opts$penalty_rank_scale,
+                     gbs_effect_weight = opts$gbs_effect_weight,
+                     gbs_pair_level = opts$gbs_pair_level,
+                     pair_freq = opts$pair_freq,
+                     pair_penalty = opts$pair_penalty,
+                     pair_pool = opts$pair_pool,
+                     shortlist_k = opts$shortlist_k,
+                     max_use = opts$max_use, overshoot = opts$overshoot,
+                     select_priority = opts$select_priority)
+}
+
+.STK_SCHEMES <- list(
+  TS  = list(parents = .stk_sel_ts,  pairs = .stk_pairs_ts,  needs_ideal = FALSE,
+             direction = "both",   pin_founder_blocks = FALSE, in_default = TRUE),
+  OHS = list(parents = .stk_sel_ohs, pairs = .stk_pairs_ohs, needs_ideal = FALSE,
+             direction = "high",   pin_founder_blocks = FALSE, in_default = TRUE),
+  OCS = list(parents = .stk_sel_ocs, pairs = NULL,           needs_ideal = FALSE,
+             direction = "high",   pin_founder_blocks = FALSE, in_default = FALSE),
+  GBS = list(parents = .stk_sel_gbs, pairs = .stk_pairs_gbs, needs_ideal = TRUE,
+             direction = "argmax", pin_founder_blocks = TRUE,  in_default = TRUE))
+
+# The registry entry of a scheme, or an internal error for an unknown name
+# (the entry points validate `scheme` against names(.STK_SCHEMES) first).
+.stk_scheme <- function(scheme) {
+  s <- .STK_SCHEMES[[scheme]]
+  if (is.null(s))
+    .hs_abort(class = "hs_error_internal", "unknown scheme '", scheme, "'.",
+              call. = FALSE)
+  s
+}
+
+# A property of several schemes at once (e.g. .stk_scheme_flag(scheme, "needs_ideal")).
+.stk_scheme_flag <- function(schemes, what) {
+  vapply(schemes, function(s) isTRUE(.stk_scheme(s)[[what]]), logical(1L),
+         USE.NAMES = FALSE)
+}
+
+
+# ---------------------------------------------------------------------------
 # Internal — scheme dispatch
 # ---------------------------------------------------------------------------
 
@@ -114,41 +287,16 @@
 # scheme yields too few, e.g. OCS stopping early on the kinship cap).
 .stk_select_parents <- function(scheme, localgebv, geno_meta, n_parents,
                                 ideal_genotypes, opts) {
-  sel <- switch(
-    scheme,
-    TS  = .stk_select_truncation(localgebv, n_parents, opts$select_priority),
-    OHS = ohs_selection(localgebv, n_parents = n_parents,
-                        method = opts$ohs_method,
-                        elite_ratio = opts$ohs_elite_ratio %||% 1,
-                        elite_level = opts$ohs_elite_level %||% "pair",
-                        seed = opts$seed),
-    OCS = {
-      v   <- .stk_total_gebv(localgebv)
-      grm <- tryCatch(suppressMessages(compute_grm(geno_meta)),
-                      error = function(e) NULL)
-      ocs_selection(v, kinship_matrix = grm, n_parents = n_parents,
-                    max_kinship = opts$max_kinship,
-                    freq_penalty_weight = opts$freq_penalty_weight,
-                    seed = opts$seed)
-    },
-    GBS = gbs_selection(localgebv, ideal_genotypes = ideal_genotypes,
-                        n_parents = n_parents, gbs_method = opts$gbs_method,
-                        gbs_objective = opts$gbs_objective,
-                        gbs_engine = opts$gbs_engine,
-                        penalty_mode = opts$penalty_mode,
-                        gbs_penalty = opts$gbs_penalty,
-                        penalty_scale = opts$penalty_scale,
-                        penalty_rank_scale = opts$penalty_rank_scale %||% 1,
-                        gbs_effect_weight = opts$gbs_effect_weight,
-                        select_priority = opts$select_priority,
-                        seed = opts$seed),
-    stop(".stk_select_parents: unknown scheme '", scheme, "'.")
-  )
-
+  sel <- .stk_scheme(scheme)$parents(localgebv, geno_meta, n_parents,
+                                     ideal_genotypes, opts)
   sel <- unique(sel)
-  if (length(sel) < 2L)
+  if (length(sel) < 2L) {
+    .hs_note("selection", "fallback_truncation",
+             paste0("scheme ", scheme, " returned ", length(sel), " parent(s); ",
+                    "truncation selection filled the parent set."))
     sel <- .stk_select_truncation(localgebv, max(n_parents, 2L),
                                   opts$select_priority)
+  }
   sel
 }
 
@@ -178,10 +326,10 @@
                 n_parents_max = n))
   }
   if (is.null(pair_budget))
-    stop("run_stacking_simulation: selection_unit = \"pairs\" needs ",
+    .hs_abort("run_stacking_simulation: selection_unit = \"pairs\" needs ",
          "'pair_budget' = \"families\" (same offspring population size as the ",
          "parents-first traversal) or \"parents\" (same number of distinct ",
-         "parents) — the two conflict, so one must be chosen.")
+         "parents) \u2014 the two conflict, so one must be chosen.")
   pair_budget <- match.arg(pair_budget, c("families", "parents"))
   c(list(selection_unit = "pairs"),
     pair_selection_budget(n, pair_budget, allow_selfing))
@@ -215,42 +363,12 @@
 .stk_select_pairs <- function(scheme, localgebv, geno_meta, ideal_genotypes,
                               opts) {
   b <- opts$pair_budget
-  pairs <- switch(
-    scheme,
-    TS  = .stk_pairs_truncation(localgebv, b, opts),
-    OHS = ohs_pair_selection(localgebv, pair_budget = b$pair_budget,
-                             top_founders = b$n_parents_ref,
-                             allow_selfing = b$allow_selfing,
-                             ohs_method = opts$ohs_method,
-                             elite_ratio = opts$ohs_elite_ratio %||% 1,
-                             elite_level = opts$ohs_elite_level %||% "pair",
-                             shortlist_families = opts$ohs_shortlist_families,
-                             max_use = opts$max_use, overshoot = opts$overshoot,
-                             seed = opts$seed),
-    OCS = stop("run_stacking_simulation: scheme \"OCS\" has no direct-pair form ",
-               "yet (it follows the KCT rename; pair plan Phase C). Use ",
-               "selection_unit = \"parents\" for OCS.", call. = FALSE),
-    GBS = gbs_pair_selection(localgebv, ideal_genotypes = ideal_genotypes,
-                             pair_budget = b$pair_budget,
-                             top_founders = b$n_parents_ref,
-                             num_offspring = opts$num_offspring,
-                             allow_selfing = b$allow_selfing,
-                             gbs_method = opts$gbs_method,
-                             gbs_objective = opts$gbs_objective,
-                             penalty_mode = opts$penalty_mode,
-                             gbs_penalty = opts$gbs_penalty,
-                             penalty_scale = opts$penalty_scale,
-                             penalty_rank_scale = opts$penalty_rank_scale %||% 1,
-                             gbs_effect_weight = opts$gbs_effect_weight,
-                             gbs_pair_level = opts$gbs_pair_level,
-                             pair_freq = opts$pair_freq,
-                             pair_penalty = opts$pair_penalty,
-                             pair_pool = opts$pair_pool,
-                             shortlist_k = opts$shortlist_k,
-                             max_use = opts$max_use, overshoot = opts$overshoot,
-                             select_priority = opts$select_priority),
-    stop(".stk_select_pairs: unknown scheme '", scheme, "'.")
-  )
+  f <- .stk_scheme(scheme)$pairs
+  if (is.null(f))
+    .hs_abort("run_stacking_simulation: scheme \"", scheme, "\" has no direct-pair ",
+              "form yet (it follows the KCT rename; pair plan Phase C). Use ",
+              "selection_unit = \"parents\" for ", scheme, ".", call. = FALSE)
+  pairs <- f(localgebv, geno_meta, ideal_genotypes, opts)
   .stk_check_pairs(pairs, dimnames(geno_meta$geno_arrays)[[1L]], b, scheme)
   pairs
 }
@@ -259,18 +377,18 @@
 # duplicate family (in either orientation), a self only when allowed.
 .stk_check_pairs <- function(pairs, pool, budget, scheme) {
   if (is.null(pairs) || nrow(pairs) == 0L)
-    stop("run_stacking_simulation: scheme \"", scheme, "\" returned no family ",
+    .hs_abort("run_stacking_simulation: scheme \"", scheme, "\" returned no family ",
          "under selection_unit = \"pairs\" (", .stk_budget_text(budget), ").",
          call. = FALSE)
   miss <- setdiff(unique(c(pairs$Parent1, pairs$Parent2)), pool)
   if (length(miss))
-    stop(".stk_select_pairs: parent(s) not in the pool: ",
+    .hs_abort(".stk_select_pairs: parent(s) not in the pool: ",
          paste(miss, collapse = ", "))
   key <- paste(pmin(pairs$Parent1, pairs$Parent2), pmax(pairs$Parent1, pairs$Parent2))
   if (anyDuplicated(key))
-    stop(".stk_select_pairs: scheme \"", scheme, "\" returned a duplicate family.")
+    .hs_abort(".stk_select_pairs: scheme \"", scheme, "\" returned a duplicate family.")
   if (!isTRUE(budget$allow_selfing) && any(pairs$Parent1 == pairs$Parent2))
-    stop(".stk_select_pairs: scheme \"", scheme, "\" returned a self-cross with ",
+    .hs_abort(".stk_select_pairs: scheme \"", scheme, "\" returned a self-cross with ",
          "avoid_selfing = TRUE.")
   invisible(TRUE)
 }
@@ -337,27 +455,27 @@
     stringsAsFactors = FALSE)
 
   # Rebuild so the canonical sample_info regenerates against the new names (a
-  # bare dimnames swap would leave sample_info$Sample stale and fail validation).
-  md <- src$metadata
-  md$n_samples <- length(new_names)
-  off <- new_geno_meta(
-    geno_arrays           = arr,
-    map_info              = src$map_info,
-    block_info            = src$block_info,
-    block_marker_map_info = src$block_marker_map_info,
-    sample_info           = fam,
-    metadata              = md,
-    marker_effects        = src$marker_effects)
-  # Blocks do not change across cycles — a stored block annotation carries to
-  # the renamed offspring container (#033).
-  off$annotation <- src$annotation
+  # bare dimnames swap would leave sample_info$Sample stale and fail
+  # validation). One rebuild path (0.9.0): blocks, effects and annotation carry
+  # to the renamed offspring (#033); the founders' phenotype and family history
+  # are declared losses (X7).
+  off <- .rebuild_geno_meta(src, geno_arrays = arr, sample_info = fam,
+                            .drop = c("family_history", "phenotype"),
+                            .caller = ".advance_generation")
 
+  bp[, CrossID := NewID]
+  list(off = off, bp = bp)
+}
+
+# The per-cross plan of a generation from its per-offspring table (one row per
+# family: F1count, the mean F1mean of its offspring, the compact CrossID). Built
+# after the offspring F1mean is known — for the block backend that is the
+# shared local-GEBV pass of .stk_advance() (0.9.0, D4-2), not the crossing.
+.stk_cross_plans <- function(bp, cycle, opts) {
   cross_plans <- bp[, .(F1count = .N, F1mean = mean(F1mean, na.rm = TRUE)),
                     by = .(FamID, Parent1, Parent2)]
   cross_plans[, CrossID := sprintf(opts$id_fmt_cross, cycle, FamID)]
-
-  bp[, CrossID := NewID]
-  list(off = off, bp = bp, cross_plans = cross_plans)
+  cross_plans
 }
 
 
@@ -375,7 +493,18 @@
 # origin behaviour: a lost state drops out and the remaining targets are
 # re-normalised). `cycle` is the whole-cycle index used to build the compact
 # offspring IDs (see .stk_rename_generation).
-.stk_advance <- function(current, scheme, effect_df, opts, cycle, session = NULL) {
+#
+# One local-GEBV pass per generation (0.9.0, form row 20 a / D4-2): the
+# offspring are scored ONCE at haplotype level, on the renamed container, and
+# that table serves three uses that were three passes up to 0.8.8 — the block
+# backend's F1mean (its genotype-level pass; the haplotype sum is identical,
+# probe D4 §3.4), the d2ideal / ideal_hap_gebv metrics, and the next
+# generation's parent table, handed back as `off_lg` and passed in as `lg`.
+# `lg = NULL` computes the parent table here (first generation, or after a
+# failed pass). Under genomicSimulation F1mean stays gS's native breeding
+# value and the pass runs only when a metric needs it.
+.stk_advance <- function(current, scheme, effect_df, opts, cycle, session = NULL,
+                         lg = NULL) {
   want <- function(m) m %in% opts$metrics
 
   # Per-step wall-clock timing (surfaced in verbose mode so the user can see which
@@ -389,7 +518,8 @@
     .tk <<- now
   }
 
-  lg <- compute_profile_localgebv(current, effect_df, level = "haplotype")
+  if (is.null(lg))
+    lg <- compute_profile_localgebv(current, effect_df, level = "haplotype")
   # A founder-fixed ideal defines the block set of GBS selection for the whole
   # run (the founders' `select_top_blocks`), so a target block cannot silently
   # drop out of a later cycle's top-N. Only GBS selection is pinned: TS/OHS/OCS
@@ -397,12 +527,13 @@
   # offspring table, so neither is affected by the scope.
   use_founder <- identical(opts$ideal_scope, "founder") &&
     !is.null(opts$founder_ideal)
-  lg <- if (use_founder && scheme == "GBS")
+  sch <- .stk_scheme(scheme)
+  lg <- if (use_founder && isTRUE(sch$pin_founder_blocks))
     .stk_limit_blocks(lg, opts$founder_blocks, NULL)
   else
     .stk_limit_blocks(lg, opts$selected_blocks, opts$select_top_blocks)
   if (nrow(lg) == 0L)
-    stop(".stk_advance: no blocks remain for selection (check 'selected_blocks' ",
+    .hs_abort(".stk_advance: no blocks remain for selection (check 'selected_blocks' ",
          "/ block assignments).")
   lap("parent_gebv")
 
@@ -410,7 +541,7 @@
   # (built whenever GBS runs, never influenced by 'metrics'), and (b) the input to
   # the d2ideal MEASUREMENT. Built once and shared when both apply, so metrics can
   # never change GBS selection.
-  need_ideal <- scheme == "GBS" || want("d2ideal")
+  need_ideal <- isTRUE(sch$needs_ideal) || want("d2ideal")
   ideal <- if (!need_ideal) NULL
   else if (use_founder) opts$founder_ideal
   else construct_ideal_genotype(lg, method = opts$construct_method,
@@ -442,26 +573,20 @@
                                       n_offspring = opts$num_offspring)
   }
 
+  # The driver rebuilds the offspring FAM itself in .stk_rename_generation(),
+  # so the genomicSimulation read-back skips its own (io/F25: one rebuild less
+  # per generation; the block backend never built one).
+  # The block backend's F1mean comes from the shared pass below (f1mean = FALSE
+  # skips its own genotype-level pass); genomicSimulation returns its native BV.
   res <- .cross_backend_dispatch(opts$cross_backend, current, cross_design,
                                  effect_df = effect_df, work_dir = opts$work_dir,
-                                 session = session)
+                                 session = session, offspring_fam = FALSE,
+                                 f1mean = FALSE)
 
   # Compact, history-free IDs for the new generation (stops the cross-id /
   # sample-name blow-up; lineage stays in Parent1/Parent2 + cycle).
   gen <- .stk_rename_generation(res, cycle, opts)
   off <- gen$off
-
-  # Per-family selection score (direct pairing; NA under parents-first) and the
-  # cycle's family / distinct-parent counts — both units, so the two protocols
-  # are compared on the same columns.
-  cross_plans <- gen$cross_plans
-  cross_plans[, pair_score := NA_real_]
-  if (!is.null(pairs))
-    cross_plans[data.table(Parent1 = pairs$Parent1, Parent2 = pairs$Parent2,
-                           s = pairs$score),
-                on = .(Parent1, Parent2), pair_score := i.s]
-  n_families     <- nrow(cross_plans)
-  n_parents_used <- length(unique(c(cross_plans$Parent1, cross_plans$Parent2)))
 
   # FR3 (persistent gS session): push the SAME compact names into the live group
   # so next cycle's parent-name -> "X" lookup in gs_cross_plan() resolves. Ordering
@@ -472,43 +597,75 @@
     session <- gs_sync_group_names(session, gen$bp$OldID, gen$bp$NewID)
   lap("crossing")
 
-  # ── Optional metrics — all measured on the OFFSPRING population ──────────────
-  # Offspring local GEBV recompute is the expensive extra pass; do it only when a
-  # metric needs it. Everything below fills NA unless its token is in opts$metrics.
-  need_offlg <- want("d2ideal") || want("ideal_hap_gebv")
+  # ── The one offspring local-GEBV pass (row 20 a) ─────────────────────────────
+  # Always for the block backend (it is the F1mean); for genomicSimulation only
+  # when a metric needs it. On error the generation keeps 0.8.8's behaviour —
+  # F1mean NA, metrics NA, the next generation recomputes its parent table —
+  # and says so (note code f1mean_failed).
+  is_block   <- identical(opts$cross_backend, "block")
+  need_offlg <- is_block || want("d2ideal") || want("ideal_hap_gebv")
   off_lg <- if (need_offlg)
     tryCatch(compute_profile_localgebv(off, effect_df, level = "haplotype"),
-             error = function(e) NULL)
+             error = function(e) {
+               .hs_note("simulation", "f1mean_failed",
+                        paste0("offspring local GEBV pass failed (",
+                               conditionMessage(e), "); ",
+                               if (is_block) "F1mean and " else "",
+                               "the offspring metrics are NA for the generation."))
+               NULL
+             })
   else NULL
+  if (is_block) {
+    f1 <- if (is.null(off_lg) || nrow(off_lg) == 0L) rep(NA_real_, nrow(gen$bp))
+          else unname(.stk_total_gebv(off_lg)[gen$bp$NewID])
+    gen$bp[, F1mean := f1]
+  }
   lap("offspring_gebv")
 
+  # Per-cross plan (F1count / F1mean per family), the per-family selection score
+  # (direct pairing; NA under parents-first) and the cycle's family /
+  # distinct-parent counts — both units, so the two protocols are compared on
+  # the same columns.
+  cross_plans <- .stk_cross_plans(gen$bp, cycle, opts)
+  cross_plans[, pair_score := NA_real_]
+  if (!is.null(pairs))
+    cross_plans[data.table(Parent1 = pairs$Parent1, Parent2 = pairs$Parent2,
+                           s = pairs$score),
+                on = .(Parent1, Parent2), pair_score := i.s]
+  n_families     <- nrow(cross_plans)
+  n_parents_used <- length(unique(c(cross_plans$Parent1, cross_plans$Parent2)))
+
+  # A metric that fails is NA for the generation and says so (note code
+  # metric_failed, with the metric's name and the error; sc/F19).
+  metric <- function(name, expr) tryCatch(expr, error = function(e) {
+    .hs_note("metrics", "metric_failed",
+             paste0(name, " failed (", conditionMessage(e), "); NA for the generation."))
+    NA_real_
+  })
   d2 <- if (want("d2ideal") && !is.null(ideal) &&
             !is.null(off_lg) && nrow(off_lg) > 0L)
-    tryCatch(.distance_to_ideal(off_lg, ideal, gbs_method = opts$gbs_method),
-             error = function(e) NA_real_)
+    metric("d2ideal", .distance_to_ideal(off_lg, ideal, gbs_method = opts$gbs_method))
   else NA_real_
 
   ideal_hap <- if (want("ideal_hap_gebv") && !is.null(off_lg) && nrow(off_lg) > 0L)
-    tryCatch(.stk_ideal_hap_gebv(off_lg, ploidy = opts$ploidy),
-             error = function(e) NA_real_)
+    metric("ideal_hap_gebv", .stk_ideal_hap_gebv(off_lg, ploidy = opts$ploidy))
   else NA_real_
 
   # Nei's (1973) gene diversity of the offspring population (marker-level).
   gdiv <- if (want("gene_diversity"))
-    tryCatch(as.numeric(compute_gene_diversity(off, level = "marker")),
-             error = function(e) NA_real_)
+    metric("gene_diversity", as.numeric(compute_gene_diversity(off, level = "marker")))
   else NA_real_
 
   # Coancestry = mean block-IBS relatedness among the OFFSPRING (a diversity
   # measure of the produced population, distinct from Nei gene diversity).
   coan <- if (want("coancestry"))
-    tryCatch(.stk_coancestry(off, dimnames(off$geno_arrays)[[1L]],
-                             blocks = unique(as.character(lg$Block))),
-             error = function(e) NA_real_)
+    metric("coancestry", .stk_coancestry(off, dimnames(off$geno_arrays)[[1L]],
+                                         blocks = unique(as.character(lg$Block))))
   else NA_real_
   lap("metrics")
 
   list(off             = off,
+       off_lg          = off_lg,
        cross_plans     = cross_plans,
        n_families      = n_families,
        n_parents_used  = n_parents_used,
@@ -548,7 +705,7 @@
   st    <- sort(step_time, decreasing = TRUE)
   lines <- sprintf("      %-22s %8.2fs  (%4.1f%%)",
                    .STK_STEP_LABELS[names(st)], st, 100 * st / tot)
-  paste0(sprintf("  [%s rep %d] step time — total %.1fs; dominant: %s\n",
+  paste0(sprintf("  [%s rep %d] step time \u2014 total %.1fs; dominant: %s\n",
                  scheme, rep, tot,
                  .STK_STEP_LABELS[[names(which.max(step_time))]]),
          paste(lines, collapse = "\n"))
@@ -577,7 +734,9 @@
   cp[]
 }
 
-# One `summary` row (FR5 columns) for a cycle.
+# One `summary` row (FR5 columns) for a cycle. The founder row (cycle 0) goes
+# through the same function from the `adv`-shaped list .stk_founder_measures()
+# builds (sc/F26), so the two rows can never drift apart in their arithmetic.
 .stk_summary_record <- function(adv, select_type, cycle, rep, sel_scheme) {
   f1 <- adv$f1
   data.table(cycle                = cycle,
@@ -595,6 +754,65 @@
              marker_size          = adv$n_marker,
              n_families           = as.integer(adv$n_families),
              n_parents_used       = as.integer(adv$n_parents_used))
+}
+
+# The founder population measured like a generation (the cycle-0 record of
+# 0.8.8, `start_fam_record`): each optional metric is filled only when its
+# token is in `opts$metrics`; the ideal is the founder ideal already built by
+# the entry point (identical input, no random draw — sc/F26), never rebuilt.
+.stk_founder_measures <- function(geno_meta, founder_lg, founder_ideal, opts) {
+  want <- function(m) m %in% opts$metrics
+  v0 <- .stk_total_gebv(founder_lg)
+  f_ideal <- if (want("d2ideal")) founder_ideal else NULL
+  list(f1              = v0,
+       d2              = if (want("d2ideal"))
+                           .distance_to_ideal(founder_lg, f_ideal,
+                                              gbs_method = opts$gbs_method)
+                         else NA_real_,
+       coan            = if (want("coancestry"))
+                           tryCatch(.stk_coancestry(
+                             geno_meta, dimnames(geno_meta$geno_arrays)[[1L]],
+                             blocks = unique(as.character(founder_lg$Block))),
+                             error = function(e) NA_real_)
+                         else NA_real_,
+       gene_div        = if (want("gene_diversity"))
+                           tryCatch(as.numeric(compute_gene_diversity(geno_meta, level = "marker")),
+                                    error = function(e) NA_real_)
+                         else NA_real_,
+       ideal_phenotype = if (is.null(f_ideal)) NA_real_
+                         else as.numeric(attr(f_ideal, "ideal_phenotype")),
+       ideal_hap       = if (want("ideal_hap_gebv"))
+                           .stk_ideal_hap_gebv(founder_lg, ploidy = opts$ploidy)
+                         else NA_real_,
+       n_marker        = dim(geno_meta$geno_arrays)[2L],
+       n_families      = NA_integer_,
+       n_parents_used  = NA_integer_)
+}
+
+# The `trajectories` compat view of a summary table (Rep / Cycle / Method /
+# MeanGEBV / SDev / BlockCoverage), one definition for the final combine and
+# the live monitor (sc/F23).
+.stk_trajectories_view <- function(summary) {
+  s <- as.data.table(summary)
+  # The legend name is method + mode (owner's naming rule, 2026-11-08): the
+  # pairs mode is "cross design", suffix -CD; OHS-block x cross is BECD.
+  # Calls keep `scheme` and `selection_unit` separate; only the label joins
+  # them. A summary without the unit column (0.8.8 tables) keeps the scheme.
+  label <- s$sel_scheme
+  if ("selection_unit" %in% names(s)) {
+    cd <- !is.na(s$selection_unit) & s$selection_unit == "pairs"
+    be <- cd & s$sel_scheme %in% "OHS" & "ohs_elite_level" %in% names(s) &
+          !is.na(s$ohs_elite_level) & s$ohs_elite_level == "block"
+    label <- ifelse(be, "BECD", ifelse(cd, paste0(s$sel_scheme, "-CD"), s$sel_scheme))
+  }
+  s[, Method := label]
+  s[cycle > 0L, .(
+    Rep           = rep,
+    Cycle         = cycle,
+    Method        = Method,
+    MeanGEBV      = mean_F1mean,
+    SDev          = sqrt(var_F1mean),
+    BlockCoverage = NA_real_)]
 }
 
 
@@ -678,10 +896,13 @@
 #' @param geno_meta Founder \code{GenoMeta}. For back-compatibility a
 #'   \code{catalogue_results} list (see \code{\link{run_haplotype_catalogue}})
 #'   may be passed here or via \code{catalogue_results}.
-#' @param effect_df data.frame of marker effects (Marker, Allele, Effect). When
-#'   \code{NULL}, the \code{GenoMeta}'s attached \code{marker_effects} are used;
-#'   if those hold a named per-trait list, the first trait's table is taken (this
-#'   pipeline is single-trait).
+#' @param effect_df Marker effects: one \code{(Marker, Allele, Effect)} table, a
+#'   named per-trait list of them, or one long table with a \code{Trait}
+#'   column. When \code{NULL}, the \code{GenoMeta}'s attached
+#'   \code{marker_effects} are used. This pipeline breeds on one trait: with
+#'   several traits pass \code{trait = "<name>"} (since 0.9.0 the call stops
+#'   otherwise, naming the traits; up to 0.8.8 the first trait was taken
+#'   silently).
 #' @param selected_blocks Optional character vector restricting selection to
 #'   these blocks. Default \code{NULL} (all blocks).
 #' @param replications Integer. Independent simulation runs. Default \code{10}.
@@ -693,6 +914,8 @@
 #'   (truncation before it). Default \code{1}.
 #' @param num_offspring Integer. Offspring per cross. Default \code{4}.
 #' @param top_founders Integer. Parents selected per cycle. Default \code{16}.
+#'   Must not exceed the population (since 0.9.0 that is an error; up to 0.8.8
+#'   the set was capped silently).
 #' @param avoid_selfing Logical. Exclude self-crosses. Default \code{TRUE}.
 #'   The \code{"all_pairs"} design of the parents-first protocol never contains
 #'   a self-cross in any case (it enumerates \code{combn(parents, 2)}), so the
@@ -729,7 +952,9 @@
 #'   (default) or \code{"usefulness"} = mid-parent \code{+ usefulness_k *
 #'   sd(F1)}. Default \code{usefulness_k = 1}.
 #' @param scheme Character vector of schemes to run/compare: any of \code{"TS"},
-#'   \code{"OHS"}, \code{"OCS"}, \code{"GBS"}.
+#'   \code{"OHS"}, \code{"OCS"}, \code{"GBS"}. Default \code{c("TS", "OHS",
+#'   "GBS")} since 0.9.0 (OCS stays available by name; up to 0.8.8 the default
+#'   ran all four).
 #' @param ohs_method OHS engine (see \code{\link{ohs_selection}}).
 #' @param ohs_elite_ratio Fraction in \code{(0, 1]} of a set's families the OHS
 #'   objective counts (see \code{\link{ohs_selection}}). Default \code{1} =
@@ -774,7 +999,11 @@
 #'   origin behaviour: a lost state drops out and the remaining targets are
 #'   re-normalised).
 #' @param select_priority \code{"high"} (default) or \code{"low"} — selection
-#'   direction (shared by TS/OHS-ideal/GBS and the ideal genotype).
+#'   direction. \code{"low"} is honoured by TS (both selection units) and by
+#'   GBS with \code{construct_method = "argmax"}; OHS, OCS and GBS with the
+#'   \code{"custom"} or \code{"ratio"} builder select for the high tail
+#'   whatever the priority says, so \code{"low"} is refused with them (0.9.0;
+#'   up to 0.8.8 it was ignored silently).
 #' @param construct_method Ideal-genotype construction (see
 #'   \code{\link{construct_ideal_genotype}}).
 #' @param k_penalty Diversity penalty for \code{construct_method = "custom"}.
@@ -796,7 +1025,13 @@
 #'   builds its ideal-genotype selection target regardless of this argument.)
 #' @param seed Base random seed (replication \code{r} uses \code{seed + r}).
 #'   Default \code{42}.
-#' @param output_dir Directory for output files/plots. Created if absent.
+#' @param output_dir \code{NULL} (default since 0.9.0): the result is returned
+#'   in memory and nothing is written. A directory (created if absent) receives
+#'   the files 0.8.8 wrote, through \code{\link{write_outputs}}:
+#'   \code{stacking_plans_<tag>.txt}, \code{stacking_summary_<tag>.txt} and
+#'   \code{Trajectories_<tag>.png} (\code{<tag>} = the schemes joined by
+#'   \code{"-"}); the result is then returned invisibly. Up to 0.8.8 the default
+#'   was \code{"stacking_output"} in the working directory.
 #' @param verbose Logical. Print progress. Default \code{TRUE}.
 #' @param monitor Logical. Live monitor: when \code{TRUE} \strong{and}
 #'   \code{output_dir} is set, the accumulating record and figures are refreshed
@@ -811,13 +1046,41 @@
 #'   a \code{monitor = FALSE} run. Default \code{FALSE}.
 #' @param n_cores Integer. Parallel workers (\code{> 1} needs \pkg{future} and
 #'   \pkg{future.apply}). Default \code{1}.
-#' @param catalogue_results,trait_name,select_method Deprecated back-compat
+#' @param trait The trait to breed on when \code{effect_df} (or the
+#'   container's \code{marker_effects}) holds several traits. Default
+#'   \code{NULL}.
+#' @param keep_populations \code{"final"} (default): keep every job's final
+#'   population in \code{final_populations}; \code{"none"}: an empty list.
+#' @param backend_opts Options of the crossing backend (genomicSimulation):
+#'   a list with any of \code{cM_per_mb}, \code{map_unit}, \code{keep_files};
+#'   see \code{\link{stk_spec}}.
+#' @param ga_control \code{list(pop_size, n_generations, mutation_rate)} for
+#'   the GA engines; see \code{\link{stk_spec}}.
+#' @param progress \code{NULL} (default) or a function of one argument, the
+#'   package's progress contract: with \code{n_cores = 1} it is called after
+#'   every generation (\code{unit = "cycle"}, see \code{\link{stk_step}}), with
+#'   \code{n_cores > 1} after every job (\code{unit = "job"}). Returning
+#'   \code{FALSE} cancels the run with an \code{hs_error_cancelled} error whose
+#'   \code{partial} field holds the result of the generations and jobs done so
+#'   far.
+#' @param catalogue_results,trait_name,select_method Deprecated since 0.9.0
+#'   (each warns on every call, see \link{haploStack-deprecated}) back-compat
 #'   inputs. \code{catalogue_results}/\code{trait_name} supply the founder
 #'   \code{GenoMeta}; \code{select_method} (\code{"GA"}/\code{"GS"}/\code{"OCS"})
 #'   maps to \code{scheme} (\code{GA -> OHS(GA_pairwise)}, \code{GS -> TS},
 #'   \code{OCS -> OCS}).
 #'
-#' @return A named list:
+#' @return An \code{hs_simulation} result (class \code{c("hs_simulation",
+#'   "hs_result", "list")}, see \code{\link{hs_result}}): the five 0.8.8
+#'   elements below, plus \code{notes} (every silent fallback of the run, one
+#'   row per job and code: \code{fallback_truncation}, \code{ocs_grm_failed},
+#'   \code{ocs_kinship_cap}, \code{metric_failed}, \code{f1mean_failed},
+#'   \code{monitor_write_failed}, \code{figure_failed}; one warning per code
+#'   is also raised at the end of the run), \code{provenance} (package, status,
+#'   the resolved \code{spec}, trait, seed, RNG kind, input sizes, block
+#'   provenance, backend, the founder ideal's summary, the file tag, one row per
+#'   job) and \code{figures} (empty: the trajectories figure is built by
+#'   \code{write_outputs()} on demand). The result survives \code{saveRDS()}.
 #' \describe{
 #'   \item{\code{plans}}{Per-cross data.table: \code{CrossID, Parent1, Parent2,
 #'     F1count, F1mean, select_type, cycle, rep, sel_scheme, D2Ideal,
@@ -871,7 +1134,7 @@ run_stacking_simulation <- function(
   overshoot           = c("skip", "stop"),
   ts_pair_score       = c("midparent", "usefulness"),
   usefulness_k        = 1,
-  scheme              = c("TS", "OHS", "OCS", "GBS"),
+  scheme              = c("TS", "OHS", "GBS"),
   ohs_method          = c("GA_pairwise", "Greedy"),
   ohs_elite_ratio     = 1,
   ohs_elite_level     = c("pair", "block"),
@@ -895,10 +1158,15 @@ run_stacking_simulation <- function(
   cross_backend       = c("block", "genomicSimulation"),
   metrics             = "gebv",
   seed                = 42L,
-  output_dir          = "stacking_output",
+  output_dir          = NULL,
   verbose             = TRUE,
   monitor             = FALSE,
   n_cores             = 1L,
+  trait               = NULL,
+  keep_populations    = c("final", "none"),
+  backend_opts        = list(),
+  ga_control          = list(),
+  progress            = NULL,
   # ── deprecated back-compat ───────────────────────────────────────────────
   catalogue_results   = NULL,
   trait_name          = NULL,
@@ -906,407 +1174,185 @@ run_stacking_simulation <- function(
 ) {
 
   # ── Back-compat: catalogue_results / select_method ────────────────────────
-  if (is.null(catalogue_results) && !is.null(geno_meta) && !is_geno_meta(geno_meta))
+  # The three inputs are on the deprecation ladder since 0.9.0 (sc/F31; they
+  # never warned before): hs_warning_deprecated, mapped as before.
+  if (is.null(catalogue_results) && !is.null(geno_meta) && !is_geno_meta(geno_meta)) {
+    .hs_deprecated("a catalogue list passed as 'geno_meta'", "geno_meta = <GenoMeta>",
+                   "0.9.0", what = "argument", fn = "run_stacking_simulation")
     catalogue_results <- geno_meta            # catalogue list passed positionally
+  } else if (!is.null(catalogue_results)) {
+    .hs_deprecated("catalogue_results", "geno_meta = <GenoMeta>", "0.9.0",
+                   what = "argument", fn = "run_stacking_simulation")
+  }
+  if (!is.null(trait_name))
+    .hs_deprecated("trait_name", "trait", "0.9.0", what = "argument",
+                   fn = "run_stacking_simulation")
 
   if (!is.null(catalogue_results)) {
     trait_name <- trait_name %||% names(catalogue_results)[1L]
     if (!trait_name %in% names(catalogue_results))
-      stop("run_stacking_simulation: trait '", trait_name,
+      .hs_abort("run_stacking_simulation: trait '", trait_name,
            "' not in catalogue_results.")
     geno_meta <- catalogue_results[[trait_name]]$geno_meta
   }
 
   if (!is.null(select_method)) {              # GA/GS/OCS -> scheme
+    .hs_deprecated("select_method", "scheme", "0.9.0", what = "argument",
+                   fn = "run_stacking_simulation")
     select_method <- match.arg(select_method, c("GA", "GS", "OCS"))
     scheme <- switch(select_method, GA = "OHS", GS = "TS", OCS = "OCS")
     if (select_method == "GA") ohs_method <- "GA_pairwise"   # GA_coverage removed 0.7.4
   }
 
-  if (!is_geno_meta(geno_meta))
-    stop("run_stacking_simulation: 'geno_meta' must be a valid GenoMeta ",
-         "(or supply 'catalogue_results').")
+  .hs_check_meta(geno_meta, "run_stacking_simulation", "geno_meta",
+                 hint = "(Or supply 'catalogue_results'.)")
+  keep_populations <- match.arg(keep_populations)
+  if (!is.null(output_dir) &&
+      (!is.character(output_dir) || length(output_dir) != 1L || !nzchar(output_dir)))
+    .hs_abort("run_stacking_simulation: 'output_dir' must be NULL or a single ",
+              "directory path.", call. = FALSE)
 
-  scheme           <- match.arg(scheme, c("TS", "OHS", "OCS", "GBS"),
-                                several.ok = TRUE)
-  ohs_method       <- match.arg(ohs_method)
-  ohs_elite_level  <- match.arg(ohs_elite_level)
-  .ohs_check_elite(ohs_elite_ratio)
-  gbs_method       <- match.arg(gbs_method)
-  gbs_preset       <- match.arg(gbs_preset)
-  ideal_scope      <- match.arg(ideal_scope)
-  select_priority  <- match.arg(select_priority)
-  construct_method <- match.arg(construct_method)
-  cross_backend    <- match.arg(cross_backend)
-  selection_unit   <- match.arg(selection_unit)
-  gbs_pair_level   <- match.arg(gbs_pair_level)
-  pair_penalty     <- match.arg(pair_penalty)
-  pair_pool        <- match.arg(pair_pool)
-  overshoot        <- match.arg(overshoot)
-  ts_pair_score    <- match.arg(ts_pair_score)
-  if (!is.null(pair_freq)) pair_freq <- match.arg(pair_freq, c("projected", "running"))
+  # ── The spec: every science argument validated once (stk_spec, D4-3) ──────
+  spec <- stk_spec(
+    scheme = scheme, replications = replications, select_cycles = select_cycles,
+    selfing_cycles = selfing_cycles, ga_start_by = ga_start_by,
+    num_offspring = num_offspring, top_founders = top_founders,
+    avoid_selfing = avoid_selfing, selection_unit = selection_unit,
+    pair_budget = pair_budget, gbs_pair_level = gbs_pair_level,
+    pair_freq = pair_freq, pair_penalty = pair_penalty, pair_pool = pair_pool,
+    shortlist_k = shortlist_k, max_use = max_use, overshoot = overshoot,
+    ts_pair_score = ts_pair_score, usefulness_k = usefulness_k,
+    ohs_method = ohs_method, ohs_elite_ratio = ohs_elite_ratio,
+    ohs_elite_level = ohs_elite_level,
+    ohs_shortlist_families = ohs_shortlist_families, gbs_method = gbs_method,
+    gbs_preset = gbs_preset, gbs_objective = gbs_objective,
+    gbs_engine = gbs_engine, penalty_mode = penalty_mode,
+    gbs_penalty = gbs_penalty, penalty_scale = penalty_scale,
+    penalty_rank_scale = penalty_rank_scale,
+    gbs_effect_weight = gbs_effect_weight, ideal_scope = ideal_scope,
+    select_priority = select_priority, construct_method = construct_method,
+    k_penalty = k_penalty, max_kinship = max_kinship,
+    freq_penalty_weight = freq_penalty_weight,
+    select_top_blocks = select_top_blocks, selected_blocks = selected_blocks,
+    cross_backend = cross_backend, metrics = metrics, trait = trait,
+    seed = seed, backend_opts = backend_opts, ga_control = ga_control)
 
-  # Selection unit and its per-cycle budget (parents-first: the traversal of
-  # `top_founders`; direct pairing: the chosen `pair_budget`). Resolved up front
-  # so a missing `pair_budget` fails before anything runs, and so the family-ID
-  # width below follows the family count. Selfing: the all-pairs design never
-  # selfs, so parents-first passes FALSE; under pairs the flag is honoured by
-  # the candidate pool, the budget and the design alike.
-  if (selection_unit == "parents" && !is.null(pair_budget))
-    warning("run_stacking_simulation: 'pair_budget' is ignored unless ",
-            "selection_unit = \"pairs\".", call. = FALSE)
-  budget <- .stk_selection_budget(
-    selection_unit, pair_budget, top_founders,
-    allow_selfing = if (selection_unit == "pairs") !isTRUE(avoid_selfing) else FALSE)
-  if (selection_unit == "pairs") {
-    if ("OCS" %in% scheme)
-      stop("run_stacking_simulation: scheme \"OCS\" has no direct-pair form yet ",
-           "(pair plan Phase C); run it under selection_unit = \"parents\".")
-    if (!is.null(gbs_engine) && gbs_engine == "GA")
-      stop("run_stacking_simulation: gbs_engine = \"GA\" over family sets is not ",
-           "implemented (pair plan Phase D); the pairs engine is the greedy.")
-    # The pairs default objective is "set" (the candidate score is separable
-    # over a family); an explicit value still wins.
-    if (is.null(gbs_objective)) gbs_objective <- "set"
-  }
-
-  # GBS knobs: the preset fills whatever was left NULL; explicit values win.
-  gbs_spec <- .gbs_apply_preset(gbs_preset, list(
-    gbs_objective = if (is.null(gbs_objective)) NULL
-                    else match.arg(gbs_objective, c("candidate", "set")),
-    gbs_engine    = if (is.null(gbs_engine)) NULL
-                    else match.arg(gbs_engine, c("greedy", "GA")),
-    penalty_mode  = if (is.null(penalty_mode)) NULL
-                    else match.arg(penalty_mode, c("dynamic", "fixed")),
-    gbs_penalty       = gbs_penalty,
-    penalty_scale     = penalty_scale,
-    gbs_effect_weight = gbs_effect_weight))
-  .gbs_check_penalty_args(gbs_spec$gbs_penalty, gbs_spec$penalty_mode,
-                          gbs_spec$penalty_scale)
-  # Not preset-backed (#036 stage 1): validated up front so a bad vector fails
-  # before anything runs, then carried in opts for the per-cycle GBS calls.
-  .gbs_check_rank_scale(penalty_rank_scale)
-  if (gbs_spec$gbs_engine == "GA" && gbs_spec$gbs_objective != "set")
-    stop("run_stacking_simulation: gbs_engine = \"GA\" requires ",
-         "gbs_objective = \"set\".")
-
-  # ── Metrics vector (measurement-only; never affects selection) ─────────────
-  # "gebv" (F1mean) is the always-on base; append any optional offspring metrics,
-  # or "all" for every one. Every value is measured on the offspring population.
-  all_metrics <- c("gebv", "d2ideal", "gene_diversity", "coancestry",
-                   "ideal_hap_gebv")
-  if (any(metrics == "all")) metrics <- all_metrics
-  metrics <- match.arg(metrics, all_metrics, several.ok = TRUE)
-  metrics <- union("gebv", metrics)          # F1mean cannot be disabled
-
-  # Single-trait pipeline: collapse a stored per-trait marker_effects list to one
-  # effect table (uses the first trait when several are present).
-  if (is.null(effect_df)) effect_df <- geno_meta$marker_effects
-  effect_df <- .coerce_single_effect_df(effect_df)
-  if (is.null(effect_df))
-    stop("run_stacking_simulation: no effects supplied — pass 'effect_df' or ",
-         "attach 'marker_effects' to the GenoMeta.")
+  # What every job shares: the effect table, the founders' table, the founder
+  # ideal, the opts list. Computed once, no random draw; its notes (row 19's
+  # d2ideal_direction_blind) join the result's.
+  prep_run <- .hs_with_notes(
+    .stk_prepare(spec, geno_meta, effect_df, caller = "run_stacking_simulation"),
+    muffle = TRUE)
+  prep <- prep_run$value
 
   if (!is.null(output_dir) && !dir.exists(output_dir))
     dir.create(output_dir, recursive = TRUE)
 
-  whole_cycles <- select_cycles * (selfing_cycles + 1L)
-
-  # Fixed-width fields for the compact generational IDs (C<cycle>F<family>_<child>):
-  # widths are sized to the run so IDs stay short, uniform and sortable. The
-  # family width follows the most families a cycle can make under the budget
-  # (parents-first: choose(top_founders, 2), unchanged).
-  fam_max <- max(2L, budget$n_families_max)
-  cyc_w   <- max(2L, nchar(as.character(whole_cycles)))
-  fam_w   <- max(2L, nchar(as.character(fam_max)))
-  ch_w    <- max(1L, nchar(as.character(num_offspring)))
-
-  # Scheme-specific knobs captured for the cycle helpers.
-  opts <- list(
-    selected_blocks   = selected_blocks,
-    select_top_blocks = select_top_blocks,
-    top_founders      = top_founders,
-    num_offspring     = num_offspring,
-    avoid_selfing     = avoid_selfing,
-    selection_unit    = selection_unit,
-    pair_budget       = budget,        # resolved budget (see .stk_selection_budget)
-    gbs_pair_level    = gbs_pair_level,
-    pair_freq         = pair_freq,
-    pair_penalty      = pair_penalty,
-    pair_pool         = pair_pool,
-    shortlist_k       = shortlist_k,
-    max_use           = max_use,
-    overshoot         = overshoot,
-    ts_pair_score     = ts_pair_score,
-    usefulness_k      = usefulness_k,
-    ohs_method        = ohs_method,
-    ohs_elite_ratio   = ohs_elite_ratio,
-    ohs_elite_level   = ohs_elite_level,
-    ohs_shortlist_families = ohs_shortlist_families,
-    gbs_method        = gbs_method,
-    gbs_objective     = gbs_spec$gbs_objective,
-    gbs_engine        = gbs_spec$gbs_engine,
-    penalty_mode      = gbs_spec$penalty_mode,
-    gbs_penalty       = gbs_spec$gbs_penalty,
-    penalty_scale     = gbs_spec$penalty_scale,
-    penalty_rank_scale = penalty_rank_scale,
-    gbs_effect_weight = gbs_spec$gbs_effect_weight,
-    ideal_scope       = ideal_scope,
-    founder_ideal     = NULL,          # filled below once the founder ideal exists
-    founder_blocks    = NULL,
-    select_priority   = select_priority,
-    construct_method  = construct_method,
-    k_penalty         = k_penalty,
-    max_kinship       = max_kinship,
-    freq_penalty_weight = freq_penalty_weight,
-    cross_backend     = cross_backend,
-    metrics           = metrics,
-    ploidy            = geno_meta$metadata$ploidy %||% 2L,
-    seed              = seed,
-    # Base dir for the genomicSimulation backend's transient scratch files. Kept
-    # under tempdir() (never output_dir, which may be on a synced/slow drive) and
-    # made unique per (rep, scheme) job in .run_one() so parallel workers don't
-    # clobber each other's gs_geno/map/eff trio. Unused by the block backend.
-    work_dir          = file.path(tempdir(), "stacking_gs_scratch"),
-    id_fmt_sample     = paste0("C%0", cyc_w, "dF%0", fam_w, "d_%0", ch_w, "d"),
-    id_fmt_cross      = paste0("C%0", cyc_w, "dF%0", fam_w, "d")
-  )
-
-  # Founder haplotype-level GEBV (baseline; drives the cycle-0 record).
-  founder_lg <- .stk_limit_blocks(
-    compute_profile_localgebv(geno_meta, effect_df, level = "haplotype"),
-    selected_blocks, select_top_blocks)
-  # Founder ideal-genotype target returned to the caller: only meaningful when GBS
-  # will use it for selection or d2ideal is measured; else NULL (metrics-only).
-  ideal_genotypes <- if ("GBS" %in% scheme || "d2ideal" %in% metrics)
-    construct_ideal_genotype(founder_lg, method = construct_method,
-                             k_penalty = k_penalty,
-                             select_priority = select_priority)
-  else NULL
-  # Founder-fixed scope: every cycle selects and measures against this table,
-  # and GBS selection is pinned to the founders' block set (see .stk_advance).
-  if (ideal_scope == "founder" && !is.null(ideal_genotypes)) {
-    opts$founder_ideal  <- ideal_genotypes
-    opts$founder_blocks <- unique(as.character(founder_lg$Block))
-  }
+  jobs   <- stk_jobs(spec)
+  n_jobs <- nrow(jobs)
 
   # The quick calculation of what `top_founders` implies per cycle.
-  if (verbose) message("Selection unit - ", .stk_budget_text(budget))
+  if (verbose) .hs_inform("Selection unit - ", .stk_budget_text(spec$budget))
 
-  # ── One (rep, scheme) run of the full route ───────────────────────────────
-  .run_one <- function(rep, sch) {
-    if (verbose) message("Scheme ", sch, " — replication ", rep, " / ", replications)
-    set.seed(seed + rep)
+  # Progress (X5): per generation when the jobs run here; per job when they
+  # run in workers (events fire as each job's record is collected).
+  use_parallel   <- .hs_parallel_ok(n_cores)
+  cycle_progress <- if (use_parallel) NULL else progress
+  job_trk <- .hs_progress_tracker(if (use_parallel) progress else NULL,
+                                  "simulation", "job", n_jobs)
 
-    # Isolate this job's genomicSimulation scratch files (no cross-worker clobber).
-    opts$work_dir <- file.path(opts$work_dir, paste0(sch, "_rep", rep))
-    if (opts$cross_backend == "genomicSimulation")
-      dir.create(opts$work_dir, showWarnings = FALSE, recursive = TRUE)
-
-    current     <- geno_meta
-    plan_recs   <- vector("list", whole_cycles + 1L)
-    summ_recs   <- vector("list", whole_cycles + 1L)
-
-    # Persistent genomicSimulation session for this (rep, scheme) job (FR1): opened
-    # lazily on the first gS cross, carried across all cycles + selfing generations,
-    # and freed on exit so no live group leaks (even if a cycle errors). NULL and a
-    # no-op for the block backend.
-    session <- NULL
-    on.exit(gs_close(session), add = TRUE)
-
-    # cycle-0 founder record (start_fam_record). Optional metrics measure the
-    # founder population; each is filled only when its token is in `metrics`.
-    wantm   <- function(m) m %in% metrics
-    f_ideal <- if (wantm("d2ideal"))
-      construct_ideal_genotype(founder_lg, method = construct_method,
-                               k_penalty = k_penalty,
-                               select_priority = select_priority)
-    else NULL
-    v0 <- .stk_total_gebv(founder_lg)
-    summ_recs[[1L]] <- data.table(
-      cycle = 0L, select_type = "founder", rep = rep, sel_scheme = sch,
-      mean_F1mean = mean(v0, na.rm = TRUE), var_F1mean = stats::var(v0, na.rm = TRUE),
-      max_F1mean = if (any(!is.na(v0))) max(v0, na.rm = TRUE) else NA_real_,
-      mean_D2Ideal = if (wantm("d2ideal"))
-        .distance_to_ideal(founder_lg, f_ideal, gbs_method = gbs_method)
-        else NA_real_,
-      mean_coancestry = if (wantm("coancestry"))
-        tryCatch(.stk_coancestry(geno_meta, dimnames(geno_meta$geno_arrays)[[1L]],
-                                 blocks = unique(as.character(founder_lg$Block))),
-                 error = function(e) NA_real_)
-        else NA_real_,
-      mean_gene_diversity = if (wantm("gene_diversity"))
-        tryCatch(as.numeric(compute_gene_diversity(geno_meta, level = "marker")),
-                 error = function(e) NA_real_)
-        else NA_real_,
-      mean_ideal_phenotype = if (is.null(f_ideal)) NA_real_
-        else as.numeric(attr(f_ideal, "ideal_phenotype")),
-      ideal_hap_gebv = if (wantm("ideal_hap_gebv"))
-        .stk_ideal_hap_gebv(founder_lg, ploidy = opts$ploidy) else NA_real_,
-      marker_size = dim(geno_meta$geno_arrays)[2L],
-      n_families = NA_integer_, n_parents_used = NA_integer_)
-
-    slot <- 1L
-    wc   <- 0L
-    step_time <- c(parent_gebv = 0, ideal = 0, selection = 0, crossing = 0,
-                   offspring_gebv = 0, metrics = 0)
-    for (cyc in seq_len(select_cycles)) {
-      # decision cycle: chosen scheme once ga_start_by reached, else truncation
-      sch_this <- if (cyc >= ga_start_by) sch else "TS"
-      wc   <- wc + 1L
-      slot <- slot + 1L
-      adv  <- .stk_advance(current, sch_this, effect_df, opts, wc, session = session)
-      step_time <- step_time + adv$timings
-      plan_recs[[slot]] <- .stk_plans_record(adv, sch_this, wc, rep, sch)
-      summ_recs[[slot]] <- .stk_summary_record(adv, sch_this, wc, rep, sch)
-      current <- adv$off
-      session <- adv$session
-
-      # intervening selfing generations advance under truncation (GS)
-      for (sf in seq_len(selfing_cycles)) {
-        wc   <- wc + 1L
-        slot <- slot + 1L
-        adv  <- .stk_advance(current, "TS", effect_df, opts, wc, session = session)
-        step_time <- step_time + adv$timings
-        plan_recs[[slot]] <- .stk_plans_record(adv, "selfing", wc, rep, sch)
-        summ_recs[[slot]] <- .stk_summary_record(adv, "selfing", wc, rep, sch)
-        current <- adv$off
-        session <- adv$session
-      }
-
-      # Progress line: cycle counter + the step consuming the most time so far, so
-      # a long run tells the user WHERE the time is going without waiting for the end.
-      if (verbose && cyc %% 10L == 0L) {
-        dom <- .STK_STEP_LABELS[[names(which.max(step_time))]]
-        message(sprintf("  %s rep %d: cycle %d / %d — %.0fs elapsed, dominant step: %s",
-                        sch, rep, cyc, select_cycles, sum(step_time), dom))
-      }
+  # ── One (rep, scheme) job: init -> step until done -> record ──────────────
+  run_job <- function(k) {
+    st <- stk_init(spec, geno_meta, job = k, .prep = prep)
+    on.exit(stk_close(st), add = TRUE)
+    if (verbose)
+      .hs_inform("Scheme ", st$scheme, " — replication ", st$rep, " / ",
+                 spec$replications)
+    while (identical(st$status, "running")) {
+      st <- stk_step(st, cycle_progress)
+      if (verbose) .stk_verbose_line(st)
     }
-
-    # End-of-job breakdown: which step took the majority of this (scheme, rep) run.
     if (verbose) {
-      summ <- .stk_timing_summary(sch, rep, step_time)
-      if (!is.null(summ)) message(summ)
+      summ <- .stk_timing_summary(st$scheme, st$rep, st$step_time)
+      if (!is.null(summ)) .hs_inform(summ)
     }
-
-    list(plans   = rbindlist(plan_recs),
-         summary = rbindlist(summ_recs),
-         final   = current,
-         key     = paste0(sch, "_rep", rep))
+    .stk_job_record(st, announce = FALSE)     # the wrapper announces once per code
   }
 
-  # ── Dispatch over the (rep x scheme) grid ─────────────────────────────────
-  grid <- expand.grid(rep = seq_len(replications), scheme = scheme,
-                      KEEP.OUT.ATTRS = FALSE, stringsAsFactors = FALSE)
-  n_jobs <- nrow(grid)
-
-  use_parallel <- n_cores > 1L &&
-    requireNamespace("future",       quietly = TRUE) &&
-    requireNamespace("future.apply", quietly = TRUE)
-  if (n_cores > 1L && !use_parallel)
-    warning("'future' and 'future.apply' required for n_cores > 1. ",
-            "Falling back to sequential execution.")
-
-  run_k <- function(k) .run_one(grid$rep[k], grid$scheme[k])
-
-  # Live monitor needs an output_dir to write into; announce and disable if absent.
+  # ── Harvest: the live monitor, the job progress event, the cancel ─────────
   live_on <- isTRUE(monitor)
   if (live_on && is.null(output_dir)) {
-    message("run_stacking_simulation: 'monitor = TRUE' needs 'output_dir'; ",
+    .hs_inform("run_stacking_simulation: 'monitor = TRUE' needs 'output_dir'; ",
             "live figures/tables are skipped.")
     live_on <- FALSE
   }
-  live_tag <- paste(unique(scheme), collapse = "-")
-
-  job_results <- vector("list", n_jobs)
-
-  if (live_on) {
-    # Harvest jobs as they resolve and refresh the record/figures after each one.
-    # The accumulated per-job outputs are exactly those used in the final combine
-    # below, so the return value is identical to a monitor = FALSE run.
-    acc_summ  <- vector("list", n_jobs)
-    acc_plans <- vector("list", n_jobs)
-    n_done    <- 0L
-    collect <- function(k, res) {
-      job_results[[k]] <<- res
-      acc_summ[[k]]    <<- res$summary
-      acc_plans[[k]]   <<- res$plans
-      n_done <<- n_done + 1L
+  live_tag  <- paste(unique(spec$scheme), collapse = "-")
+  records   <- vector("list", n_jobs)
+  n_done    <- 0L
+  done_so_far <- function()
+    stk_result(records[!vapply(records, is.null, logical(1L))], keep_populations)
+  on_job <- function(k, rec) {
+    records[[k]] <<- rec
+    n_done <<- n_done + 1L
+    if (live_on) {
       if (verbose)
-        message(sprintf("[%d/%d] %s rep %d done - mean_F1mean=%.4g",
-                        n_done, n_jobs, grid$scheme[k], grid$rep[k],
-                        mean(res$summary[cycle > 0L]$mean_F1mean, na.rm = TRUE)))
-      keep <- !vapply(acc_summ, is.null, logical(1L))
-      .stk_render_live(data.table::rbindlist(acc_summ[keep]),
-                       data.table::rbindlist(acc_plans[keep]),
+        .hs_inform(sprintf("[%d/%d] %s rep %d done - mean_F1mean=%.4g",
+                        n_done, n_jobs, rec$scheme, rec$rep,
+                        mean(rec$summary[cycle > 0L]$mean_F1mean, na.rm = TRUE)))
+      keep <- !vapply(records, is.null, logical(1L))
+      .stk_render_live(data.table::rbindlist(lapply(records[keep], `[[`, "summary")),
+                       data.table::rbindlist(lapply(records[keep], `[[`, "plans")),
                        output_dir, live_tag)
     }
-
-    if (use_parallel) {
-      oplan <- future::plan(future::multisession, workers = n_cores)
-      on.exit(future::plan(oplan), add = TRUE)
-      futs    <- lapply(seq_len(n_jobs),
-                        function(k) future::future(run_k(k), seed = NULL))
-      pending <- seq_len(n_jobs)
-      while (length(pending)) {
-        ready <- pending[vapply(futs[pending], future::resolved, logical(1L))]
-        if (length(ready)) {
-          for (k in ready) collect(k, future::value(futs[[k]]))
-          pending <- setdiff(pending, ready)
-        } else {
-          Sys.sleep(0.2)
-        }
-      }
-    } else {
-      for (k in seq_len(n_jobs)) collect(k, run_k(k))
-    }
-  } else if (use_parallel) {
-    oplan <- future::plan(future::multisession, workers = n_cores)
-    on.exit(future::plan(oplan), add = TRUE)
-    job_results <- future.apply::future_lapply(seq_len(n_jobs), run_k,
-                                               future.seed = NULL)
-  } else {
-    job_results <- lapply(seq_len(n_jobs), run_k)
+    if (identical(rec$status, "cancelled"))
+      .hs_abort("run_stacking_simulation: cancelled by the progress callback in ",
+                rec$scheme, " rep ", rec$rep, " after generation ", rec$generation,
+                " of ", rec$n_generations, ".", call. = FALSE,
+                class = "hs_error_cancelled",
+                data = list(partial = done_so_far(),
+                            at = list(unit = "cycle", i = rec$generation,
+                                      n = rec$n_generations, job = k)))
+    job_trk$tick(k, label = rec$key,
+                 payload = list(job = k, scheme = rec$scheme, rep = rec$rep,
+                                status = rec$status, elapsed = rec$elapsed),
+                 partial = done_so_far)
   }
 
-  # ── Combine ────────────────────────────────────────────────────────────────
-  plans   <- rbindlist(lapply(job_results, `[[`, "plans"))
-  summary <- rbindlist(lapply(job_results, `[[`, "summary"))
-  final_populations <- stats::setNames(
-    lapply(job_results, `[[`, "final"),
-    vapply(job_results, `[[`, character(1L), "key"))
+  # The caller's stream is left as it was (every job seeds itself, row 3). The
+  # jobs keep their own notes; whatever is raised outside them (the live
+  # monitor) is collected here (X4).
+  run <- .hs_with_notes(
+    .hs_keep_rng(.stk_dispatch(n_jobs, run_job, if (use_parallel) n_cores else 1L,
+                               on_job = on_job)),
+    muffle = TRUE)
 
-  # trajectories compat view (Rep/Cycle/Method/MeanGEBV/SDev/BlockCoverage)
-  trajectories <- summary[cycle > 0L, .(
-    Rep           = rep,
-    Cycle         = cycle,
-    Method        = sel_scheme,
-    MeanGEBV      = mean_F1mean,
-    SDev          = sqrt(var_F1mean),
-    BlockCoverage = NA_real_)]
+  res <- stk_result(records, keep_populations)
+  res$provenance$fun <- "run_stacking_simulation"
+  res$notes <- .stk_merge_notes(list(prep_run$notes, res$notes, run$notes))
 
-  # ── Write output ────────────────────────────────────────────────────────────
+  # ── Write output (row 10 a): only when a directory is named ───────────────
   if (!is.null(output_dir)) {
-    tag <- paste(unique(scheme), collapse = "-")
-    fwrite(plans,   file.path(output_dir, paste0("stacking_plans_",   tag, ".txt")),
-           sep = "\t")
-    fwrite(summary, file.path(output_dir, paste0("stacking_summary_", tag, ".txt")),
-           sep = "\t")
-    p <- tryCatch(
-      plot_simulation_trajectories(trajectories, trait_name = tag),
-      error = function(e) NULL)
-    if (!is.null(p))
-      tryCatch(
-        ggplot2::ggsave(file.path(output_dir, paste0("Trajectories_", tag, ".png")),
-                        p, width = 10, height = 5, dpi = 150),
-        error = function(e) NULL)
+    w <- .hs_with_notes(write_outputs(res, output_dir, overwrite = TRUE), muffle = TRUE)
+    res$notes <- .stk_merge_notes(list(res$notes, w$notes))
   }
 
-  list(
-    plans             = plans,
-    summary           = summary,
-    ideal_genotypes   = ideal_genotypes,
-    final_populations = final_populations,
-    trajectories      = trajectories
-  )
+  # One warning per note code for the whole run; the detail is hs_notes(res).
+  .stk_announce_notes(res$notes)
+
+  if (is.null(output_dir)) res else invisible(res)
+}
+
+# The 0.8.8 verbose progress line, once every 10 decision cycles (after that
+# cycle's selfing generations): the cycle counter and the step consuming the
+# most time so far, so a long run tells the user WHERE the time is going.
+.stk_verbose_line <- function(st) {
+  per <- st$spec$selfing_cycles + 1L
+  if (st$generation %% per != 0L) return(invisible(NULL))
+  cyc <- st$generation %/% per
+  if (cyc %% 10L != 0L) return(invisible(NULL))
+  dom <- .STK_STEP_LABELS[[names(which.max(st$step_time))]]
+  .hs_inform(sprintf("  %s rep %d: cycle %d / %d — %.0fs elapsed, dominant step: %s",
+                     st$scheme, st$rep, cyc, st$spec$select_cycles,
+                     sum(st$step_time), dom))
+  invisible(NULL)
 }

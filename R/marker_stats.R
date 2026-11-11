@@ -58,8 +58,11 @@
 # Dispatches to marker_allele_counts_cpp or the pure-R fallback; identical result.
 .marker_allele_counts <- function(arr, na_vals = character(0L),
                                    strip_blank = FALSE,
-                                   use_rcpp = .hs_use_rcpp("marker_allele_counts_cpp")) {
-  enc     <- .encode_marker_codes(arr, na_vals, strip_blank)
+                                   use_rcpp = .hs_use_rcpp("marker_allele_counts_cpp"),
+                                   enc = NULL) {
+  # `enc`: a pre-built .encode_marker_codes() result, so a caller that already
+  # encoded the array (compute_marker_stats(), cc/F19) does not encode twice.
+  if (is.null(enc)) enc <- .encode_marker_codes(arr, na_vals, strip_blank)
   markers <- dimnames(arr)[[2L]]
   n_mark  <- dim(arr)[2L]
   n_lev   <- length(enc$levels)
@@ -74,6 +77,36 @@
   }
   dimnames(counts) <- list(markers, enc$levels)
   counts
+}
+
+# Major / minor allele per marker from an [n_markers x n_levels] count matrix
+# (levels in dictionary = alphabetical order). The one tie rule (0.9.0,
+# decision-form row 16 a, D22):
+#   Minor = the least frequent observed allele; ties -> first in allele order
+#           (the same allele the dosage counts, so MAF and dosage agree)
+#   Major = the most frequent among the REMAINING observed alleles; ties ->
+#           first in allele order
+# so on an exact two-way tie Major != Minor (0.8.8 reported the same allele for
+# both). A monomorphic marker has Major only; no observed allele gives NA/NA.
+.hs_major_minor <- function(counts) {
+  n_mark <- nrow(counts)
+  levs   <- colnames(counts)
+  major  <- rep(NA_character_, n_mark)
+  minor  <- rep(NA_character_, n_mark)
+  if (length(levs) == 0L || n_mark == 0L)
+    return(list(Major = major, Minor = minor))
+  for (j in seq_len(n_mark)) {
+    cj  <- counts[j, ]
+    obs <- which(cj > 0L)
+    if (length(obs) == 0L) next
+    if (length(obs) == 1L) { major[j] <- levs[obs]; next }
+    i_min <- obs[which.min(cj[obs])]            # first in allele order on a tie
+    rest  <- setdiff(obs, i_min)
+    i_max <- rest[which.max(cj[rest])]          # first in allele order on a tie
+    minor[j] <- levs[i_min]
+    major[j] <- levs[i_max]
+  }
+  list(Major = major, Minor = minor)
 }
 
 
@@ -138,8 +171,8 @@
 #'
 #' Statistics are derived from a single integer-encoding pass over
 #' \code{geno_meta$geno_arrays} (\code{[n_samples x n_markers x ploidy]}) and reuse
-#' the internal counting kernels (\code{\link{.marker_allele_counts}},
-#' \code{\link{.marker_maf}}). Marker location and block membership are taken from
+#' the internal counting kernels (\code{.marker_allele_counts()},
+#' \code{.marker_maf()}). Marker location and block membership are taken from
 #' the GenoMeta map and block assignments.
 #'
 #' @param geno_meta A valid \code{GenoMeta} list (see \code{\link{new_geno_meta}}).
@@ -180,16 +213,26 @@
 #' }
 #'
 #' @seealso \code{\link{geno_meta_views}}, \code{\link{write_block_allele_sheet}}
+#' @section Major, minor and ploidy (0.9.0):
+#' One rule names the alleles (decision-form row 16 a): \code{Minor} is the
+#' least frequent observed allele, ties broken by allele order (so it is the
+#' allele the dosage counts and \code{MAF} agrees with it); \code{Major} is the
+#' most frequent of the remaining alleles, ties broken the same way. On an exact
+#' two-way tie the two therefore differ (0.8.8 reported the same allele for
+#' both). \code{MAF} is \code{1 - } the major-allele frequency from the same
+#' counts. \code{Het} is defined for diploid data only and is \code{NA} at any
+#' other ploidy; a dosage-coded container (\code{metadata$encoding ==
+#' "numeric"}) is read as one layer, so its \code{Missing_rate} is the true one.
+#'
 #' @export
 compute_marker_stats <- function(geno_meta, markers = NULL, output_file = NULL) {
-  if (!is_geno_meta(geno_meta))
-    stop("compute_marker_stats: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "compute_marker_stats", "geno_meta")
 
   arr <- geno_meta$geno_arrays
   if (!is.null(markers)) {
     keep <- dimnames(arr)[[2L]] %in% as.character(markers)
     if (!any(keep))
-      stop("compute_marker_stats: none of 'markers' are present in geno_meta.")
+      .hs_abort("compute_marker_stats: none of 'markers' are present in geno_meta.")
     arr <- arr[, keep, , drop = FALSE]
   }
   marker_names <- dimnames(arr)[[2L]]
@@ -199,20 +242,28 @@ compute_marker_stats <- function(geno_meta, markers = NULL, output_file = NULL) 
   # Encoding + missing tokens (all missingness decided in R, as elsewhere).
   enc_str <- geno_meta$metadata$encoding %||%
     detect_genotype_encoding(.meta_to_allele_matrix(geno_meta))
-  miss <- .missing_tokens(enc_str)
+  miss <- .missing_tokens(enc_str, .meta_extra_missing(geno_meta))
 
-  # Single integer-encoding pass; NA = missing.
-  codes  <- .encode_marker_codes(arr, na_vals = miss)$codes   # [n_samp x n_mark x ploidy]
+  # cc/F21: a dosage container ("numeric", the phantom second layer that P1
+  # retires) carries one real layer, so its cell count is n_samp x 1 and the
+  # missing rate no longer reads 0.5 on every marker.
+  eff_ploidy <- if (identical(enc_str, "numeric")) 1L else ploidy
+  if (eff_ploidy < ploidy) arr <- arr[, , seq_len(eff_ploidy), drop = FALSE]
+
+  # ONE integer-encoding pass (cc/F19); every statistic below reads it.
+  enc    <- .encode_marker_codes(arr, na_vals = miss)
+  codes  <- enc$codes                                   # [n_samp x n_mark x eff_ploidy]
   is_na  <- is.na(codes)
 
   # Missing / call rate and observed count per marker.
-  n_cells      <- n_samp * ploidy
+  n_cells      <- n_samp * eff_ploidy
   miss_cells   <- apply(is_na, 2L, sum)
   missing_rate <- miss_cells / n_cells
   n_obs        <- n_cells - miss_cells
 
-  # Observed heterozygosity (diploid only): scored samples whose two copies differ.
-  if (ploidy >= 2L) {
+  # Observed heterozygosity: diploid only (cc/F21) — scored samples whose two
+  # copies differ. NA for any other ploidy rather than a two-layer guess.
+  if (eff_ploidy == 2L) {
     l1 <- codes[, , 1L]; l2 <- codes[, , 2L]      # [n_samp x n_mark]
     if (n_mark == 1L) { l1 <- matrix(l1, n_samp, 1L); l2 <- matrix(l2, n_samp, 1L) }
     both_obs <- !is.na(l1) & !is.na(l2)
@@ -223,24 +274,14 @@ compute_marker_stats <- function(geno_meta, markers = NULL, output_file = NULL) 
     het <- rep(NA_real_, n_mark)
   }
 
-  # MAF (reuse the shared kernel-backed helper).
-  maf_all <- .marker_maf(geno_meta)
-  maf     <- unname(maf_all[marker_names])
-
-  # Major / minor allele from per-marker observed counts.
-  counts <- .marker_allele_counts(arr, na_vals = miss)   # [n_mark x n_lev]
-  levs   <- colnames(counts)
-  major  <- rep(NA_character_, n_mark)
-  minor  <- rep(NA_character_, n_mark)
-  if (length(levs) > 0L) {
-    for (j in seq_len(n_mark)) {
-      cj  <- counts[j, ]
-      obs <- which(cj > 0L)
-      if (length(obs) == 0L) next
-      major[j] <- levs[obs[which.max(cj[obs])]]
-      if (length(obs) >= 2L) minor[j] <- levs[obs[which.min(cj[obs])]]
-    }
-  }
+  # Per-marker allele counts from the same encoding; MAF = 1 - major frequency
+  # (the .marker_maf() rule, computed here from these counts, cc/F19); Major /
+  # Minor by the one tie rule (.hs_major_minor(), row 16 a).
+  counts <- .marker_allele_counts(arr, na_vals = miss, enc = enc)   # [n_mark x n_lev]
+  tot    <- rowSums(counts)
+  mx     <- if (ncol(counts) > 0L) apply(counts, 1L, max) else integer(nrow(counts))
+  maf    <- ifelse(tot > 0L, 1 - mx / tot, NA_real_)
+  mm_al  <- .hs_major_minor(counts)
 
   stats <- data.table::data.table(
     Marker       = marker_names,
@@ -248,15 +289,19 @@ compute_marker_stats <- function(geno_meta, markers = NULL, output_file = NULL) 
     Missing_rate = as.numeric(missing_rate),
     Call_rate    = as.numeric(1 - missing_rate),
     MAF          = as.numeric(maf),
-    Major        = major,
-    Minor        = minor,
+    Major        = mm_al$Major,
+    Minor        = mm_al$Minor,
     Het          = as.numeric(het))
 
-  # Location + block membership, in genomic order, via the shared views.
-  mm <- geno_meta_views(geno_meta)$marker_meta[
-    , .(Marker = marker, Chrom = chromosome, Pos = position, Block = block_id)]
+  # Location + block membership from the map and the block map directly
+  # (cc/F19): geno_meta_views() would melt the whole allele table for the same
+  # four fields.
+  mm <- .marker_locus_table(geno_meta)[, .(Marker, Chrom, Pos, Block)]
   stats <- merge(mm, stats, by = "Marker", all.y = TRUE, sort = FALSE)
-  data.table::setorder(stats, Chrom, Pos)
+  # 0.9.0 (row 29 a): the one natural chromosome order, then position
+  stats[, .chr_key := .hs_chrom_rank(Chrom)]
+  data.table::setorder(stats, .chr_key, Pos)
+  stats[, .chr_key := NULL]
   data.table::setcolorder(stats,
     c("Marker", "Chrom", "Pos", "Block", "N_obs", "Missing_rate",
       "Call_rate", "MAF", "Major", "Minor", "Het"))

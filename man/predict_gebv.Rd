@@ -40,8 +40,8 @@ name one. The trait also names the output column.}
 \code{\link{filter_geno_meta}}).}
 
 \item{center}{Centring mode applied to the allele effects:
-�\code{"none"}, �\code{"locus_mean"} or �\code{"allele_freq"}. See
-�\code{\link{compute_profile_localgebv}} for what each preserves.}
+\code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
+\code{\link{compute_profile_localgebv}} for what each preserves.}
 
 \item{center_by_freq}{Logical; mean-centre each allele effect by its
 population frequency before summing (forwarded to

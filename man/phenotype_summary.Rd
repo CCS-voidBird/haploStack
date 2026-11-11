@@ -16,7 +16,9 @@ data.frame (\code{Sample} + traits).}
 }
 \value{
 A data.frame with one row per trait and columns \code{Trait},
-\code{Mean}, \code{SD}, \code{Median}, \code{Skew}, \code{Min}, \code{Max},
+\code{Mean}, \code{SD}, \code{Median}, \code{Skew} (Pearson's second
+skewness coefficient without its factor 3, \code{(mean - median) / sd};
+a sign-and-size cue, not a moment-based skewness), \code{Min}, \code{Max},
 \code{N}.
 }
 \description{

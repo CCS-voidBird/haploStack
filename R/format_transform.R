@@ -10,7 +10,9 @@
 #'
 #' Takes the metadata list produced by \code{\link{process_genotype}} and
 #' reformats the genotype data to a different encoding, orientation, or
-#' output preset (e.g. SelectionTools → PLINK dosage).
+#' output preset (e.g. SelectionTools → PLINK dosage). Legacy layer: a
+#' translation to or from the \code{"selectiontools"} encoding warns
+#' (deprecated since 0.9.0; see \code{\link{st_convert}}).
 #'
 #' @param metadata           Named list from \code{\link{process_genotype}}.
 #' @param output_preset      Short-cut preset: \code{"ST"}, \code{"GS"},
@@ -34,6 +36,12 @@
 #'   \item{\code{map}}{data.frame formatted for the output preset/unit.}
 #' }
 #'
+#' @section Deprecated:
+#' Since 0.9.0 (warns on every call; removed in 0.10 with
+#' \code{\link{process_genotype}}). A \code{GenoMeta} is written by
+#' \code{\link{write_geno_meta}} or laid out by \code{\link{geno_meta_to_matrix}}.
+#' See \link{haploStack-deprecated}.
+#'
 #' @seealso \code{\link{process_genotype}}
 #'
 #' @examples
@@ -53,6 +61,8 @@ transform_genotype <- function(metadata,
                                 output_encode      = NULL,
                                 name_as_col        = NULL,
                                 output_pos_unit    = "bp") {
+  # Deprecated since 0.9.0 (row 27 a): the pre-GenoMeta layer. Removed in 0.10.
+  .hs_deprecated("transform_genotype()", "write_geno_meta() or geno_meta_to_matrix()", "0.9.0")
 
   if (is.null(output_char_dict)) output_char_dict <- metadata$char_dict
 
@@ -139,11 +149,12 @@ transform_genotype <- function(metadata,
 #'   is preserved.
 #' @param char_dict     Encoding dictionary (default:
 #'   \code{DEFAULT_ENCODING_DICT}).
-#' @param extend        Logical. When \code{TRUE} (default) fills in zero-effect
-#'   rows for any (Marker, Allele) combination missing from the file.
+#' @param extend        Deprecated since 0.9.0 and ignored: the zero-effect rows
+#'   it promised were never added (the branch needed a dictionary entry no
+#'   dictionary has). Supplying it warns.
 #'
 #' @return data.frame with columns \code{Marker}, \code{Allele},
-#'   \code{Effect} [, \code{Effect2}, ...].
+#'   \code{Effect}, optionally followed by \code{Effect2}, \code{Effect3}, ...
 #'
 #' @seealso \code{\link{transform_effects}}
 #'
@@ -164,11 +175,13 @@ read_effect_file <- function(path,
                               output_encode = NULL,
                               char_dict     = DEFAULT_ENCODING_DICT,
                               extend        = TRUE) {
-  if (!file.exists(path)) stop("read_effect_file: File not found: ", path)
+  if (!file.exists(path)) .hs_abort("read_effect_file: File not found: ", path)
   auto_header <- identical(header, "auto")
   if (!auto_header && !(isTRUE(header) || isFALSE(header)))
-    stop("read_effect_file: 'header' must be TRUE, FALSE or \"auto\".")
+    .hs_abort("read_effect_file: 'header' must be TRUE, FALSE or \"auto\".")
   if (identical(sep, "auto")) sep <- .effect_file_sep(path)
+  if (!missing(extend))
+    .hs_deprecated("extend", NULL, "0.9.0", what = "argument", fn = "read_effect_file")
 
   # Read as text, then coerce the effect columns back. The allele column (2)
   # must never be type-inferred: a table whose alleles are all "T" came back as
@@ -185,7 +198,7 @@ read_effect_file <- function(path,
     raw <- raw[-1L, , drop = FALSE]
     rownames(raw) <- NULL
     if (nrow(raw) == 0L)
-      stop("read_effect_file: ", path, " holds a header line and no effects.")
+      .hs_abort("read_effect_file: ", path, " holds a header line and no effects.")
   }
   if (ncol(raw) >= 3L)
     for (j in 3:ncol(raw))
@@ -195,8 +208,7 @@ read_effect_file <- function(path,
     effects_df    = raw,
     metadata      = NULL,
     output_encode = output_encode,
-    char_dict     = char_dict,
-    extend        = extend
+    char_dict     = char_dict
   )
 }
 
@@ -249,8 +261,8 @@ read_effect_file <- function(path,
 #'   \code{"selectiontools"}. When \code{NULL} the original encoding is
 #'   preserved.
 #' @param char_dict     Encoding dictionary.
-#' @param extend        When \code{TRUE} (default) adds zero-effect rows for
-#'   missing (Marker, Allele) combinations.
+#' @param extend        Deprecated since 0.9.0 and ignored (see
+#'   \code{\link{read_effect_file}}); supplying it warns.
 #'
 #' @return data.frame with columns \code{Marker}, \code{Allele},
 #'   \code{Effect} [, extra effect columns].
@@ -263,13 +275,15 @@ transform_effects <- function(effects_df,
                                char_dict     = NULL,
                                extend        = TRUE) {
 
+  if (!missing(extend))
+    .hs_deprecated("extend", NULL, "0.9.0", what = "argument", fn = "transform_effects")
   if (is.null(char_dict)) {
     char_dict <- if (!is.null(metadata$char_dict)) metadata$char_dict
                  else DEFAULT_ENCODING_DICT
   }
 
   df <- as.data.frame(effects_df, stringsAsFactors = FALSE)
-  if (ncol(df) < 3L) stop("transform_effects: need at least 3 columns.")
+  if (ncol(df) < 3L) .hs_abort("transform_effects: need at least 3 columns.")
 
   colnames(df)[1:3] <- c("Marker", "Allele", "Effect")
   extra_cols <- if (ncol(df) > 3L) seq(4L, ncol(df)) else integer(0L)
@@ -289,30 +303,6 @@ transform_effects <- function(effects_df,
     df$Allele <- as.character(translated)
   }
 
-  # Extend with zero rows for missing allele × marker combinations
-  if (extend && !is.null(char_dict[["valid_chars"]])) {
-    valid_states <- if (!is.null(output_encode) &&
-                        output_encode == "selectiontools")
-      as.character(unlist(char_dict[vapply(names(char_dict), function(k)
-        k %in% c("valid_nums","A","G","C","T"), logical(1L))]))
-    else char_dict[["valid_chars"]]
-
-    if (!is.null(valid_states) && length(valid_states) > 0L) {
-      all_markers <- unique(df$Marker)
-      fill_rows <- lapply(all_markers, function(m) {
-        present <- df$Allele[df$Marker == m]
-        missing  <- setdiff(valid_states, present)
-        if (length(missing) == 0L) return(NULL)
-        data.frame(Marker = m, Allele = missing, Effect = 0,
-                   stringsAsFactors = FALSE)
-      })
-      fill_df <- do.call(rbind, Filter(Negate(is.null), fill_rows))
-      if (!is.null(fill_df) && nrow(fill_df) > 0L) {
-        df <- rbind(df[, c("Marker","Allele","Effect")], fill_df)
-      }
-    }
-  }
-
   rownames(df) <- NULL
   df
 }
@@ -322,24 +312,29 @@ transform_effects <- function(effects_df,
 
 #' Build allele state translation map
 #' @keywords internal
+#' @noRd
 .eff_build_state_map <- function(from_encode, to_encode, char_dict) {
   from_encode <- .encode_arg(from_encode, "transform_effects")
   to_encode   <- .encode_arg(to_encode,   "transform_effects")
-  if (from_encode == "nucleotide" && to_encode == "selectiontools") {
-    m <- setNames(as.character(unlist(DEFAULT_ENCODING_DICT)),
-                  names(DEFAULT_ENCODING_DICT))
-    return(m)
+  if ("selectiontools" %in% c(from_encode, to_encode)) {
+    .st_gate("transform_effects", per_call = FALSE)       # C-6
+    .st_encoding_deprecated("transform_effects",
+                            what = paste0(from_encode, " -> ", to_encode),
+                            then = "this translation is kept only for the legacy process_genotype() layer")
   }
-  if (from_encode == "selectiontools" && to_encode == "nucleotide") {
-    return(REVERSED_ENCODING_DICT)
-  }
-  stop("transform_effects: unsupported encoding '", from_encode,
-       "' → '", to_encode, "'.")
+  # the adapter's two tables (C-6): one recode implementation
+  if (from_encode == "nucleotide" && to_encode == "selectiontools")
+    return(.ST_FROM_NUCLEOTIDE)
+  if (from_encode == "selectiontools" && to_encode == "nucleotide")
+    return(.ST_TO_NUCLEOTIDE)
+  .hs_abort("transform_effects: unsupported encoding '", from_encode,
+       "' \u2192 '", to_encode, "'.")
 }
 
 
 #' Format map for target preset / position unit
 #' @keywords internal
+#' @noRd
 .format_map_for_preset <- function(map_df, output_preset = NULL,
                                    output_pos_unit = "bp") {
   if (is.null(map_df)) return(NULL)
@@ -366,6 +361,7 @@ transform_effects <- function(effects_df,
 
 #' Placeholder for .genotype_translate (implemented in format_split.R)
 #' @keywords internal
+#' @noRd
 .genotype_translate <- function(geno_array, from_encode, to_encode,
                                 char_dict, minor_alleles = NULL) {
   # Implemented in format_split.R via translate_alleles()
@@ -376,6 +372,7 @@ transform_effects <- function(effects_df,
 
 #' Placeholder for .combine_genotype (implemented in format_split.R)
 #' @keywords internal
+#' @noRd
 .combine_genotype <- function(geno_array, map_df, sample_names,
                                output_preset, output_orientation,
                                output_split_char, output_encode,

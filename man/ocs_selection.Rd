@@ -39,7 +39,14 @@ objective: \eqn{score = GEBV - \lambda \cdot \Sigma (CurrentFreq -
 frequency-deviation penalty when \code{ideal_genotype_df} is supplied.
 Default \code{1}.}
 
-\item{seed}{Random seed. Default \code{42L}.}
+\item{seed}{Ignored since 0.9.0 and kept for compatibility:
+the greedy draws no random number, so the selection is the same for any
+seed. Up to 0.8.8 the function reseeded the caller's random stream
+(\code{set.seed(seed)}) on every call, which made the crossing draws
+after every OCS cycle of \code{\link{run_stacking_simulation}} restart
+from the same point, so OCS replicates within a run coincided and the
+caller's stream was reset. Both are gone; OCS numbers from 0.8.8 cannot be
+reproduced (form row 3).}
 }
 \value{
 A character vector of selected sample names.

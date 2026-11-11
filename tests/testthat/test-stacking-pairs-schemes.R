@@ -16,7 +16,7 @@ library(data.table)
 .pairs_fixture <- function(seed = 5L) {
   m <- sim_geno_meta(n_samples = 12L, n_markers = 24L, n_chrom = 2L,
                      block_size = 3L, seed = seed)
-  e <- sim_effect_df(dimnames(m$geno_arrays)[[2L]], alleles = c("1", "4"))
+  e <- sim_effect_df(dimnames(m$geno_arrays)[[2L]], alleles = c("A", "T"))
   list(meta = m, eff = e,
        lg = compute_profile_localgebv(m, e, level = "haplotype"))
 }
@@ -289,7 +289,8 @@ test_that("the driver runs 'pairs' with the genomicSimulation backend", {
     fx$meta, fx$eff, replications = 1L, select_cycles = 2L, top_founders = 4L,
     num_offspring = 2L, scheme = "TS", selection_unit = "pairs",
     pair_budget = "families", cross_backend = "genomicSimulation",
-    select_top_blocks = 50L, output_dir = NULL, verbose = FALSE)
+    select_top_blocks = 50L, output_dir = NULL, verbose = FALSE,
+    backend_opts = list(map_unit = "bp"))               # the simulated map is bp
   expect_true(all(res$summary[cycle > 0L]$n_families == 6L))
 })
 

@@ -58,7 +58,7 @@ grid of \code{penalty_scale} values (the fixed scale under
 \code{penalty_mode = "fixed"}, the cap of the dynamic scale under
 \code{"dynamic"}) with the base \code{gbs_penalty} held fixed, scoring each
 resulting parent set by its distance to the ideal genotype
-(\code{\link{.distance_to_ideal}}, lower is better). Scores are averaged over
+(\code{.distance_to_ideal()}, lower is better). Scores are averaged over
 \code{n_rep} candidate-pool subsamples to avoid overfitting a single
 realisation.
 }

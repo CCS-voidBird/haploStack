@@ -62,7 +62,7 @@
 compute_segment_ibs <- function(seg1, seg2, block_length = NULL,
                                 weight_by_length = FALSE) {
   if (length(seg1) != length(seg2))
-    stop("compute_segment_ibs: 'seg1' and 'seg2' must have equal length.")
+    .hs_abort("compute_segment_ibs: 'seg1' and 'seg2' must have equal length.")
 
   s1 <- as.character(seg1)
   s2 <- as.character(seg2)
@@ -73,7 +73,7 @@ compute_segment_ibs <- function(seg1, seg2, block_length = NULL,
   ratio <- sum(s1[comparable] == s2[comparable]) / n
   if (weight_by_length) {
     if (is.null(block_length))
-      stop("compute_segment_ibs: 'block_length' is required when ",
+      .hs_abort("compute_segment_ibs: 'block_length' is required when ",
            "weight_by_length = TRUE.")
     return(ratio * as.numeric(block_length))
   }
@@ -85,36 +85,18 @@ compute_segment_ibs <- function(seg1, seg2, block_length = NULL,
 # Internal — missing-allele tokens (encoding-aware)
 # ---------------------------------------------------------------------------
 
-# Allele strings to treat as missing (keyed on the source allele vocabulary).
-# The rule is per ALLELE, so a diploid cell written "00" or "--" is a missing
-# genotype by consequence — both copies land in this set — while a half-called
-# cell ("A0") keeps its observed allele and marks only the absent copy.
-#
-# For nucleotide data BOTH "0" (PLINK's missing code) and "-" (the canonical
-# missing character of DEFAULT_ENCODING_DICT, and HS_FILL_NA_DEFAULT) are
-# missing; "-" comes from the encoding-independent base set. Since 0.6.0 "0" is
-# missing for selectiontools too, where a 1/2/3/4-coded file writes it for an
-# absent call and never as a real allele code (Q21.a). It is kept for
-# numeric/dosage data, where 0 is a real genotype (homozygous reference) — that
-# exclusion is load-bearing, see normalise_missing_alleles().
-#
-# use_missing_chars() extends this per mode for the session (R/alphabet.R); the
-# built-in set below cannot be removed, only added to.
-#
-# Since 0.6.0 a container built by the package is already normalised, so this
-# set is legacy compatibility for hand-built or pre-0.6.0 containers, not the
-# mechanism that decides what is missing.
-.missing_tokens <- function(encoding) {
-  base <- c("", "NA", "N", "n", ".", "-")
-  if (identical(encoding, "nucleotide") ||
-      identical(encoding, "selectiontools")) base <- c(base, "0")
-  unique(c(base, .extra_missing_chars(encoding)))
-}
+# The missing-allele vocabulary (.missing_tokens(), .meta_extra_missing()) lives
+# in R/alphabet.R since 0.9.0. The rule is per ALLELE, so a diploid cell written
+# "00" or "--" is a missing genotype by consequence — both copies land in the
+# set — while a half-called cell ("A0") keeps its observed allele and marks only
+# the absent copy. Since 0.6.0 a container built by the package is already
+# normalised, so the set is legacy compatibility for hand-built or pre-0.6.0
+# containers, not the mechanism that decides what is missing.
 
 
 # Emit a progress message (to stderr) only when verbose is TRUE.
 .sim_msg <- function(verbose, ...) {
-  if (isTRUE(verbose)) message(sprintf(...))
+  if (isTRUE(verbose)) .hs_inform(sprintf(...))
   invisible(NULL)
 }
 
@@ -147,10 +129,10 @@ compute_segment_ibs <- function(seg1, seg2, block_length = NULL,
   } else {
     ped <- as.data.table(pedigree)
     if (!all(c("Sample", "Parent1", "Parent2") %in% names(ped)))
-      stop(".resolve_families: pedigree needs columns Sample, Parent1, Parent2.")
+      .hs_abort(".resolve_families: pedigree needs columns Sample, Parent1, Parent2.")
     pset <- lapply(seq_len(nrow(ped)), function(i) {
       p <- c(as.character(ped$Parent1[i]), as.character(ped$Parent2[i]))
-      sort(unique(p[!is.na(p) & nzchar(p) & p != "0"]))
+      .hs_sort(unique(p[!is.na(p) & nzchar(p) & p != "0"]))
     })
     keys <- vapply(pset, paste, collapse = "|", FUN.VALUE = character(1L))
     uk <- unique(keys[nzchar(keys)])
@@ -215,7 +197,7 @@ compute_segment_ibs <- function(seg1, seg2, block_length = NULL,
            "[similarity] encoding=%s | %d markers in %d blocks | ploidy=%d (num_hap/sample)",
            prof$encoding, nrow(mk_block), n_blocks, ploidy)
 
-  miss <- .missing_tokens(prof$encoding)
+  miss <- .missing_tokens(prof$encoding, .meta_extra_missing(gm))
   marker_names <- mk_block$marker
   long <- data.table::melt(
     prof$alleles[, c("Sample", "Haplotype_idx", marker_names), with = FALSE],
@@ -232,7 +214,7 @@ compute_segment_ibs <- function(seg1, seg2, block_length = NULL,
 
   fams <- .resolve_families(family_history, pedigree, prof$samples)
   if (isTRUE(attr(fams, "dropped")))
-    warning("compute similarity: one or more families had no genotyped ",
+    .hs_warn("compute similarity: one or more families had no genotyped ",
             "parent/offspring and were skipped.")
   if (length(fams) == 0L) {
     .sim_msg(verbose, "[similarity] no usable families after matching to ",
@@ -341,11 +323,10 @@ compute_segment_ibs <- function(seg1, seg2, block_length = NULL,
 compute_block_ibd <- function(geno_meta, family_history = NULL,
                               pedigree = NULL, blocks = NULL, threshold = 0.5,
                               verbose = FALSE) {
-  if (!is_geno_meta(geno_meta))
-    stop("compute_block_ibd: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "compute_block_ibd", "geno_meta")
   if (is.null(family_history)) family_history <- geno_meta$metadata$family_history
   if (is.null(family_history) && is.null(pedigree))
-    stop("compute_block_ibd: supply 'family_history' (or attach one via ",
+    .hs_abort("compute_block_ibd: supply 'family_history' (or attach one via ",
          "attach_family_history()) or a 'pedigree'.")
 
   .sim_msg(verbose, "[compute_block_ibd] starting...")
@@ -418,11 +399,10 @@ score_marker_signal <- function(geno_meta, family_history = NULL,
                                 n_signal = 1L, select_score = "final_mcc",
                                 verbose = FALSE) {
   mode <- match.arg(mode)
-  if (!is_geno_meta(geno_meta))
-    stop("score_marker_signal: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "score_marker_signal", "geno_meta")
   if (is.null(family_history)) family_history <- geno_meta$metadata$family_history
   if (is.null(family_history) && is.null(pedigree))
-    stop("score_marker_signal: supply 'family_history' (or attach one via ",
+    .hs_abort("score_marker_signal: supply 'family_history' (or attach one via ",
          "attach_family_history()) or a 'pedigree'.")
 
   .sim_msg(verbose, "[score_marker_signal] mode = %s; building comparisons...",
@@ -487,7 +467,7 @@ score_marker_signal <- function(geno_meta, family_history = NULL,
   # membership already carried by `detail`, so no extra map lookup is needed.
   n_signal <- suppressWarnings(as.integer(n_signal))
   if (is.na(n_signal) || n_signal < 0L)
-    stop("score_marker_signal: 'n_signal' must be a non-negative integer.")
+    .hs_abort("score_marker_signal: 'n_signal' must be a non-negative integer.")
   signal <- if (n_signal > 0L) {
     select_signal_markers(
       metrics, geno_meta = geno_meta,
@@ -543,9 +523,9 @@ compute_signal_metrics <- function(marker_table, geno_meta = NULL, maf = NULL,
                                    zero_division = 0, verbose = FALSE) {
   dt <- as.data.table(data.table::copy(marker_table))
   if (!all(c("TP", "FP", "TN", "FN") %in% names(dt)))
-    stop("compute_signal_metrics: 'marker_table' needs TP, FP, TN, FN columns.")
+    .hs_abort("compute_signal_metrics: 'marker_table' needs TP, FP, TN, FN columns.")
   if (is.null(maf) && is.null(geno_meta))
-    stop("compute_signal_metrics: supply 'geno_meta' or a named 'maf' vector.")
+    .hs_abort("compute_signal_metrics: supply 'geno_meta' or a named 'maf' vector.")
 
   zero_division <- as.numeric(zero_division)
   fill <- function(x) { x[!is.finite(x)] <- zero_division; x }
@@ -571,14 +551,14 @@ compute_signal_metrics <- function(marker_table, geno_meta = NULL, maf = NULL,
 
   if (is.null(maf)) maf <- .marker_maf(geno_meta)
   if (is.null(names(maf)))
-    stop("compute_signal_metrics: 'maf' must be a named vector (marker IDs).")
+    .hs_abort("compute_signal_metrics: 'maf' must be a named vector (marker IDs).")
   if (!"Marker" %in% names(dt))
-    stop("compute_signal_metrics: 'marker_table' needs a 'Marker' column to ",
+    .hs_abort("compute_signal_metrics: 'marker_table' needs a 'Marker' column to ",
          "join MAF.")
   dt[, MAF := unname(maf[as.character(Marker)])]
   n_no_maf <- sum(is.na(dt$MAF))
   if (n_no_maf > 0L)
-    warning("compute_signal_metrics: ", n_no_maf,
+    .hs_warn("compute_signal_metrics: ", n_no_maf,
             " marker(s) have no MAF; set to 0 (their final_* scores become 0).")
   dt[is.na(MAF), MAF := 0]
 
@@ -660,13 +640,13 @@ select_signal_markers <- function(metrics, geno_meta = NULL,
   ties <- match.arg(ties)
   n    <- suppressWarnings(as.integer(n))
   if (is.na(n) || n < 1L)
-    stop("select_signal_markers: 'n' must be a positive integer.")
+    .hs_abort("select_signal_markers: 'n' must be a positive integer.")
 
   dt <- as.data.table(data.table::copy(metrics))
   if (!"Marker" %in% names(dt))
-    stop("select_signal_markers: 'metrics' needs a 'Marker' column.")
+    .hs_abort("select_signal_markers: 'metrics' needs a 'Marker' column.")
   if (!score %in% names(dt))
-    stop("select_signal_markers: score column '", score,
+    .hs_abort("select_signal_markers: score column '", score,
          "' not found in 'metrics'.")
   dt[, Marker := as.character(Marker)]
   dt[, score_val := as.numeric(get(score))]
@@ -681,12 +661,12 @@ select_signal_markers <- function(metrics, geno_meta = NULL,
   bmm <- block_marker_map %||%
     (if (!is.null(geno_meta)) geno_meta$block_marker_map_info else NULL)
   if (is.null(bmm))
-    stop("select_signal_markers: no marker->block map; supply ",
+    .hs_abort("select_signal_markers: no marker->block map; supply ",
          "'block_marker_map' or a 'geno_meta' carrying block_marker_map_info ",
          "(see attach_block_info()).")
   bmm <- as.data.table(bmm)
   if (!all(c("Marker", "Block") %in% names(bmm)))
-    stop("select_signal_markers: 'block_marker_map' needs Marker and Block ",
+    .hs_abort("select_signal_markers: 'block_marker_map' needs Marker and Block ",
          "columns.")
   bmm <- bmm[, .(Marker = as.character(Marker), Block = as.character(Block))]
   if ("Block" %in% names(dt)) dt[, Block := NULL]
@@ -714,7 +694,7 @@ select_signal_markers <- function(metrics, geno_meta = NULL,
     maf      = if ("MAF" %in% names(sel)) -as.numeric(MAF) else as.numeric(Pos),
     first    = seq_len(.N))]
   if (ties == "maf" && !"MAF" %in% names(sel))
-    warning("select_signal_markers: ties = 'maf' but 'metrics' has no MAF ",
+    .hs_warn("select_signal_markers: ties = 'maf' but 'metrics' has no MAF ",
             "column; falling back to position.")
   data.table::setorderv(sel, c("Block", "score_val", "tie_key", "Marker"),
                         c(1L, -1L, 1L, 1L), na.last = TRUE)
@@ -767,17 +747,16 @@ select_signal_markers <- function(metrics, geno_meta = NULL,
 #' @seealso \code{\link{select_signal_markers}}, \code{\link{get_signal_markers}}
 #' @export
 attach_signal_markers <- function(geno_meta, signal, overwrite = TRUE) {
-  if (!is_geno_meta(geno_meta))
-    stop("attach_signal_markers: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "attach_signal_markers", "geno_meta")
 
   # block_info is optional on a GenoMeta (a block map alone is enough for most
   # of the package), so derive the coordinate table when it is missing rather
   # than making the caller run attach_block_info() first.
   if (is.null(geno_meta$block_info)) {
     if (is.null(geno_meta$block_marker_map_info))
-      stop("attach_signal_markers: 'geno_meta' has no block information; call ",
+      .hs_abort("attach_signal_markers: 'geno_meta' has no block information; call ",
            "attach_block_info() first.")
-    message("attach_signal_markers: no block_info on the GenoMeta — derived it ",
+    .hs_inform("attach_signal_markers: no block_info on the GenoMeta \u2014 derived it ",
             "from block_marker_map_info.")
     geno_meta$block_info <- as.data.frame(
       .compute_block_location(geno_meta$block_marker_map_info,
@@ -787,7 +766,7 @@ attach_signal_markers <- function(geno_meta, signal, overwrite = TRUE) {
 
   sig <- as.data.table(data.table::copy(signal))
   if (!all(c("Block", "Marker") %in% names(sig)))
-    stop("attach_signal_markers: 'signal' needs Block and Marker columns ",
+    .hs_abort("attach_signal_markers: 'signal' needs Block and Marker columns ",
          "(see select_signal_markers()).")
   if (!"signal_rank" %in% names(sig)) sig[, signal_rank := seq_len(.N), by = Block]
   if (!"score_val"   %in% names(sig)) sig[, score_val := NA_real_]
@@ -795,13 +774,13 @@ attach_signal_markers <- function(geno_meta, signal, overwrite = TRUE) {
   bi   <- as.data.frame(geno_meta$block_info, stringsAsFactors = FALSE)
   cols <- .signal_marker_cols()
   if (!isTRUE(overwrite) && any(cols %in% names(bi)))
-    stop("attach_signal_markers: 'geno_meta' already carries a signal-marker ",
+    .hs_abort("attach_signal_markers: 'geno_meta' already carries a signal-marker ",
          "selection and overwrite = FALSE.")
 
   unknown <- setdiff(unique(sig$Block), as.character(bi$Block))
   if (length(unknown) > 0L) {
-    warning("attach_signal_markers: ", length(unknown),
-            " block(s) in 'signal' absent from block_info — dropped: ",
+    .hs_warn("attach_signal_markers: ", length(unknown),
+            " block(s) in 'signal' absent from block_info \u2014 dropped: ",
             paste(utils::head(unknown, 5L), collapse = ", "),
             if (length(unknown) > 5L) " ..." else "")
     sig <- sig[Block %in% as.character(bi$Block)]
@@ -819,27 +798,17 @@ attach_signal_markers <- function(geno_meta, signal, overwrite = TRUE) {
   bi$Signal_Score  <- packed$Signal_Score[idx]
   bi$N_Signal      <- ifelse(is.na(idx), 0L, packed$N_Signal[idx])
 
-  meta <- geno_meta$metadata
-  meta$signal_selection <- list(
-    score    = attr(signal, "score") %||% NA_character_,
-    n        = attr(signal, "n") %||% max(sig$signal_rank, 0L),
-    n_blocks = nrow(packed),
-    date     = format(Sys.Date()))
-
-  out <- new_geno_meta(
-    geno_arrays           = geno_meta$geno_arrays,
-    map_info              = geno_meta$map_info,
-    block_info            = bi,
-    block_marker_map_info = geno_meta$block_marker_map_info,
-    metadata              = meta,
-    sample_info           = geno_meta$sample_info,
-    marker_effects        = geno_meta$marker_effects,
-    phenotype             = geno_meta$phenotype
-  )
   # The block definitions are unchanged (only Signal_* columns were added), so
-  # a stored block annotation stays valid (#033).
-  out$annotation <- geno_meta$annotation
-  out
+  # everything else is forwarded (one rebuild path, 0.9.0). No timestamp in
+  # the record: containers built from the same inputs stay identical().
+  .rebuild_geno_meta(
+    geno_meta,
+    block_info = bi,
+    metadata   = list(signal_selection = list(
+      score    = attr(signal, "score") %||% NA_character_,
+      n        = attr(signal, "n") %||% max(sig$signal_rank, 0L),
+      n_blocks = nrow(packed))),
+    .caller = "attach_signal_markers")
 }
 
 
@@ -900,8 +869,8 @@ get_signal_markers <- function(geno_meta, long = TRUE) {
   if (length(gone) == 0L) return(block_info)
 
   kept <- sel[!Marker %in% gone]
-  message(caller, ": ", length(gone),
-          " signal marker(s) no longer in the panel — dropped from block_info.")
+  .hs_inform(caller, ": ", length(gone),
+          " signal marker(s) no longer in the panel \u2014 dropped from block_info.")
 
   if (nrow(kept) == 0L) {
     block_info$Signal_Marker <- NA_character_
@@ -934,7 +903,7 @@ get_signal_markers <- function(geno_meta, long = TRUE) {
   markers <- dimnames(arr)[[2L]]
   enc <- geno_meta$metadata$encoding %||%
     detect_genotype_encoding(.meta_to_allele_matrix(geno_meta))
-  miss <- .missing_tokens(enc)
+  miss <- .missing_tokens(enc, .meta_extra_missing(geno_meta))
 
   # Per-marker allele counts (missing tokens resolved in R); MAF = 1 - major
   # allele frequency. Markers with no observed allele stay NA.

@@ -8,30 +8,30 @@
 #' Detect genotype encoding format
 #'
 #' Samples up to 100 non-NA values from a genotype matrix and classifies the
-#' encoding as one of \code{"selectiontools"} (slash-separated numeric, e.g.
-#' \code{"1/4"}), \code{"nucleotide"} (e.g. \code{"A/T"} or \code{"AT"}), or
-#' \code{"numeric"} (dosage counts 0/1/2).
+#' encoding as \code{"nucleotide"} (allele labels, e.g. \code{"A/T"} or
+#' \code{"AT"}) or \code{"numeric"} (dosage counts 0/1/2). Slash-separated
+#' integer codes (\code{"1/4"}, \code{"1/-1"}) are SelectionTools' allele
+#' encoding, which a \code{GenoMeta} no longer stores (0.9.0): they are
+#' refused with an \code{hs_error_format} that names
+#' \code{\link{st_convert}} and the two declarations that resolve the
+#' ambiguity (\code{encoding = "selectiontools"} to translate the codes,
+#' \code{encoding = "nucleotide"} to keep digits as labels).
 #'
 #' @param geno_data A matrix, data.frame, or data.table. Values should be
 #'   genotype call strings. Either orientation (markers × samples or samples ×
 #'   markers) is accepted.
 #'
-#' @return A character scalar: \code{"selectiontools"}, \code{"nucleotide"}, or
-#'   \code{"numeric"}.
+#' @return A character scalar: \code{"nucleotide"} or \code{"numeric"}.
 #'
 #' @details
 #' Detection priority:
 #' 1. If >50 % of sampled values contain \code{"/"} and the allele parts are
-#'    all numeric → \code{"selectiontools"}.
+#'    all numeric → SelectionTools codes: refused (see above).
 #' 2. If >50 % contain \code{"/"} and allele parts are alphabetic → \code{"nucleotide"}.
 #' 3. If no slash but >50 % contain A/G/C/T characters → \code{"nucleotide"}.
 #' 4. If values are simple integers 0/1/2 → \code{"numeric"}.
 #'
 #' @examples
-#' # SelectionTools format
-#' detect_genotype_encoding(matrix(c("1/1", "1/4", "4/4", "-1/-1"), 2))
-#' # => "selectiontools"
-#'
 #' # Nucleotide format
 #' detect_genotype_encoding(matrix(c("A/A", "A/T", "T/T"), 1))
 #' # => "nucleotide"
@@ -40,8 +40,22 @@
 #' detect_genotype_encoding(matrix(c(0, 1, 2, 1), 2))
 #' # => "numeric"
 #'
+#' # SelectionTools codes are refused, naming st_convert()
+#' try(detect_genotype_encoding(matrix(c("1/1", "1/4", "4/4", "-1/-1"), 2)))
+#'
 #' @export
 detect_genotype_encoding <- function(geno_data) {
+  enc <- .detect_encoding(geno_data)
+  if (identical(enc, "selectiontools")) .st_refuse_codes("detect_genotype_encoding")
+  enc
+}
+
+# The detector proper. Still returns "selectiontools" for slash-separated
+# integer codes, so the portal (new_geno_meta()), build_geno_meta() and the
+# legacy process_genotype() layer can tell codes from labels; the exported
+# wrapper above refuses that verdict.
+# @keywords internal
+.detect_encoding <- function(geno_data) {
   if (is.data.frame(geno_data) || inherits(geno_data, "data.table")) {
     geno_mat <- as.matrix(geno_data)
   } else {
@@ -52,7 +66,7 @@ detect_genotype_encoding <- function(geno_data) {
   all_vals <- all_vals[!is.na(all_vals) & nzchar(all_vals) & all_vals != "NA"]
 
   if (length(all_vals) == 0L) {
-    stop("detect_genotype_encoding: No non-NA genotype values found.")
+    .hs_abort("detect_genotype_encoding: No non-NA genotype values found.")
   }
 
   # Classify on the calls, not the absences. A cell whose every allele is a
@@ -65,8 +79,9 @@ detect_genotype_encoding <- function(geno_data) {
   # everything the unfiltered values are used instead.
   all_vals <- .drop_all_missing_cells(all_vals)
 
-  set.seed(42L)
-  sampled <- sample(all_vals, min(100L, length(all_vals)))
+  # A fixed local seed keeps the verdict reproducible; the caller's own
+  # random stream is restored afterwards (R/state.R).
+  sampled <- .with_seed(42L, sample(all_vals, min(100L, length(all_vals))))
 
   has_slash  <- grepl("/", sampled, fixed = TRUE)
 
@@ -86,7 +101,7 @@ detect_genotype_encoding <- function(geno_data) {
   nums <- suppressWarnings(as.numeric(trimws(sampled)))
   if (mean(!is.na(nums)) > 0.5) return("numeric")
 
-  stop(
+  .hs_abort(
     "detect_genotype_encoding: Unable to determine encoding. ",
     "Sample values: ", paste(head(sampled, 5L), collapse = ", ")
   )
@@ -136,6 +151,7 @@ detect_genotype_encoding <- function(geno_data) {
 #' @param map_info  Optional map data frame (one row per marker).
 #' @return Integer: \code{1L} (rows = samples) or \code{2L} (rows = markers).
 #' @keywords internal
+#' @noRd
 .detect_orientation <- function(df, map_info = NULL) {
   if (!is.null(map_info)) {
     n_markers <- nrow(map_info)
@@ -159,6 +175,7 @@ detect_genotype_encoding <- function(geno_data) {
 #' @param char_dict  Encoding dictionary; used to identify missing value codes.
 #' @return Named character vector: marker name → minor allele (as stored).
 #' @keywords internal
+#' @noRd
 .detect_minor_alleles <- function(geno_array,
                                   encode    = "nucleotide",
                                   char_dict = DEFAULT_ENCODING_DICT) {
@@ -203,6 +220,12 @@ detect_genotype_encoding <- function(geno_data) {
 # split_haplotypes()'s detected one — so an ST preset produced "selectiontools"
 # and then handed it to translate_alleles(), which only knew "number". That is
 # what broke the transform_genotype() round-trip example. One vocabulary now.
+#
+# 0.9.0 (C-5): "selectiontools" is no longer a vocabulary the container
+# stores — a GenoMeta holds nucleotide alleles (and dosage). The token stays
+# accepted here for the legacy process_genotype() / translate_alleles() layer
+# (deprecated, warns) and for the declared-encoding deprecation rung of the
+# builders; it joins .HS_ENCODING_REMOVED in 0.10.
 HS_ENCODINGS <- c("selectiontools", "nucleotide", "allele")
 
 # Tokens removed in 0.5.1, mapped to what replaced them, so a caller still on
@@ -225,13 +248,13 @@ HS_ENCODINGS <- c("selectiontools", "nucleotide", "allele")
   if (is.null(x)) return(NULL)
   x <- as.character(x)
   if (length(x) != 1L || is.na(x))
-    stop(what, ": encoding must be a single string, one of ",
+    .hs_abort(what, ": encoding must be a single string, one of ",
          paste0('"', allowed, '"', collapse = ", "), ".")
   if (x %in% names(.HS_ENCODING_REMOVED))
-    stop(what, ": encoding \"", x, "\" was removed in 0.5.1 — use \"",
+    .hs_abort(what, ": encoding \"", x, "\" was removed in 0.5.1 \u2014 use \"",
          .HS_ENCODING_REMOVED[[x]], "\" instead.")
   if (x %in% allowed || !strict) return(x)
-  stop(what, ": unknown encoding \"", x, "\". Use one of ",
+  .hs_abort(what, ": unknown encoding \"", x, "\". Use one of ",
        paste0('"', allowed, '"', collapse = ", "), ".")
 }
 
@@ -251,6 +274,7 @@ HS_ENCODINGS <- c("selectiontools", "nucleotide", "allele")
 #' @return Named list with elements \code{orientation}, \code{split_char},
 #'   \code{encode}.
 #' @keywords internal
+#' @noRd
 .resolve_preset <- function(preset, orientation, split_char, encode) {
   encode <- .encode_arg(encode, ".resolve_preset")
   if (is.null(preset)) {
@@ -268,7 +292,7 @@ HS_ENCODINGS <- c("selectiontools", "nucleotide", "allele")
 
   p <- preset_map[[toupper(preset)]]
   if (is.null(p)) {
-    stop(".resolve_preset: Unknown preset '", preset,
+    .hs_abort(".resolve_preset: Unknown preset '", preset,
          "'. Choose from: ST, GS, MA, PL.")
   }
   list(
@@ -278,11 +302,4 @@ HS_ENCODINGS <- c("selectiontools", "nucleotide", "allele")
   )
 }
 
-# Null-coalescing helper (not exported)
-`%||%` <- function(a, b) if (is.null(a)) b else a
 
-
-# .resolve_geno_spec() lived here until 0.5.1. It was dead code — nothing in the
-# package called it — and it carried a third copy of the retired "char"/"number"
-# vocabulary, so removing the vocabulary removed it too. Its live replacement is
-# resolve_geno_format() / GENO_FORMAT_PRESETS in format_helper.R.

@@ -29,7 +29,7 @@ po_meta <- function(n_samples = 6L, seed = 11L) {
                       n_chrom = 2L, block_size = 4L, seed = seed)
   mk <- dimnames(m$geno_arrays)[[2L]]
   m$marker_effects <- list(
-    Yield = sim_effect_df(mk, alleles = c("1", "4"), seed = 3L))
+    Yield = sim_effect_df(mk, alleles = c("A", "T"), seed = 3L))
   m
 }
 

@@ -12,9 +12,10 @@ library(haploStack)
 
 # ── detect_genotype_encoding ──────────────────────────────────────────────────
 
-test_that("detect_genotype_encoding correctly identifies SelectionTools format", {
+test_that("detect_genotype_encoding refuses SelectionTools codes (0.9.0, C-5)", {
   geno <- matrix(c("1/1","1/4","4/4","-1/-1"), nrow = 2)
-  expect_equal(detect_genotype_encoding(geno), "selectiontools")
+  expect_error(detect_genotype_encoding(geno), class = "hs_error_format")
+  expect_equal(haploStack:::.detect_encoding(geno), "selectiontools")
 })
 
 test_that("detect_genotype_encoding correctly identifies nucleotide slash format", {
@@ -38,8 +39,8 @@ test_that("detect_genotype_encoding handles nucleotide no-slash format", {
 })
 
 test_that("detect_genotype_encoding accepts data.frame input", {
-  df <- as.data.frame(matrix(c("1/1","4/4"), nrow = 1))
-  expect_equal(detect_genotype_encoding(df), "selectiontools")
+  df <- as.data.frame(matrix(c("A/A","T/T"), nrow = 1))
+  expect_equal(detect_genotype_encoding(df), "nucleotide")
 })
 
 # ── split_haplotypes ──────────────────────────────────────────────────────────
@@ -100,9 +101,11 @@ test_that("combine_haplotypes respects output_orientation = 2", {
 # ── translate_alleles ─────────────────────────────────────────────────────────
 
 test_that("translate_alleles converts nucleotide to selectiontools correctly", {
+  withr::local_options(list(haploStack.st_formats = TRUE))        # 0.9.0, C-6
   arr <- array(c("A","T","T","A"), dim = c(1,2,2),
                dimnames = list("S1", c("M1","M2"), c("H1","H2")))
-  out <- translate_alleles(arr, "nucleotide", "selectiontools")
+  expect_warning(out <- translate_alleles(arr, "nucleotide", "selectiontools"),
+                 class = "hs_warning_deprecated")             # 0.9.0, C-5
   expect_equal(as.character(out["S1","M1","H1"]), "1")  # A → 1
   expect_equal(as.character(out["S1","M1","H2"]), "4")  # T → 4
 })
@@ -114,8 +117,9 @@ test_that("translate_alleles returns unchanged array when encodings match", {
 })
 
 test_that("translate_alleles converts selectiontools to nucleotide correctly", {
+  withr::local_options(list(haploStack.st_formats = TRUE))        # 0.9.0, C-6
   arr <- array(c("1","4"), dim = c(1,1,2))
-  out <- translate_alleles(arr, "selectiontools", "nucleotide")
+  out <- suppressWarnings(translate_alleles(arr, "selectiontools", "nucleotide"))
   expect_equal(as.character(out[1,1,1]), "A")  # 1 → A
   expect_equal(as.character(out[1,1,2]), "T")  # 4 → T
 })
@@ -142,7 +146,8 @@ test_that("the removed encoding tokens error, naming their replacement", {
                'use "selectiontools"')
   expect_error(build_geno_meta(geno, map, encoding = "char"),
                'use "nucleotide"')
-  expect_error(process_genotype(geno, encode = "number"),
+  expect_error(suppressWarnings(process_genotype(geno, encode = "number"),
+                                classes = "hs_warning_deprecated"),   # row 27 a
                'use "selectiontools"')
 
   # An unknown (never-supported) token is a different, plainer error.
@@ -153,24 +158,32 @@ test_that("the removed encoding tokens error, naming their replacement", {
 test_that("build_geno_meta stores an encoding geno_meta_views() accepts", {
   # The 0.5.1 fix: metadata$encoding is now always from the canonical
   # vocabulary, so the views layer can consume whatever build_geno_meta emits.
-  geno <- matrix(c("1/1", "1/4", "4/4", "1/1"), nrow = 2L,
+  # Since 0.9.0 (C-5) that vocabulary is nucleotide / numeric; a declared
+  # "selectiontools" is translated (with a deprecation warning).
+  geno <- matrix(c("A/A", "A/T", "T/T", "A/A"), nrow = 2L,
                  dimnames = list(c("S1", "S2"), c("M1", "M2")))
   map  <- data.frame(Chrom = c("1", "1"), Marker = c("M1", "M2"),
                      Pos = c(1e6, 2e6), stringsAsFactors = FALSE)
   # list(), not c(), so the NULL (auto-detect) case is actually exercised.
-  for (enc in list("selectiontools", NULL)) {
+  for (enc in list("nucleotide", NULL)) {
     meta <- suppressMessages(build_geno_meta(geno, map, encoding = enc))
-    expect_true(meta$metadata$encoding %in%
-                  c("selectiontools", "nucleotide", "numeric"))
+    expect_true(meta$metadata$encoding %in% c("nucleotide", "numeric"))
     expect_no_error(geno_meta_views(meta))
   }
+  codes <- matrix(c("1/1", "1/4", "4/4", "1/1"), nrow = 2L,
+                  dimnames = list(c("S1", "S2"), c("M1", "M2")))
+  withr::local_options(list(haploStack.st_formats = TRUE))        # 0.9.0, C-6
+  expect_warning(meta <- suppressMessages(build_geno_meta(codes, map, encoding = "selectiontools")),
+                 class = "hs_warning_deprecated")
+  expect_identical(meta$metadata$encoding, "nucleotide")
+  expect_no_error(geno_meta_views(meta))
 })
 
 # ── transform_effects ─────────────────────────────────────────────────────────
 
 test_that("transform_effects standardises column names by position", {
   df <- data.frame(x = c("M1","M1"), y = c("A","T"), z = c(0.5,-0.5))
-  out <- transform_effects(df, extend = FALSE)
+  out <- transform_effects(df)
   expect_true("Marker" %in% names(out))
   expect_true("Allele" %in% names(out))
   expect_true("Effect" %in% names(out))
@@ -178,7 +191,7 @@ test_that("transform_effects standardises column names by position", {
 
 test_that("transform_effects coerces Effect to numeric", {
   df <- data.frame(Marker = "M1", Allele = "A", Effect = "0.5")
-  out <- transform_effects(df, extend = FALSE)
+  out <- transform_effects(df)
   expect_type(out$Effect, "double")
 })
 
@@ -413,9 +426,9 @@ test_that("read_vcf_genotype errors on non-existent file", {
 # ── build_geno_meta automatic marker intersection (geno ∩ map) ────────────────
 
 .bgm_geno <- matrix(
-  c("1/1","1/4","4/4","1/1",
-    "4/4","1/4","1/1","4/4",
-    "1/1","1/1","4/4","1/4"),
+  c("A/A","A/T","T/T","A/A",
+    "T/T","A/T","A/A","T/T",
+    "A/A","A/A","T/T","A/T"),
   nrow = 3L, byrow = TRUE,
   dimnames = list(c("S1","S2","S3"), c("M1","M2","M3","M4"))
 )
@@ -491,9 +504,9 @@ test_that("read_genotype delegates marker intersection to build_geno_meta", {
                "M3\t2\t3000000"), map_tmp)
 
   # ST preset: markers as rows, slash-separated SelectionTools cells,
-  # map column order Marker | Chrom | Pos.
+  # map column order Marker | Chrom | Pos. Gated since 0.9.0 (C-5).
   gm <- suppressMessages(suppressWarnings(
-    read_genotype(geno_tmp, map_file = map_tmp, preset = "ST")))
+    read_genotype(geno_tmp, map_file = map_tmp, preset = "ST", st_formats = TRUE)))
   expect_true(is_geno_meta(gm))
   expect_setequal(dimnames(gm$geno_arrays)[[2L]], c("M1","M2","M3"))
   expect_equal(dim(gm$geno_arrays)[1L], 3L)          # 3 samples
@@ -577,8 +590,8 @@ test_that("write_geno_meta round-trips through a preset (ST)", {
                "M3\t2\t3000000"), map_tmp)
 
   gm <- suppressMessages(suppressWarnings(
-    read_genotype(geno_tmp, map_file = map_tmp, preset = "ST")))
-  res <- suppressMessages(write_geno_meta(gm, out_tmp, preset = "ST"))
+    read_genotype(geno_tmp, map_file = map_tmp, preset = "ST", st_formats = TRUE)))
+  res <- suppressMessages(write_geno_meta(gm, out_tmp, preset = "ST", st_formats = TRUE))
   expect_true(file.exists(out_tmp))
   # ST output is marker-as-row: 3 markers + 1 header row
   back <- read.csv(out_tmp, check.names = FALSE, stringsAsFactors = FALSE)

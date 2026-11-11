@@ -52,6 +52,14 @@ that collectively maximise a composite objective: (a) total block coverage
 optionally (b) alignment of carrier frequencies with ideal target
 frequencies.
 }
+\section{Deprecated}{
+
+Since 0.9.0 (warns on every call; removed in 0.10). Use
+\code{\link{ohs_selection}()} (its \code{"GA_pairwise"} engine) or
+\code{run_stacking_simulation(scheme = "OHS")}. See
+\link{haploStack-deprecated}.
+}
+
 \examples{
 \dontrun{
 selected <- genetic_algorithm_selection(gebv_matrix, n_parents = 8,

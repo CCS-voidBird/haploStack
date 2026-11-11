@@ -11,7 +11,8 @@ sim_effect_df(marker_names, alleles = c("A", "T"), seed = 42L)
 
 \item{alleles}{Character vector of allele states. Default \code{c("A", "T")}.}
 
-\item{seed}{Random seed for reproducibility. Default 42.}
+\item{seed}{Random seed for reproducibility. Default 42. The
+caller's own random stream is left untouched; \code{NULL} draws from it.}
 }
 \value{
 A data frame with columns \code{Marker}, \code{Allele}, \code{Effect}.
@@ -20,7 +21,7 @@ A data frame with columns \code{Marker}, \code{Allele}, \code{Effect}.
 Draw per-allele additive effects from a normal distribution.
 }
 \examples{
-eff <- sim_effect_df(paste0("Mkr", 1:5), alleles = c("1", "4"))
+eff <- sim_effect_df(paste0("Mkr", 1:5))
 head(eff)
 }
 \seealso{

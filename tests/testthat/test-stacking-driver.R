@@ -15,7 +15,7 @@ library(data.table)
 .driver_fixture <- function(seed = 5L) {
   m <- sim_geno_meta(n_samples = 12L, n_markers = 24L, n_chrom = 2L,
                      block_size = 3L, seed = seed)
-  e <- sim_effect_df(dimnames(m$geno_arrays)[[2L]], alleles = c("1", "4"))
+  e <- sim_effect_df(dimnames(m$geno_arrays)[[2L]], alleles = c("A", "T"))
   list(meta = m, eff = e)
 }
 
@@ -57,9 +57,12 @@ test_that("a single-scheme run returns the origin output contract", {
     top_founders = 4L, num_offspring = 2L, scheme = "TS", metrics = "all",
     select_top_blocks = 50L, output_dir = NULL, verbose = FALSE)
 
+  # 0.9.0: the five 0.8.8 elements plus notes / provenance / figures (hs_result)
   expect_setequal(names(res),
                   c("plans", "summary", "ideal_genotypes",
-                    "final_populations", "trajectories"))
+                    "final_populations", "trajectories",
+                    "notes", "provenance", "figures"))
+  expect_s3_class(res, "hs_simulation")
   expect_named(res$plans, PLANS_COLS)               # exact columns + order
   expect_named(res$summary, SUMMARY_COLS)
   expect_named(res$ideal_genotypes,                 # built because d2ideal ∈ "all"
@@ -106,11 +109,13 @@ test_that("summary carries a cycle-0 founder record", {
 test_that("each scheme runs end-to-end and produces valid plans", {
   fx <- .driver_fixture()
   for (sc in c("TS", "OHS", "OCS", "GBS")) {
-    res <- run_stacking_simulation(
+    # OCS on this toy stops at the kinship cap and falls back to truncation;
+    # since 0.9.0 that is announced (hs_warning_fallback) and noted
+    res <- suppressWarnings(run_stacking_simulation(
       fx$meta, fx$eff, replications = 1L, select_cycles = 2L,
       top_founders = 4L, num_offspring = 2L, scheme = sc,
       ohs_method = "Greedy", select_top_blocks = 50L,
-      output_dir = NULL, verbose = FALSE)
+      output_dir = NULL, verbose = FALSE), classes = "hs_warning_fallback")
     expect_named(res$plans, PLANS_COLS, info = sc)
     expect_gt(nrow(res$plans), 0L)
     expect_true(all(res$plans$F1count >= 1L), info = sc)
@@ -152,10 +157,12 @@ test_that("selfing_cycles interleaves selfing generations and ga_start_by delays
 test_that("catalogue_results + select_method back-compat path works", {
   fx      <- .driver_fixture()
   cat_res <- list(SimTrait = list(geno_meta = fx$meta))
-  res <- run_stacking_simulation(
+  # 0.9.0: catalogue_results / trait_name / select_method are on the deprecation ladder (they warn)
+  res <- suppressWarnings(run_stacking_simulation(
     catalogue_results = cat_res, trait_name = "SimTrait", effect_df = fx$eff,
     replications = 1L, select_cycles = 2L, top_founders = 4L,
-    num_offspring = 2L, select_method = "GA", output_dir = NULL, verbose = FALSE)
+    num_offspring = 2L, select_method = "GA", output_dir = NULL, verbose = FALSE),
+    classes = "hs_warning_deprecated")
 
   # GA -> OHS(GA_pairwise) since 0.7.4 (GA_coverage removed); trajectories
   # compat view is still emitted.

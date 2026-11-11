@@ -37,12 +37,12 @@
     wide <- x[["phenotype"]]
   } else if (is.list(x) && !is.data.frame(x) &&
              ("geno_arrays" %in% names(x))) {
-    stop(".as_phenotype_table: GenoMeta has no phenotype attached. ",
+    .hs_abort(".as_phenotype_table: GenoMeta has no phenotype attached. ",
          "Use attach_phenotype() first.")
   } else if (is.data.frame(x)) {
     wide <- x
   } else {
-    stop(".as_phenotype_table: 'x' must be a GenoMeta or a data.frame with a ",
+    .hs_abort(".as_phenotype_table: 'x' must be a GenoMeta or a data.frame with a ",
          "'Sample' column.")
   }
 
@@ -53,7 +53,7 @@
   if (!is.null(traits)) {
     missing_t <- setdiff(traits, trait_cols)
     if (length(missing_t) > 0L)
-      stop(".as_phenotype_table: requested trait(s) not found: ",
+      .hs_abort(".as_phenotype_table: requested trait(s) not found: ",
            paste(missing_t, collapse = ", "), ".")
     trait_cols <- traits
   }
@@ -63,7 +63,7 @@
                    logical(1L))
   trait_cols <- trait_cols[is_num]
   if (length(trait_cols) == 0L)
-    stop(".as_phenotype_table: no numeric trait columns to plot.")
+    .hs_abort(".as_phenotype_table: no numeric trait columns to plot.")
 
   w <- data.frame(Sample = as.character(wide[[sample_col]]),
                   stringsAsFactors = FALSE)
@@ -174,7 +174,7 @@ plot_phenotype_correlation <- function(x, traits = NULL, method = "pearson") {
 
   trait_cols <- setdiff(names(wide), "Sample")
   if (length(trait_cols) < 2L)
-    stop("plot_phenotype_correlation: need at least two traits.")
+    .hs_abort("plot_phenotype_correlation: need at least two traits.")
 
   cmat <- stats::cor(as.matrix(wide[, trait_cols, drop = FALSE]),
                      method = method, use = "pairwise.complete.obs")
@@ -213,7 +213,9 @@ plot_phenotype_correlation <- function(x, traits = NULL, method = "pearson") {
 #' @param digits Rounding digits. Default \code{3}.
 #'
 #' @return A data.frame with one row per trait and columns \code{Trait},
-#'   \code{Mean}, \code{SD}, \code{Median}, \code{Skew}, \code{Min}, \code{Max},
+#'   \code{Mean}, \code{SD}, \code{Median}, \code{Skew} (Pearson's second
+#'   skewness coefficient without its factor 3, \code{(mean - median) / sd};
+#'   a sign-and-size cue, not a moment-based skewness), \code{Min}, \code{Max},
 #'   \code{N}.
 #'
 #' @export
@@ -304,7 +306,7 @@ plot_phenotype_bars <- function(x, traits = NULL, samples = NULL,
 
   # "max col 2": keep at most the first two traits.
   if (length(trait_cols) > 2L) {
-    warning("plot_phenotype_bars: more than two traits supplied; keeping the ",
+    .hs_warn("plot_phenotype_bars: more than two traits supplied; keeping the ",
             "first two (", paste(trait_cols[1:2], collapse = ", "), ").")
     trait_cols <- trait_cols[1:2]
     long <- long[long$Trait %in% trait_cols, , drop = FALSE]
@@ -316,7 +318,7 @@ plot_phenotype_bars <- function(x, traits = NULL, samples = NULL,
     samples <- as.character(samples)
     missing_s <- setdiff(samples, unique(long$Sample))
     if (length(missing_s) > 0L)
-      warning("plot_phenotype_bars: ", length(missing_s),
+      .hs_warn("plot_phenotype_bars: ", length(missing_s),
               " requested sample(s) not present: ",
               paste(utils::head(missing_s, 5L), collapse = ", "),
               if (length(missing_s) > 5L) " ..." else "")
@@ -328,11 +330,14 @@ plot_phenotype_bars <- function(x, traits = NULL, samples = NULL,
   # both `sample_order` and the broadcast; below it the shared contract applies.
   order_res <- NULL
   if (is.null(sample_levels)) {
-    base_levels <- if (!is.null(samples)) samples else sort(unique(long$Sample))
+    base_levels <- if (!is.null(samples)) samples else .hs_sort(unique(long$Sample))
     order_res <- .hs_resolve_sample_order(
       sample_order, base_levels, caller = "plot_phenotype_bars",
       subset = "intersect", default = "keep")
     sample_levels <- order_res$order %||% base_levels
+  } else {
+    # viz/F23 (0.9.0): an explicit lock is tagged like any other resolved order
+    order_res <- list(order = as.character(sample_levels), source = "argument")
   }
   sample_levels <- as.character(sample_levels)
   long$Sample <- factor(long$Sample, levels = sample_levels)
@@ -367,12 +372,31 @@ plot_phenotype_bars <- function(x, traits = NULL, samples = NULL,
 # axis is not discrete or cannot be read (callers then skip reordering).
 .discrete_axis_levels <- function(p, which = c("y", "x")) {
   which <- match.arg(which)
+  # io/F26 / viz/F30 (0.9.0): read the order the plotter already recorded
+  # (attr "sample_order", every sample-axis figure tags it) before touching the
+  # scales, and build the plot only as a last resort; a sync that still finds
+  # nothing leaves a note instead of failing silently.
+  tagged <- attr(p, "sample_order", exact = TRUE)
+  if (!is.null(tagged) && length(tagged)) return(as.character(tagged))
   lv <- tryCatch({
-    pp   <- ggplot2::ggplot_build(p)$layout$panel_params[[1L]]
-    labs <- pp[[which]]$get_labels()
-    as.character(labs[!is.na(labs)])
+    sc <- ggplot2::layer_scales(p)[[which]]
+    l  <- if (!is.null(sc) && is.function(sc$get_limits)) sc$get_limits() else NULL
+    if (is.null(l)) character(0L) else as.character(l[!is.na(l)])
   }, error = function(e) character(0L))
-  if (is.null(lv)) character(0L) else lv
+  if (!length(lv)) {
+    lv <- tryCatch({
+      pp   <- ggplot2::ggplot_build(p)$layout$panel_params[[1L]]
+      labs <- pp[[which]]$get_labels()
+      as.character(labs[!is.na(labs)])
+    }, error = function(e) character(0L))
+  }
+  if (is.null(lv) || !length(lv)) {
+    .hs_note("plot_meta_alignment", "axis_sync_skipped",
+             paste0("no discrete ", which, "-axis levels could be read from a panel; ",
+                    "its sample ticks were not synchronised"))
+    return(character(0L))
+  }
+  lv
 }
 
 
@@ -439,15 +463,17 @@ plot_meta_alignment <- function(plots, rel_widths = NULL, sync_axis = "y",
   sync_axis <- match.arg(sync_axis, c("y", "x", "none"))
 
   if (!requireNamespace("cowplot", quietly = TRUE))
-    stop("plot_meta_alignment: the 'cowplot' package is required. ",
+    .hs_abort(class = "hs_error_dependency",
+         data = list(hint = "install.packages(\"cowplot\")"),
+         "plot_meta_alignment: the 'cowplot' package is required. ",
          "Install it with install.packages('cowplot').")
   if (!is.list(plots) || length(plots) < 2L)
-    stop("plot_meta_alignment: 'plots' must be a list of at least two ggplots.")
+    .hs_abort("plot_meta_alignment: 'plots' must be a list of at least two ggplots.")
   is_gg <- vapply(plots, function(p) inherits(p, "ggplot"), logical(1L))
   if (!all(is_gg))
-    stop("plot_meta_alignment: every element of 'plots' must be a ggplot.")
+    .hs_abort("plot_meta_alignment: every element of 'plots' must be a ggplot.")
   if (!is.null(rel_widths) && length(rel_widths) != length(plots))
-    stop("plot_meta_alignment: 'rel_widths' must have one value per plot.")
+    .hs_abort("plot_meta_alignment: 'rel_widths' must have one value per plot.")
 
   # 0. Do the panels agree on the row order? The sync below imposes the
   # reference's order on everyone, so a disagreement is silently resolved unless
@@ -489,8 +515,11 @@ plot_meta_alignment <- function(plots, rel_widths = NULL, sync_axis = "y",
   }
 
   # 4. Arrange the panels in one row, aligned so the sample rows match.
+  # cowplot's default is 1; passing NULL through makes its rep() warn
+  # ("'x' is NULL so the result will be NULL") on every call without widths.
   panel_row <- cowplot::plot_grid(plotlist = plots, nrow = 1L, align = align,
-                                  axis = "tb", rel_widths = rel_widths)
+                                  axis = "tb",
+                                  rel_widths = if (is.null(rel_widths)) 1 else rel_widths)
 
   if (legend != "bottom" || length(legends) == 0L)
     return(panel_row)

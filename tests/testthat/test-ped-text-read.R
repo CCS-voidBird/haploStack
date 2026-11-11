@@ -152,14 +152,14 @@ test_that("T4: a panel with no trap column reads exactly as before", {
   expect_equal(meta$metadata$source_format, "plink_ped")
 })
 
-test_that("T4b: a 1/2/3/4-coded PED is still declared selectiontools", {
+test_that("T4b: a 1/2/3/4-coded PED keeps its digits as allele labels (nucleotide vocabulary)", {
   n  <- 6L
   al <- cbind(rep("1", n), rep("1", n), rep(c("1", "4"), length.out = n),
               rep("4", n))
   fx   <- write_ped_from(al, markers = c("M1", "M2"))
   meta <- suppressMessages(read_plink_ped(fx$ped, fx$map))
 
-  expect_equal(meta$metadata$encoding, "selectiontools")
+  expect_equal(meta$metadata$encoding, "nucleotide")   # 0.9.0, C-5
   expect_true(all(meta$geno_arrays[, "M1", ] == "1"))
 })
 

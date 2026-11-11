@@ -10,9 +10,9 @@
   ds <- sim_dataset(n_samples = 12L, n_markers = 24L, block_size = 4L,
                     seed = 11L)
   meta <- ds$geno_meta
-  meta$marker_effects <- list(Trait = ds$eff_st)   # for the GenoMeta stat route
+  meta$marker_effects <- list(Trait = ds$eff_nuc)   # for the GenoMeta stat route
   analysis <- suppressWarnings(suppressMessages(analyze_block_catalogue(
-    geno_meta = meta, effect_list = list(T1 = ds$eff_st, T2 = ds$eff_st))))
+    geno_meta = meta, effect_list = list(T1 = ds$eff_nuc, T2 = ds$eff_nuc))))
   bi <- as.data.frame(build_block_location_info(meta)$block_info)
   genes <- data.table::data.table(
     chrom = bi$Chrom[1L], start = bi$Start[1L], end = bi$End[1L],
@@ -107,7 +107,7 @@ test_that("plot_meta_circos renders, orders tracks, and re-renders by width", {
   f <- tempfile(fileext = ".png")
   grDevices::png(f, width = 89 / 25.4, height = 89 / 25.4, units = "in",
                  res = 150, type = "cairo")
-  obj <- plot_meta_circos(tracks, meta = fx$meta)
+  obj <- plot_meta_circos(tracks, meta = fx$meta, draw = TRUE)   # 0.9.0: draw is opt-in
   grDevices::dev.off()
   expect_s3_class(obj, "hs_meta_circos")
   expect_identical(obj$tracks, c("gene_count", "T1", "loci"))
@@ -278,7 +278,7 @@ test_that("label regions that meet stay apart: each carries a white edge", {
   d <- data.frame(Chrom = "1", Name = c("Rrs1", "Rpt1"),
                   Start = c(40e6, 50e6), End = c(50e6, 90e6))
   ob <- plot_meta_circos(track_marker_labels(d), chr_sizes = c(`1` = 1e8),
-                         draw = FALSE, legend = FALSE)
+                         draw = FALSE, legend_position = "none")
   f <- tempfile(fileext = ".png")
   grDevices::png(f, width = 89 / 25.4, height = 89 / 25.4, units = "in",
                  res = 100, type = "cairo")
@@ -494,7 +494,7 @@ test_that("legend_position renders every placement and sizes the saved page", {
                                     legend_position = "centre")$legend_position,
                    "center")
   off <- plot_meta_circos(tracks, meta = fx$meta, draw = FALSE,
-                          legend = FALSE, legend_position = "bottom")
+                          legend_position = "none")
   expect_identical(off$legend_position, "none")
   expect_equal(off$height_mm(89), 89)
 
@@ -657,13 +657,20 @@ test_that("attach_marker_annotations stores custom, coexists and carries forward
   expect_setequal(names(m2b$annotation),
                   c("blocks", "features", "marker_gene", "custom"))
 
-  # filter prunes custom rows whose marker left; re-blocking drops everything
+  # filter prunes custom rows whose marker left; re-blocking drops the gene
+  # tables and keeps the custom table with its Block re-derived (0.9.0,
+  # ann/F23)
   keep <- map$Marker[1:6]
   f <- suppressWarnings(filter_geno_meta(m2, keep_markers = keep))
   expect_identical(f$annotation$custom$Name, "L1")
   bmap <- sim_block_map(m2$map_info, block_size = 6L)
   expect_message(m3 <- attach_block_info(m2, bmap), "annotation was dropped")
-  expect_null(m3$annotation)
+  expect_identical(names(m3$annotation), "custom")
+  expect_identical(names(m3$metadata$annotation), "custom")
+  expect_identical(m3$annotation$custom$Name, c("L1", "L2"))
+  expect_identical(m3$annotation$custom$Block,
+                   bmap$Block[match(m3$annotation$custom$Marker, bmap$Marker)])
+  expect_true(is_geno_meta(m3))
 
   # a corrupted custom marker fails validation
   m4 <- m1

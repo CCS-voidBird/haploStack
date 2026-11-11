@@ -65,11 +65,11 @@
 #'   \code{\link{plot_haplotype_alignment}}, \code{\link{plot_localgebv_alignment}}
 #' @export
 use_sample_order <- function(x) {
-  old <- getOption("haploStack.sample_order")
+  old <- .hs_option_raw("sample_order")
 
   if (is.null(x)) {
     options(haploStack.sample_order = NULL)
-    message("use_sample_order: sample-order broadcast cleared; figures fall ",
+    .hs_inform("use_sample_order: sample-order broadcast cleared; figures fall ",
             "back to their own defaults.")
     return(invisible(old))
   }
@@ -81,38 +81,33 @@ use_sample_order <- function(x) {
   } else if (is.character(x) || is.factor(x)) {
     ord <- as.character(x)
   } else {
-    stop("use_sample_order: 'x' must be an hs_sample_clustering (from ",
+    .hs_abort("use_sample_order: 'x' must be an hs_sample_clustering (from ",
          "cluster_samples()), a character vector of sample IDs, or NULL.")
   }
   if (length(ord) == 0L)
-    stop("use_sample_order: the order is empty.")
+    .hs_abort("use_sample_order: the order is empty.")
   if (anyNA(ord))
-    stop("use_sample_order: the order contains NA sample IDs.")
+    .hs_abort("use_sample_order: the order contains NA sample IDs.")
   if (anyDuplicated(ord))
-    stop("use_sample_order: the order has duplicated sample IDs: ",
+    .hs_abort("use_sample_order: the order has duplicated sample IDs: ",
          paste(utils::head(unique(ord[duplicated(ord)]), 5L), collapse = ", "),
          ".")
 
   options(haploStack.sample_order = x)
   desc <- .hs_order_describe(x)
-  message("use_sample_order: broadcasting a row order over ", length(ord),
+  .hs_inform("use_sample_order: broadcasting a row order over ", length(ord),
           " sample(s)",
           if (is.null(desc)) "." else paste0(" (", desc, ")."))
   invisible(old)
 }
 
 
-# Read the broadcast order. Returns NULL when unset. Validated here as well as in
-# use_sample_order(), because options() can be set directly.
+# Read the broadcast order. Returns NULL when unset. Validated on read as well
+# as in use_sample_order(), because options() can be set directly: an unusable
+# value is ignored with a warning (.check_sample_order(), R/state.R).
 # @keywords internal
 .hs_sample_order <- function() {
-  x <- getOption("haploStack.sample_order")
-  if (is.null(x)) return(NULL)
-  if (inherits(x, "hs_sample_clustering")) return(x)
-  if (is.character(x) || is.factor(x)) return(as.character(x))
-  warning("haploStack.sample_order holds an unusable value (",
-          class(x)[1L], "); ignoring it. Set it with use_sample_order().")
-  NULL
+  .hs_setting("sample_order")
 }
 
 
@@ -132,7 +127,7 @@ use_sample_order <- function(x) {
 
 # Subtitle/message fragment for a described order; "" when there is nothing to say.
 # @keywords internal
-.hs_order_suffix <- function(desc, prefix = " · rows: ") {
+.hs_order_suffix <- function(desc, prefix = " \u00B7 rows: ") {
   if (is.null(desc) || !nzchar(desc)) "" else paste0(prefix, desc)
 }
 
@@ -163,6 +158,7 @@ use_sample_order <- function(x) {
 #'   \code{clustering} (the object when one was supplied, else \code{NULL}) and
 #'   \code{desc} (provenance text, or \code{NULL}).
 #' @keywords internal
+#' @noRd
 .hs_resolve_sample_order <- function(order_spec = NULL, samples,
                                      caller  = "plot",
                                      subset  = c("strict", "intersect"),
@@ -172,7 +168,7 @@ use_sample_order <- function(x) {
   samples <- unique(as.character(samples))
 
   fallback <- function(src) {
-    list(order      = if (default == "sorted") sort(samples) else NULL,
+    list(order      = if (default == "sorted") .hs_sort(samples) else NULL,
          source     = src,
          clustering = NULL,
          desc       = NULL)
@@ -187,7 +183,7 @@ use_sample_order <- function(x) {
     if (isTRUE(order_spec)) {
       order_spec <- .hs_sample_order()
       if (is.null(order_spec))
-        stop(caller, ": sample_order = TRUE, but no order is broadcast. ",
+        .hs_abort(caller, ": sample_order = TRUE, but no order is broadcast. ",
              "Call use_sample_order(cluster_samples(meta)) first, or pass an ",
              "order directly.")
       source <- "option"
@@ -207,7 +203,7 @@ use_sample_order <- function(x) {
 
   ord <- as.character(order_spec)
   if (anyDuplicated(ord))
-    stop(caller, ": 'sample_order' has duplicated sample IDs.")
+    .hs_abort(caller, ": 'sample_order' has duplicated sample IDs.")
 
   # A broadcast is best-effort; an explicit argument is checked (see the
   # function docs for why the two differ).
@@ -217,7 +213,7 @@ use_sample_order <- function(x) {
   extra_ord   <- setdiff(ord, samples)     # in the order, not in the panel
 
   if (mode == "strict" && (length(missing_ord) || length(extra_ord)))
-    stop(caller, ": 'sample_order' must be a permutation of the panel's ",
+    .hs_abort(caller, ": 'sample_order' must be a permutation of the panel's ",
          "samples. ",
          if (length(missing_ord))
            sprintf("Missing %d: %s. ", length(missing_ord),
@@ -227,19 +223,19 @@ use_sample_order <- function(x) {
                    paste(utils::head(extra_ord, 5L), collapse = ", ")) else "")
 
   if (length(extra_ord) && length(extra_ord) == length(ord))
-    warning(caller, ": the supplied sample order matches none of this panel's ",
+    .hs_warn(caller, ": the supplied sample order matches none of this panel's ",
             "samples; the panel keeps its own order.")
 
   # One warning per call, never per panel: a nested figure would otherwise emit
   # the same message once per family.
   if (length(missing_ord))
-    message(caller, ": ", length(missing_ord), " panel sample(s) are not in the ",
+    .hs_inform(caller, ": ", length(missing_ord), " panel sample(s) are not in the ",
             "supplied order and are placed after the ordered ones: ",
             paste(utils::head(missing_ord, 5L), collapse = ", "),
             if (length(missing_ord) > 5L) " ..." else "")
 
   kept <- ord[ord %in% samples]
-  tail <- if (default == "sorted") sort(missing_ord) else missing_ord
+  tail <- if (default == "sorted") .hs_sort(missing_ord) else missing_ord
   list(order      = c(kept, tail),
        source     = source,
        clustering = clustering,
@@ -283,13 +279,13 @@ use_sample_order <- function(x) {
 
   src <- vapply(plots, function(p)
     attr(p, "sample_order_source") %||% "unknown", character(1L))
-  warning("plot_meta_alignment: panel(s) ", paste(bad, collapse = ", "),
+  .hs_warn("plot_meta_alignment: panel(s) ", paste(bad, collapse = ", "),
           " were drawn in a different sample order from the reference panel ",
           "(sources: ", src[keep[1L]], " vs ",
           paste(unique(src[bad]), collapse = "/"),
           "). The reference order is imposed on every panel, so those panels ",
-          "are being re-ordered. Draw them with the same 'sample_order' — or ",
-          "broadcast one with use_sample_order() — to make the figure honest. ",
+          "are being re-ordered. Draw them with the same 'sample_order' \u2014 or ",
+          "broadcast one with use_sample_order() \u2014 to make the figure honest. ",
           "Pass check_order = FALSE to silence this.")
   invisible(TRUE)
 }
@@ -299,6 +295,54 @@ use_sample_order <- function(x) {
 # can tell a clustered panel from an alphabetical one. Set LAST: `p + <layer>`
 # drops attributes.
 # @keywords internal
+# ---- chromosome order (0.9.0, design D3 §3.6, decision-form row 29 a) --------
+
+#' One natural chromosome order
+#'
+#' The single rule every haploStack figure axis and table row order follows
+#' since 0.9.0 (decision-form row 29 a). Up to 0.8.8 four rules disagreed:
+#' the circos and Manhattan plots put \code{"Un"} first and \code{"10H"} before
+#' \code{"1H"}, the alignment panels used a natural order, and tables sorted
+#' chromosomes as plain strings (\code{"10"} before \code{"2"}).
+#'
+#' The rule: strip a leading \code{chr}, \code{chrom} or \code{chromosome}
+#' (any case, with an optional \code{_}, \code{.} or \code{-}) to get the key;
+#' names whose key starts with an integer come first, ordered by that integer
+#' and then by the rest of the key (\code{1A} before \code{1B}, \code{2A} before
+#' \code{10A}); every other name follows, alphabetically by key; ties keep the
+#' original spelling order. The comparison is locale-free.
+#'
+#' Who sees a change from 0.8.8: panels with ten or more numbered chromosomes,
+#' bare numbers plus a scaffold (\code{"Un"}), or \code{chr}-prefixed names.
+#' Barley \code{1H}–\code{7H} (with or without \code{Un}) is identical under
+#' every rule. Values never change, only the order of rows and axes;
+#' HapSelect block ids embed the key, so they change on exactly those panels.
+#'
+#' @param x Chromosome names (any vector; coerced to character, \code{NA}
+#'   dropped).
+#' @return The distinct names in natural order.
+#' @examples
+#' hs_chrom_levels(c("10H", "2H", "1H", "Un"))   # 1H 2H 10H Un
+#' hs_chrom_levels(c("chr10", "chr2", "chr1"))   # chr1 chr2 chr10
+#' hs_chrom_levels(c("X", "2", "1", "Y", "10", "MT"))  # 1 2 10 MT X Y
+#' @export
+hs_chrom_levels <- function(x) {
+  u <- unique(as.character(x))
+  u <- u[!is.na(u)]
+  if (!length(u)) return(character(0L))
+  key  <- sub("^(chromosome|chrom|chr)[_.-]?", "", u, ignore.case = TRUE)
+  lead <- suppressWarnings(as.numeric(
+    ifelse(grepl("^[0-9]+", key), sub("^([0-9]+).*$", "\\1", key), NA)))
+  rest <- ifelse(is.na(lead), key, sub("^[0-9]+", "", key))
+  u[order(is.na(lead), lead, rest, u, method = "radix")]
+}
+
+# Integer rank of each name under hs_chrom_levels(); for data.table sorts.
+.hs_chrom_rank <- function(x) {
+  x <- as.character(x)
+  match(x, hs_chrom_levels(x))
+}
+
 .hs_tag_sample_order <- function(p, res) {
   if (is.null(res)) return(p)
   attr(p, "sample_order")        <- res$order

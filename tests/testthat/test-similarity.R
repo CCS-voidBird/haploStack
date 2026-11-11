@@ -369,7 +369,6 @@ test_that("plot_marker_signal carries a marker x block table", {
 })
 
 test_that("save_marker_signal writes the table beside the image", {
-  skip_if_not_installed("ggplot2")
   sel  <- select_signal_markers(.sel_fixture$metrics,
                                 geno_meta = .sel_fixture$meta, n = 1)
   meta <- attach_signal_markers(.sel_fixture$meta, sel)
@@ -385,13 +384,19 @@ test_that("save_marker_signal writes the table beside the image", {
   expect_equal(nrow(data.table::fread(csv)), 4L)
 })
 
-test_that("plot_marker_signal writes the table to table_file on request", {
+test_that("plot_marker_signal: table_file still writes but is deprecated (0.9.0)", {
   csv <- file.path(tempdir(), "marker_signal_direct.csv")
   on.exit(unlink(csv), add = TRUE)
-  suppressMessages(
+  expect_warning(suppressMessages(
     plot_marker_signal(.sel_fixture$metrics, geno_meta = .sel_fixture$meta,
-                       highlight = "quantile", table_file = csv))
+                       highlight = "quantile", table_file = csv)),
+    class = "hs_warning_deprecated")
   expect_true(file.exists(csv))
+  # the table is on the plot: marker_signal_table() replaces the argument
+  p <- suppressMessages(plot_marker_signal(.sel_fixture$metrics, geno_meta = .sel_fixture$meta,
+                                           highlight = "quantile"))
+  expect_identical(marker_signal_table(p), attr(p, "signal_table"))
+  expect_true(is.data.frame(marker_signal_table(p)))
 })
 
 # ── select_signal_markers / attach / get ──────────────────────────────────────

@@ -10,6 +10,10 @@
 #   st_ld_blocks_files()  SelectionTools' own file formats in (named
 #                         define_haplotype_blocks() up to 0.7.9)
 #
+# Both are behind use_st_formats() (0.9.0: SelectionTools is being retired),
+# and the exchange of formats lives in R/st_formats.R (st_convert() and the
+# helpers .st_write_inputs() / .st_parse_blocks() the resolver uses).
+#
 # Experimental: SelectionTools needed every guard below to run safely from a
 # package (thread #034), and its partition differs from HapSelect's at the same
 # settings. The container route exists because the file route could not be
@@ -38,7 +42,9 @@
 # Fail early, with the alternatives, when SelectionTools is absent.
 .st_require <- function(caller) {
   if (!requireNamespace("SelectionTools", quietly = TRUE))
-    stop(caller, " requires the SelectionTools package, which is not ",
+    .hs_abort(class = "hs_error_dependency",
+         data = list(hint = "SelectionTools is distributed outside CRAN; see the haploStack README"),
+         caller, " requires the SelectionTools package, which is not ",
          "installed. Alternatives: a block map you already have (the ",
          "recommended route: attach_block_info(), or block_file = / blocks = ",
          "when reading), or hapS_ld_blocks(), the default LD resolver.",
@@ -53,113 +59,29 @@
 # SelectionTools resolves every file name against the variables st.input.dir
 # and st.output.dir. It holds neither itself: its .onLoad creates both, as "",
 # in the GLOBAL environment (where its manual has users set them), and its
-# functions find them there. The bridge passes bare names inside its private
-# working directory, so both must be "".
-#   * Set to a directory: refused. SelectionTools would read and write there,
-#     outside the private directory.
-#   * Gone: every st.* reader stops with "object 'st.input.dir' not found".
-#     That happens after rm(list = ls()) once SelectionTools has loaded, which
-#     is what a script re-run in the same session does. The bridge supplies ""
-#     for the call and removes it again on exit (.st_drop_io_dirs()), so the
-#     global environment is left as it was found.
-# Returns the names it supplied.
-.st_check_io_dirs <- function(caller) {
-  ns   <- asNamespace("SelectionTools")
+# functions find them there. Since 0.9.0 (D1 §3.8) the bridge points both at
+# its private working directory for the call and restores whatever the user
+# had — present or absent — on exit, so the working directory is never
+# changed and a user's own setting is neither refused nor lost. After
+# rm(list = ls()) the variables are gone and SelectionTools alone would stop
+# with "object 'st.input.dir' not found"; the bridge supplies them and removes
+# them again.
+.st_with_io_dirs <- function(work_dir, code) {
   vars <- c("st.input.dir", "st.output.dir")
-  have <- vapply(vars, exists, logical(1L), envir = ns)   # SelectionTools' lookup
-  dirs <- vapply(vars, function(v)
-    if (exists(v, envir = ns)) paste(as.character(get(v, envir = ns)), collapse = "")
-    else "", "")
-  if (any(nzchar(dirs)))
-    stop(caller, ": SelectionTools' ", paste(vars[nzchar(dirs)], collapse = " / "),
-         " is set (", paste(dirs[nzchar(dirs)], collapse = ", "), "). The bridge ",
-         "keeps SelectionTools' files in a private directory and needs the ",
-         "default: run ", paste0(vars[nzchar(dirs)], " <- \"\"", collapse = "; "),
-         " and call again.", call. = FALSE)
-  supplied <- vars[!have]
-  for (v in supplied) assign(v, "", envir = globalenv())
-  invisible(supplied)
-}
-
-# Undo what .st_check_io_dirs() supplied (on exit).
-.st_drop_io_dirs <- function(supplied) {
-  if (length(supplied))
-    suppressWarnings(rm(list = supplied, envir = globalenv()))
-  invisible(NULL)
-}
-
-# Write the two SelectionTools input files for `markers` (placed, any order)
-# into `dir`, under aliases. Returns the files and the alias tables.
-#
-#   hs_geno.txt  matrix format "m": header "m/i  i1 i2 ...", one line per
-#                marker "m7  1/2 2/2 -/1 ...", tab-separated. Alleles are
-#                recoded per marker to 1, 2, ... in sorted order — r^2 does not
-#                depend on which allele is called what, and SelectionTools
-#                reads 1..5 whatever the source vocabulary was (nucleotides,
-#                1/2/3/4 codes, DArT A/B). Missing = "-".
-#   hs_map.txt   map format "mcp" with a header: "name chrom pos", chrom as an
-#                integer key in natural order, pos in bp.
-.st_write_inputs <- function(geno_meta, markers, dir) {
-  map <- as.data.frame(geno_meta$map_info, stringsAsFactors = FALSE)
-  map <- map[match(markers, map$Marker), c("Chrom", "Marker", "Pos"), drop = FALSE]
-  map$Chrom <- as.character(map$Chrom)
-  map$Pos   <- as.numeric(map$Pos)
-
-  chrom_levels <- .natural_chrom_levels(map$Chrom)
-  map$key <- match(map$Chrom, chrom_levels)
-  map <- map[order(map$key, map$Pos, seq_len(nrow(map))), , drop = FALSE]
-
-  arr <- geno_meta$geno_arrays[, map$Marker, , drop = FALSE]
-  a1  <- matrix(as.character(arr[, , 1L]), nrow = dim(arr)[1L])
-  a2  <- matrix(as.character(arr[, , 2L]), nrow = dim(arr)[1L])
-  c1  <- matrix(NA_integer_, nrow(a1), ncol(a1))
-  c2  <- c1
-  n_all <- integer(ncol(a1))
-  for (j in seq_len(ncol(a1))) {
-    lv <- sort(unique(c(a1[, j], a2[, j])))
-    lv <- lv[!is.na(lv)]
-    n_all[j] <- length(lv)
-    c1[, j] <- match(a1[, j], lv)
-    c2[, j] <- match(a2[, j], lv)
-  }
-  # SelectionTools codes alleles 1..5; a marker with more states cannot be
-  # written faithfully and is left out (it becomes a singleton on attach).
-  too_many <- n_all > 5L
-  if (any(too_many)) {
-    warning("st_ld_blocks: ", sum(too_many), " marker(s) carry ",
-            "more than 5 allele states and are left out of SelectionTools' ",
-            "blocking (e.g. ", paste(head(map$Marker[too_many], 3L),
-            collapse = ", "), ").", call. = FALSE)
-    keep <- !too_many
-    map <- map[keep, , drop = FALSE]
-    c1 <- c1[, keep, drop = FALSE]
-    c2 <- c2[, keep, drop = FALSE]
-  }
-
-  m_alias <- paste0("m", seq_len(nrow(map)))
-  i_alias <- paste0("i", seq_len(nrow(c1)))
-  cell <- function(x) { x <- as.character(x); x[is.na(x)] <- "-"; x }
-  cells <- matrix(paste0(cell(c1), "/", cell(c2)), nrow = nrow(c1))
-
-  geno_file <- file.path(dir, "hs_geno.txt")
-  map_file  <- file.path(dir, "hs_map.txt")
-  body <- data.table::as.data.table(t(cells))
-  data.table::setnames(body, i_alias)
-  body <- cbind(data.table::data.table(`m/i` = m_alias), body)
-  data.table::fwrite(body, geno_file, sep = "\t", quote = FALSE,
-                     col.names = TRUE, showProgress = FALSE)
-  # scipen: positions in fixed notation — SelectionTools' own map parser must
-  # never be handed "8.8e+07" for a round position.
-  data.table::fwrite(data.table::data.table(name = m_alias, chrom = map$key,
-                                            pos = map$Pos),
-                     map_file, sep = "\t", quote = FALSE, col.names = TRUE,
-                     scipen = 100L, showProgress = FALSE)
-
-  list(geno_file = geno_file, map_file = map_file,
-       markers   = data.frame(alias = m_alias, Marker = map$Marker,
-                              Chrom = map$Chrom, Pos = map$Pos,
-                              stringsAsFactors = FALSE),
-       n_left_out = sum(too_many))
+  ge   <- globalenv()
+  had  <- vapply(vars, exists, logical(1L), envir = ge, inherits = FALSE)
+  old  <- lapply(vars, function(v)
+    if (exists(v, envir = ge, inherits = FALSE)) get(v, envir = ge, inherits = FALSE)
+    else NULL)
+  on.exit({
+    for (i in seq_along(vars)) {
+      if (had[i]) assign(vars[i], old[[i]], envir = ge)
+      else suppressWarnings(rm(list = vars[i], envir = ge))
+    }
+  }, add = TRUE)
+  dir <- paste0(normalizePath(work_dir, winslash = "/", mustWork = TRUE), "/")
+  for (v in vars) assign(v, dir, envir = ge)
+  force(code)
 }
 
 # Run SelectionTools' LD blocking on two files already in the current working
@@ -188,30 +110,6 @@
   res
 }
 
-# st.def.hblocks() table -> (Chrom, Marker, Block) in container IDs and names.
-.st_parse_blocks <- function(raw, alias_map) {
-  raw <- as.data.frame(raw, stringsAsFactors = FALSE)
-  if (!all(c("Name", "Markers") %in% names(raw)))
-    stop("st_ld_blocks: unexpected SelectionTools output ",
-         "(columns: ", paste(names(raw), collapse = ", "), ").", call. = FALSE)
-  members <- strsplit(gsub("[[:space:]]", "", raw$Markers), ";", fixed = TRUE)
-  members <- lapply(members, function(x) x[nzchar(x)])
-  bm <- data.frame(alias = unlist(members, use.names = FALSE),
-                   Block = rep(as.character(raw$Name), lengths(members)),
-                   stringsAsFactors = FALSE)
-  idx <- match(bm$alias, alias_map$alias)
-  if (anyNA(idx))
-    stop("st_ld_blocks: SelectionTools returned marker(s) the ",
-         "bridge did not write (", paste(head(bm$alias[is.na(idx)], 3L),
-         collapse = ", "), ").", call. = FALSE)
-  out <- data.frame(Chrom  = alias_map$Chrom[idx],
-                    Marker = alias_map$Marker[idx],
-                    Block  = bm$Block,
-                    stringsAsFactors = FALSE)
-  out[order(match(out$Marker, alias_map$Marker)), , drop = FALSE]
-}
-
-
 #' LD haplotype blocks with SelectionTools (experimental)
 #'
 #' \strong{A side route, and experimental.} haploStack does not need LD
@@ -233,7 +131,9 @@
 #' "flanking")} there, reads the blocks back in the container's own marker IDs
 #' and chromosome names, deletes the directory, and (by default) attaches the
 #' blocks. Named \code{define_haplotype_blocks_meta()} in 0.7.9; that name still
-#' works, with a deprecation warning.
+#' works, with a deprecation warning. SelectionTools is being retired from
+#' haploStack: this function is behind \code{\link{use_st_formats}} (off by
+#' default), and the exchange of formats goes through \code{\link{st_convert}}.
 #'
 #' @section What SelectionTools sees:
 #' Markers are written under aliases (\code{m1}, \code{m2}, ...), samples as
@@ -257,11 +157,13 @@
 #'
 #' @section SelectionTools' directory variables:
 #' SelectionTools resolves file names against \code{st.input.dir} and
-#' \code{st.output.dir}. It creates both, as \code{""}, in the global
-#' environment when it loads. Both must be \code{""} here: a directory set there
-#' is refused, and the error names the remedy. If they are gone — after
-#' \code{rm(list = ls())}, for instance — \code{""} is supplied for the call and
-#' removed again afterwards, so the global environment is left as it was found.
+#' \code{st.output.dir}, two variables its \code{.onLoad} creates as \code{""}
+#' in the global environment. For the call both are pointed at a private
+#' temporary directory and restored afterwards (present or absent, whatever
+#' you had); the working directory is not changed. Process state SelectionTools
+#' cannot release (its thread count, the resident LD data set and those
+#' globals) is documented here because the package cannot undo it: run
+#' SelectionTools in its own R process when that matters.
 #'
 #' @section Known SelectionTools behaviour:
 #' \itemize{
@@ -298,6 +200,17 @@
 #'   reports its path.
 #' @param verbose      \code{TRUE} (default) shows SelectionTools' console
 #'   output and a summary; \code{FALSE} silences both.
+#' @param st_formats   \code{TRUE} enables SelectionTools formats for this call;
+#'   \code{NULL} (default) takes the session switch
+#'   (\code{\link{use_st_formats}}, off by default: SelectionTools is being
+#'   retired from haploStack).
+#' @param progress     \code{NULL} (default) or a function of one argument (the
+#'   package's progress contract, 0.9.0). SelectionTools' C code cannot be
+#'   interrupted, so there are two events only: \code{unit = "run"},
+#'   \code{i = 1} (\code{"start"}) before the run and \code{i = 2}
+#'   (\code{"done"}, \code{payload$n_blocks}) after it; returning \code{FALSE}
+#'   at \code{"start"} cancels with an \code{hs_error_cancelled} error (no
+#'   partial result).
 #'
 #' @return With \code{attach = TRUE}, the \code{GenoMeta} with
 #'   \code{block_marker_map_info} / \code{block_info} set. With
@@ -333,49 +246,53 @@ st_ld_blocks <- function(geno_meta,
                          output_dir   = NULL,
                          prefix       = "st_blocks",
                          keep_files   = FALSE,
-                         verbose      = TRUE) {
+                         verbose      = TRUE,
+                         st_formats   = NULL,
+                         progress     = NULL) {
   caller <- "st_ld_blocks"
-  if (!is_geno_meta(geno_meta, verbose = FALSE))
-    stop(caller, ": 'geno_meta' must be a valid GenoMeta.", call. = FALSE)
+  .st_gate(caller, st_formats)
+  trk <- .hs_progress_tracker(progress, "ld_blocks", "run", 2L)
+  .hs_check_meta(geno_meta, caller, "geno_meta")
   .ld_check_rule(ld_threshold, tolerance, caller, zero_note = .st_zero_note)
   .st_require(caller)
-  st_dirs <- .st_check_io_dirs(caller)
-  on.exit(.st_drop_io_dirs(st_dirs), add = TRUE)
   d <- dim(geno_meta$geno_arrays)
   if (d[3L] != 2L)
-    stop(caller, ": SelectionTools reads diploid genotypes; this container ",
+    .hs_abort(caller, ": SelectionTools reads diploid genotypes; this container ",
          "has ploidy ", d[3L], ".", call. = FALSE)
   if (d[1L] < 2L)
-    stop(caller, ": LD needs at least 2 samples.", call. = FALSE)
+    .hs_abort(caller, ": LD needs at least 2 samples.", call. = FALSE)
 
   placed <- .ld_placed_markers(geno_meta$map_info)
   n_unplaced <- d[2L] - length(placed)
   if (length(placed) < 2L)
-    stop(caller, ": fewer than 2 markers carry a usable position.",
+    .hs_abort(caller, ": fewer than 2 markers carry a usable position.",
          call. = FALSE)
 
   t0 <- Sys.time()
   work_dir <- tempfile("hs_st_")
   dir.create(work_dir, recursive = TRUE)
   if (isTRUE(keep_files)) {
-    message(caller, ": SelectionTools files kept in ", work_dir)
+    .hs_inform(caller, ": SelectionTools files kept in ", work_dir)
   } else {
     on.exit(unlink(work_dir, recursive = TRUE, force = TRUE), add = TRUE)
   }
 
-  io <- .st_write_inputs(geno_meta, placed, work_dir)
+  io <- .st_write_inputs(geno_meta, placed, work_dir, caller = caller)
 
-  # SelectionTools writes its side files into the working directory.
-  old_wd <- setwd(work_dir)
-  on.exit(setwd(old_wd), add = TRUE, after = FALSE)
-  raw <- .st_run_hblocks(basename(io$geno_file), basename(io$map_file),
-                         ld_threshold, tolerance, verbose = verbose)
-  setwd(old_wd)
+  # SelectionTools reads and writes through st.input.dir / st.output.dir,
+  # which point at the private directory for this call (0.9.0: the working
+  # directory is not changed).
+  trk$tick(1L, label = "start")
+  raw <- .st_with_io_dirs(work_dir,
+                          .st_run_hblocks(basename(io$geno_file), basename(io$map_file),
+                                          ld_threshold, tolerance, verbose = verbose))
 
-  bm <- .st_parse_blocks(raw, io$markers)
+  bm <- .st_parse_blocks(raw, io$markers, caller = caller)
+  trk$tick(2L, label = "done",
+           payload = list(n_blocks = length(unique(bm$Block))))
 
   if (isTRUE(verbose))
-    message(sprintf(paste0(
+    .hs_inform(sprintf(paste0(
       "%s: SelectionTools blocks (r^2 >= %s, tolerance %d): %s; %d unplaced ",
       "marker(s) left unblocked%s; %.1f s"),
       caller, format(ld_threshold), as.integer(tolerance), .ld_sizes_note(bm),
@@ -386,203 +303,80 @@ st_ld_blocks <- function(geno_meta,
   .ld_finish(geno_meta, bm,
              data.frame(Marker = io$markers$Marker, Chrom = io$markers$Chrom,
                         Pos = io$markers$Pos, stringsAsFactors = FALSE),
-             attach, output_dir, prefix, caller)
+             attach, output_dir, prefix, caller,
+             rule = list(backend = "st_ld_blocks", ld_threshold = ld_threshold,
+                         tolerance = tolerance,
+                         n_unplaced = n_unplaced + io$n_left_out))
 }
 
 
 #' LD haplotype blocks from SelectionTools files (experimental)
 #'
 #' The file route of the SelectionTools resolver, for genotype and map files
-#' already in SelectionTools' own formats. Named
+#' already in SelectionTools' own formats: \code{\link{st_convert}} reads them
+#' into a \code{GenoMeta}, \code{\link{st_ld_blocks}} blocks it, and the two
+#' canonical block files are written to \code{output_dir}. Named
 #' \code{define_haplotype_blocks()} up to 0.7.9; that name still works, with a
-#' deprecation warning. For data in a \code{GenoMeta} use
-#' \code{\link{st_ld_blocks}}. Before either, check whether you need LD
-#' blocking at all: the recommended route is a block map you already have
-#' (\code{\link{attach_block_info}}), and the default local resolver is
-#' \code{\link{hapS_ld_blocks}}. Experimental, for the reasons
-#' \code{\link{st_ld_blocks}} gives.
+#' deprecation warning. SelectionTools is being retired from haploStack:
+#' \strong{this function is deprecated since 0.9.0} (it warns on every call
+#' and goes in 0.10; it is \code{\link{st_convert}} followed by
+#' \code{\link{st_ld_blocks}}), it is behind \code{\link{use_st_formats}}
+#' (off by default), and
+#' SelectionTools' own side files (\code{<tag>.ld.txt},
+#' \code{<tag>.haplotype_map.txt}, written up to 0.8.8) are no longer produced.
+#' Before using it, check whether you need LD blocking at all: the recommended
+#' route is a block map you already have (\code{\link{attach_block_info}}), and
+#' the default local resolver is \code{\link{hapS_ld_blocks}}.
 #'
-#' Four files are written to \code{output_dir}, named after the genotype file
+#' Two files are written to \code{output_dir}, named after the genotype file
 #' and the rule (\code{<tag>} = \code{<geno>_<ld_threshold>_t<tolerance>}):
-#' \describe{
-#'   \item{\code{<tag>_block_info.csv}}{Block coordinate table:
-#'     \code{Chrom, Block, Start, End}.}
-#'   \item{\code{<tag>_block_marker_map.csv}}{Canonical marker-level table:
-#'     \code{Chrom, Marker, Block}.}
-#'   \item{\code{<tag>.ld.txt}}{SelectionTools' block table, as
-#'     \code{st.def.hblocks()} returns it.}
-#'   \item{\code{<tag>.haplotype_map.txt}}{Per-marker haplotype-allele map
-#'     from \code{st.recode.hil()}.}
-#' }
+#' \code{<tag>_block_info.csv} and \code{<tag>_block_marker_map.csv}, the
+#' canonical tables (see \code{\link{build_block_location_info}}).
 #'
 #' @param geno_data_file Path to a genotype file in SelectionTools' own matrix
 #'   format (\code{st.read.marker.data(format = "m")}): markers in rows, the
 #'   first row the individual names, fields separated by a tab, a blank or
-#'   \code{;} — **not a comma**, so the CSV that
-#'   \code{write_geno_meta(output_format = "st")} writes is not one. Starting
-#'   from a \code{GenoMeta}, use \code{\link{st_ld_blocks}}.
+#'   \code{;} (not a comma). Starting from a \code{GenoMeta}, use
+#'   \code{\link{st_ld_blocks}}.
 #' @param geno_map_file  Path to the map, SelectionTools format \code{"mcp"}
-#'   with a header line: columns \code{name, chrom, pos}. SelectionTools keeps
-#'   only the leading integer of a chromosome name; the returned tables take
-#'   \code{Chrom} (e.g. \code{"1H"}) from this file.
-#' @param ld_threshold   Minimum LD (\code{r^2}) to merge adjacent markers; one
-#'   number in \eqn{(0, 1]}. Default \code{0.5}. \code{0} is refused:
-#'   SelectionTools aborts the R session on it.
-#' @param tolerance      Tolerance for \code{st.def.hblocks()}; a whole number
-#'   \eqn{\ge 0}. Default \code{0}.
-#' @param output_dir     Directory where block-map files are written.
+#'   with a header line: columns \code{name, chrom, pos}. The returned tables
+#'   take \code{Chrom} (e.g. \code{"1H"}) from this file.
+#' @inheritParams st_ld_blocks
+#' @param output_dir     Directory where the two block files are written.
 #'
-#' @return A named list with:
-#' \describe{
-#'   \item{\code{block_info}}{data.table: \code{Chrom, Block, Start, End}.}
-#'   \item{\code{block_marker_map}}{data.table: \code{Chrom, Marker, Block}.}
-#' }
+#' @return A named list with \code{block_marker_map} (\code{Chrom, Marker,
+#'   Block}), \code{block_info} (\code{Chrom, Block, Start, End, Pos, Num_SNPs,
+#'   Block_length}) and \code{provenance}, as \code{st_ld_blocks(attach =
+#'   FALSE)} returns it.
 #'
 #' @details
 #' Requires the \pkg{SelectionTools} package. If not installed, an informative
 #' error is raised so the user can supply a pre-computed block map instead.
 #'
-#' SelectionTools runs in a private temporary directory (its side files —
-#' \code{ld}, \code{blocks.hmap}, \code{blocks.hall}, the \code{.srt} map — never
-#' touch the working directory or the input folder) and on the data set
-#' \code{"ld.blocks"}; its \code{"default"} data set is left alone (0.7.9).
-#' SelectionTools' \code{st.input.dir} / \code{st.output.dir} are handled as
-#' \code{\link{st_ld_blocks}} describes.
-#'
-#' After calling this function, pass the \code{block_marker_map} element of
-#' the returned list to \code{\link{attach_block_info}} to register the block
-#' assignments in a \code{GenoMeta} object:
-#' \preformatted{
-#'   blocks <- st_ld_blocks_files("geno.txt", "map.txt")
-#'   meta   <- attach_block_info(meta, blocks$block_marker_map)
-#' }
-#'
 #' @seealso \code{\link{st_ld_blocks}} (start from a \code{GenoMeta}),
+#'   \code{\link{st_convert}} (the format converter),
 #'   \code{\link{hapS_ld_blocks}} (the default resolver),
-#'   \code{\link{attach_block_info}}, \code{\link{run_haplotype_catalogue}},
-#'   \code{\link{build_block_location_info}}, \code{\link{expand_block_info}}
+#'   \code{\link{attach_block_info}}, \code{\link{build_block_location_info}}
 #'
 #' @export
 st_ld_blocks_files <- function(geno_data_file,
                                geno_map_file,
                                ld_threshold = 0.5,
                                tolerance    = 0,
-                               output_dir   = "haplotype") {
+                               output_dir   = "haplotype",
+                               st_formats   = NULL,
+                               progress     = NULL) {
+  # Deprecated since 0.9.0 (row 27 a): st_convert() then st_ld_blocks().
+  .hs_deprecated("st_ld_blocks_files()", "st_convert() followed by st_ld_blocks()",
+                 "0.9.0")
   caller <- "st_ld_blocks_files"
+  .st_gate(caller, st_formats)
   .ld_check_rule(ld_threshold, tolerance, caller, zero_note = .st_zero_note)
   .st_require(caller)
-  st_dirs <- .st_check_io_dirs(caller)
-  on.exit(.st_drop_io_dirs(st_dirs), add = TRUE)
-
-  geno_data_file <- normalizePath(geno_data_file, winslash = "/", mustWork = TRUE)
-  geno_map_file  <- normalizePath(geno_map_file,  winslash = "/", mustWork = TRUE)
-  if (!dir.exists(output_dir))
-    dir.create(output_dir, recursive = TRUE)
-  output_dir <- normalizePath(output_dir, winslash = "/", mustWork = TRUE)
-
-  geno_basename <- gsub("\\..*$", "", basename(geno_data_file))
-  tag           <- paste0(geno_basename, "_", ld_threshold, "_t", tolerance)
-
-  # SelectionTools writes side files into the working directory ("ld",
-  # "blocks.hmap", "blocks.hall") and next to the map it reads ("<map>.srt").
-  # Run it in a private directory holding its own copy of the map, so neither
-  # the user's working directory nor the input folder is touched, and two runs
-  # cannot overwrite each other's files.
-  work_dir <- tempfile("hs_st_")
-  dir.create(work_dir, recursive = TRUE)
-  on.exit(unlink(work_dir, recursive = TRUE, force = TRUE), add = TRUE)
-  file.copy(geno_map_file, file.path(work_dir, "hs_map.txt"))
-  old_wd <- setwd(work_dir)
-  on.exit(setwd(old_wd), add = TRUE, after = FALSE)
-
-  # Load straight into the dedicated data set: reading into "default" (and
-  # copying) replaced whatever a SelectionTools session kept there.
-  ds <- "ld.blocks"
-  SelectionTools::st.read.marker.data(geno_data_file, format = "m",
-                                 data.set = ds)
-  SelectionTools::st.read.map("hs_map.txt",
-                               m.stretch  = 1,
-                               format     = "mcp",
-                               skip       = 1,
-                               data.set   = ds)
-
-  message("Computing pairwise LD (r²)...")
-  # auxfiles = FALSE: st.def.hblocks() reads the LD from SelectionTools'
-  # memory; writing the whole pairwise table to disk only to read it back into
-  # R (and discard it) was the slowest step on a genome-wide panel.
-  SelectionTools::st.calc.ld(ld.measure = "r2",
-                              data.set   = ds,
-                              auxfiles   = FALSE)
-
-  message("Defining haplotype blocks (LD threshold = ", ld_threshold,
-          ", tolerance = ", tolerance, ")...")
-  block_info_raw <- SelectionTools::st.def.hblocks(
-    ld.threshold = ld_threshold,
-    ld.criterion = "flanking",
-    tolerance    = as.integer(tolerance),
-    data.set     = ds
-  )
-  colnames(block_info_raw)[3L] <- "Block"
-
-  # Write raw LD block file
-  utils::write.table(block_info_raw,
-    file = file.path(output_dir, paste0(tag, ".ld.txt")),
-    sep = " ", row.names = FALSE, quote = FALSE)
-
-  # Build full haplotype map
-  hrec <- SelectionTools::st.recode.hil(data.set = ds)
-  setwd(old_wd)
-  hrec$Block_id <- paste0(hrec$Block, "_", hrec$AlleleNr)
-  block_info_full <- dplyr::left_join(hrec, block_info_raw, by = "Block")
-
-  setDT(block_info_full)
-  block_info_map <- block_info_full[, .(
-    Marker     = unlist(strsplit(gsub(" ", "", Markers), ";")),
-    MarkerName = paste0(
-      unlist(strsplit(gsub(" ", "", Markers), ";")), ".",
-      unlist(strsplit(gsub(" ", "", AlleleDef), ";"))),
-    Pos   = rep(Pos, lengths(strsplit(gsub(" ", "", Markers), ";"))),
-    Block = rep(Block, lengths(strsplit(gsub(" ", "", Markers), ";")))
-  ), by = .(Chrom, Block_id)][, c("Chrom","Marker","MarkerName",
-                                   "Block","Block_id","Pos")]
-
-  # Read map file for precise positions — and for the chromosome NAMES.
-  # SelectionTools keeps only the leading integer of a chromosome ("1H" -> 1),
-  # so joining its Chrom back to a named map matched nothing and every
-  # position came out NA (up to 0.7.8). Join on Marker alone and take Chrom
-  # from the map. Marker and Chrom are read as text (a numeric-looking marker
-  # ID must stay the string SelectionTools returned); Pos keeps fread's type,
-  # so the written files format positions exactly as before.
-  map_info <- fread(geno_map_file, header = TRUE,
-                    colClasses = list(character = 1:2))
-  map_info <- map_info[, 1:3]
-  colnames(map_info) <- c("Marker", "Chrom", "Pos")
-
-  block_info_map <- dplyr::left_join(
-    block_info_map[, c("Marker","MarkerName","Block","Block_id")],
-    map_info, by = "Marker", relationship = "many-to-many"
-  )[, c("Chrom","Marker","MarkerName","Block","Block_id","Pos")]
-
-  fwrite(as.data.table(block_info_map),
-         file = file.path(output_dir, paste0(tag, ".haplotype_map.txt")),
-         sep = " ", row.names = FALSE, quote = FALSE)
-
-  # Build canonical block_marker_map: (Chrom, Marker, Block)
-  block_marker_map <- unique(
-    as.data.table(block_info_map)[, .(Chrom, Marker, Block)]
-  )
-
-  # Build block_info: (Chrom, Block, Start, End) from marker positions
-  block_info <- block_marker_map[
-    as.data.table(map_info)[, .(Marker, Pos)], on = "Marker", nomatch = 0
-  ][, .(Start = min(Pos), End = max(Pos)), by = .(Chrom, Block)]
-
-  # Write both canonical files
-  binfo_file  <- file.path(output_dir, paste0(tag, "_block_info.csv"))
-  bmap_file   <- file.path(output_dir, paste0(tag, "_block_marker_map.csv"))
-  fwrite(block_info,      file = binfo_file,  sep = ",", row.names = FALSE, quote = FALSE)
-  fwrite(block_marker_map, file = bmap_file,  sep = ",", row.names = FALSE, quote = FALSE)
-  message("Block files written to: ", output_dir)
-
-  list(block_info = block_info, block_marker_map = block_marker_map)
+  tag  <- paste0(gsub("\\..*$", "", basename(geno_data_file)), "_",
+                 ld_threshold, "_t", tolerance)
+  meta <- st_convert(geno_data_file, map = geno_map_file, st_formats = TRUE)
+  st_ld_blocks(meta, ld_threshold = ld_threshold, tolerance = tolerance,
+               attach = FALSE, output_dir = output_dir, prefix = tag,
+               verbose = FALSE, st_formats = TRUE, progress = progress)
 }

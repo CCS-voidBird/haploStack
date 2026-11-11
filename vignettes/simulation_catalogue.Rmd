@@ -43,7 +43,7 @@ N_SAMPLES  <- 10L
 N_MARKERS  <- 20L
 N_CHROM    <- 3L
 BLOCK_SIZE <- 4L
-ENCODING   <- "selectiontools"   # "1/4" style
+ENCODING   <- "nucleotide"       # "A/T" style (the one categorical vocabulary since 0.9.0)
 
 ## ── Genotype matrix (markers × samples) ───────────────────────────────────────
 geno_mat <- sim_geno_matrix(N_SAMPLES, N_MARKERS, ENCODING)
@@ -75,7 +75,7 @@ cat("Number of unique blocks:", length(unique(block_map_df$Block)), "\n")
 ```{r sim-effects}
 ## ── Marker effects (Marker, Allele, Effect) ───────────────────────────────────
 ## SelectionTools encoding uses alleles "1" and "4"
-effect_df <- sim_effect_df(rownames(geno_mat), alleles = c("1","4"))
+effect_df <- sim_effect_df(rownames(geno_mat), alleles = c("A","T"))
 
 cat("Effect data (first 8 rows):\n")
 print(head(effect_df, 8))
@@ -180,7 +180,10 @@ unlink(tmp_meta)
 
 ```{r recode-profile}
 ## ── Node: recode_geno_meta ────────────────────────────────────────────────────
-## Convert selectiontools (numeric) to nucleotide (char)
+## Since 0.9.0 a GenoMeta holds nucleotide alleles only, so this is a no-op on
+## a fresh container; it is the explicit route for an object saved by an
+## earlier version with SelectionTools codes (1/4), which load_geno_meta() and
+## upgrade_geno_meta() also recode on their own.
 meta_nuc <- recode_geno_meta(meta, to_type = "nucleotide")
 cat("Original encoding:", meta$metadata$encoding, "\n")
 cat("Recoded encoding:", meta_nuc$metadata$encoding, "\n")
@@ -204,7 +207,7 @@ gebv_matrix <- compute_profile_localgebv(
   geno_meta      = meta,
   effect_df      = effect_df,
   level          = "genotype",
-  center_by_freq = TRUE
+  center = "allele_freq"
 )
 
 cat("GEBV matrix dimensions:", dim(gebv_matrix), "\n")
@@ -221,7 +224,7 @@ gebv_hap <- compute_profile_localgebv(
   geno_meta      = meta,
   effect_df      = effect_df,
   level          = "haplotype",
-  center_by_freq = FALSE
+  center = "none"
 )
 cat("Haplotype-level columns:", ncol(gebv_hap) - 1L,
     "(expected:", length(profile$samples) * 2L, ")\n")

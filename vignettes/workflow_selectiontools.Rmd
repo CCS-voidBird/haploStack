@@ -196,7 +196,7 @@ gebv_yield <- compute_profile_localgebv(
   profile        = profile,
   effect_df      = eff_yield,
   level          = "genotype",   # "haplotype" for per-haplotype resolution
-  center_by_freq = TRUE
+  center = "allele_freq"
 )
 
 cat("GEBV matrix:", dim(gebv_yield), "(blocks × samples + 1)\n")
@@ -222,7 +222,7 @@ results <- run_haplotype_catalogue(
   output_dir     = "output/catalogue_st",
   ld_threshold   = 0.5,
   save_profile   = TRUE,
-  center_by_freq = TRUE,
+  center = "allele_freq",
   n_cores        = 1L
 )
 
@@ -302,19 +302,20 @@ Convert a SelectionTools genotype into PLINK PED or genomicSimulation format.
 
 ```{r export}
 # ── ST → PLINK PED ────────────────────────────────────────────────────────────
-write_geno_meta(meta, path = "output/genotype_plink", output_format = "plink_ped")
+write_geno_meta(meta, path = "output/genotype_plink", preset = "PL")
 # Writes: output/genotype_plink.ped + output/genotype_plink.map
 
 # ── ST → genomicSimulation CSV ────────────────────────────────────────────────
-write_geno_meta(meta, path = "output/genotype_gs.csv", output_format = "gs")
+write_geno_meta(meta, path = "output/genotype_gs.csv", preset = "GS")
 
 # ── Inspect the ST matrix (markers × samples, "1/4" cells) ───────────────────
-converted_st <- geno_meta_to_matrix(meta, output_format = "st")
+converted_st <- geno_meta_to_matrix(meta, preset = "ST", st_formats = TRUE)
+# (cells are the container's nucleotides; st_convert(to = "selectiontools") writes the codes)
 dim(converted_st$matrix)         # n_markers × n_samples
 converted_st$matrix[1:4, 1:5]
 
 # ── Inspect the PLINK matrix (samples × markers, "A T" space-sep cells) ──────
-converted_pl <- geno_meta_to_matrix(meta, output_format = "plink_ped")
+converted_pl <- geno_meta_to_matrix(meta, preset = "PL")
 dim(converted_pl$matrix)         # n_samples × n_markers
 converted_pl$matrix[1:3, 1:4]
 

@@ -78,12 +78,12 @@ create_fitness_index <- function(effect_list,
 
   # Validate inputs
   if (length(effect_list) == 0L)
-    stop("create_fitness_index: 'effect_list' must contain at least one trait.")
+    .hs_abort("create_fitness_index: 'effect_list' must contain at least one trait.")
   trait_names <- names(effect_list)
   if (is.null(trait_names))
-    stop("create_fitness_index: 'effect_list' must be named.")
+    .hs_abort("create_fitness_index: 'effect_list' must be named.")
   if (!all(trait_names %in% names(trait_weights)))
-    stop("create_fitness_index: 'trait_weights' must have names matching all traits.")
+    .hs_abort("create_fitness_index: 'trait_weights' must have names matching all traits.")
 
   # Weights are used AS GIVEN by default (0.5.4): the composite is the plain
   # sum(weight * effect), so its effects — and any GEBV derived from them — stay
@@ -93,10 +93,10 @@ create_fitness_index <- function(effect_list,
   # trait's contribution stays balanced. Dividing by sum(w) would blow up / flip
   # when weights sum to ~0 (e.g. +1 and -1).
   w <- trait_weights[trait_names]
-  if (any(is.na(w))) stop("create_fitness_index: some trait weights are NA.")
+  if (any(is.na(w))) .hs_abort("create_fitness_index: some trait weights are NA.")
   if (normalise_weights) {
     denom <- sum(abs(w))
-    if (denom == 0) stop("create_fitness_index: 'trait_weights' are all zero.")
+    if (denom == 0) .hs_abort("create_fitness_index: 'trait_weights' are all zero.")
     w <- w / denom
   }
 
@@ -104,7 +104,7 @@ create_fitness_index <- function(effect_list,
   eff_dfs <- lapply(seq_along(effect_list), function(i) {
     df <- as.data.frame(effect_list[[i]], stringsAsFactors = FALSE)
     if (ncol(df) < 3L)
-      stop(sprintf("Effect table for '%s' needs >= 3 columns.", trait_names[i]))
+      .hs_abort(sprintf("Effect table for '%s' needs >= 3 columns.", trait_names[i]))
     colnames(df)[1:3] <- c("Marker", "Allele", "Effect")
     df$Marker <- as.character(df$Marker)
     df$Allele <- as.character(df$Allele)
@@ -121,21 +121,24 @@ create_fitness_index <- function(effect_list,
   # Compute weighted composite
   result <- all_pairs
 
-  trait_cols <- list()
+  # Each trait's raw contribution is kept before weighting (0.9.0, sc/F22): up
+  # to 0.8.8 the per-trait column was the weighted value divided by the
+  # weight, so a zero weight gave NaN. The composite is unchanged.
+  raw_cols <- list()
   for (trait in trait_names) {
     eff_dt <- as.data.table(eff_dfs[[trait]])
     joined <- merge(result, eff_dt, by = c("Marker","Allele"), all.x = TRUE)
     joined$Effect[is.na(joined$Effect)] <- fill_missing
-    trait_cols[[trait]] <- joined$Effect * w[[trait]]
+    raw_cols[[trait]] <- joined$Effect
   }
 
-  result$Effect <- Reduce("+", trait_cols)
+  result$Effect <- Reduce("+", lapply(trait_names, function(tr) raw_cols[[tr]] * w[[tr]]))
   for (trait in trait_names) {
-    result[[trait]] <- trait_cols[[trait]] / w[[trait]]  # un-weighted contribution
+    result[[trait]] <- raw_cols[[trait]]                 # un-weighted contribution
   }
 
   # Sort by Marker, Allele
-  result <- result[order(result$Marker, result$Allele), ]
+  result <- result[.hs_order(result$Marker, result$Allele), ]
   rownames(result) <- NULL
 
   as.data.table(result)
@@ -165,20 +168,25 @@ update_fitness_index <- function(fitness_index,
                                   normalise_weights = FALSE) {
 
   if (!is.data.table(fitness_index))
-    stop("update_fitness_index: 'fitness_index' must be a data.table.")
+    .hs_abort("update_fitness_index: 'fitness_index' must be a data.table.")
   if (!all(c("Marker","Allele","Effect") %in% names(fitness_index)))
-    stop("update_fitness_index: 'fitness_index' must have Marker, Allele, Effect columns.")
+    .hs_abort("update_fitness_index: 'fitness_index' must have Marker, Allele, Effect columns.")
 
   # Rebuild using the restricted marker × allele set from the existing index
   base_registry <- fitness_index[, .(Marker, Allele)]
   allele_dict   <- unique(fitness_index$Allele)
 
-  create_fitness_index(
+  out <- create_fitness_index(
     effect_list       = updated_effects,
     trait_weights     = trait_weights,
     allele_dict       = allele_dict,
     normalise_weights = normalise_weights
   )
+  # Keep to the original registry, as documented (0.9.0, sc/F29): up to 0.8.8
+  # a marker present only in the updated effects was admitted.
+  out <- out[base_registry, on = .(Marker, Allele), nomatch = NULL]
+  out <- out[order(Marker, Allele)]
+  out[]
 }
 
 
@@ -202,11 +210,11 @@ write_fitness_file <- function(fitness_index,
                                 sep  = " ") {
   cols_exist <- intersect(cols, names(fitness_index))
   if (length(cols_exist) == 0L)
-    stop("write_fitness_file: none of the requested columns found in fitness_index.")
+    .hs_abort("write_fitness_file: none of the requested columns found in fitness_index.")
 
   fwrite(fitness_index[, cols_exist, with = FALSE],
          file = path, sep = sep, quote = FALSE, row.names = FALSE)
-  message("Fitness index written to: ", path)
+  .hs_inform("Fitness index written to: ", path)
   invisible(NULL)
 }
 
@@ -223,10 +231,13 @@ write_fitness_file <- function(fitness_index,
 #' @param allele_dict    Valid allele states (default \code{DEFAULT_ALLELE_DICT}).
 #' @param normalise_weights Logical. Default \code{FALSE} (weights used as
 #'   given; see \code{\link{create_fitness_index}}).
-#' @param plot_landscape Logical. When \code{TRUE}, print a barplot of
-#'   marker-level fitness effects. Default \code{FALSE}.
+#' @param plot_landscape Logical. When \code{TRUE}, build a barplot of
+#'   marker-level fitness effects, attach it to the result as
+#'   \code{attr(fi, "landscape")} and print it at an interactive console only
+#'   (since 0.9.0 nothing is drawn inside a script). Default \code{FALSE}.
 #'
-#' @return The fitness index \code{data.table}, invisibly.
+#' @return The fitness index \code{data.table}, invisibly; with
+#'   \code{plot_landscape = TRUE} the ggplot is \code{attr(fi, "landscape")}.
 #'
 #' @export
 run_fitness_pipeline <- function(effect_list,
@@ -236,14 +247,14 @@ run_fitness_pipeline <- function(effect_list,
                                   normalise_weights = FALSE,
                                   plot_landscape    = FALSE) {
 
-  message("Building fitness index for ", length(effect_list), " trait(s)...")
+  .hs_inform("Building fitness index for ", length(effect_list), " trait(s)...")
   fi <- create_fitness_index(
     effect_list       = effect_list,
     trait_weights     = trait_weights,
     allele_dict       = allele_dict,
     normalise_weights = normalise_weights
   )
-  message("  Fitness index: ", nrow(fi), " marker-allele rows.")
+  .hs_inform("  Fitness index: ", nrow(fi), " marker-allele rows.")
 
   if (plot_landscape) {
     p <- ggplot(fi, aes(x = reorder(paste0(Marker,".",Allele), Effect),
@@ -251,11 +262,15 @@ run_fitness_pipeline <- function(effect_list,
       geom_col() +
       scale_fill_manual(values = c("TRUE" = "#2ca25f", "FALSE" = "#de2d26"),
                         guide  = "none") +
-      labs(title = "Fitness Landscape — Marker Effects",
+      labs(title = "Fitness Landscape \u2014 Marker Effects",
            x = "Marker.Allele", y = "Composite Effect") +
       theme_bw(base_size = 10) +
       theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 5))
-    print(p)
+    # 0.9.0 (C-run-fitness-print; D4 §3.10 form): the figure travels with the
+    # result and is drawn only at an interactive console — a script or a
+    # server never gets a device opened behind its back.
+    attr(fi, "landscape") <- p
+    if (interactive()) print(p)
   }
 
   if (!is.null(output_file)) {

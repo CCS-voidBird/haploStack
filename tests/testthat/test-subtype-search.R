@@ -18,7 +18,7 @@ srch_meta <- function(n_samples = 12L) {
                       n_chrom = 3L, block_size = 4L)
   mk <- dimnames(m$geno_arrays)[[2L]]
   m$marker_effects <- list(
-    Yield = sim_effect_df(mk, alleles = c("1", "4"), seed = 1L))
+    Yield = sim_effect_df(mk, alleles = c("A", "T"), seed = 1L))
   m
 }
 

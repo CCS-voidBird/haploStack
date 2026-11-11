@@ -81,6 +81,14 @@ normalises the marker map, detects minor alleles, and returns a single
 metadata list consumed by \code{\link{transform_genotype}} and the catalogue
 pipeline functions.
 }
+\section{Deprecated}{
+
+Since 0.9.0 (warns on every call; removed in 0.10 with
+\code{\link{transform_genotype}}). Build a \code{GenoMeta} with
+\code{\link{build_geno_meta}} or a reader instead. See
+\link{haploStack-deprecated}.
+}
+
 \examples{
 # Minimal example — SelectionTools format
 geno <- matrix(c("1/1","1/4","4/4","1/1"), nrow = 2,

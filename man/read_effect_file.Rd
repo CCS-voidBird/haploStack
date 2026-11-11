@@ -40,12 +40,13 @@ is preserved.}
 \item{char_dict}{Encoding dictionary (default:
 \code{DEFAULT_ENCODING_DICT}).}
 
-\item{extend}{Logical. When \code{TRUE} (default) fills in zero-effect
-rows for any (Marker, Allele) combination missing from the file.}
+\item{extend}{Deprecated since 0.9.0 and ignored: the zero-effect rows
+it promised were never added (the branch needed a dictionary entry no
+dictionary has). Supplying it warns.}
 }
 \value{
 data.frame with columns \code{Marker}, \code{Allele},
-\code{Effect} \link{, \code{Effect2}, ...}.
+\code{Effect}, optionally followed by \code{Effect2}, \code{Effect3}, ...
 }
 \description{
 Reads a space-, tab- or comma-separated effect file, with or without a

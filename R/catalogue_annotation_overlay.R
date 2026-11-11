@@ -38,27 +38,39 @@
 #' @param match_bp Matching tolerance in bp (default the shared 10 kb,
 #'   \code{.HS_ANNOT_DEFAULT_BP} — the same constant as
 #'   \code{compute_block_annotation()}'s \code{flank_bp} default).
+#' @param chr_map  Optional named character vector, container chromosome ->
+#'   the annotation's spelling (the one direction every haploStack
+#'   \code{chr_map} uses, e.g. \code{c("1" = "1H")}). Positions are matched
+#'   on the mapped names; the stored \code{Chrom} of a matched row is the
+#'   container's spelling.
 #'
 #' @return A data.frame: \code{Marker, Chrom, Pos, Block, Name, Type, Trait,
 #'   matched_dist_bp} — one row per input row, input order kept.
 #'   \code{matched_dist_bp} is 0 on the \code{Marker} route, the
 #'   marker-to-position distance on a positional match, \code{NA} unplaced.
+#'   A region table (\code{Chrom} + \code{Start}/\code{End}, no \code{Pos})
+#'   is matched at its midpoint.
 #'
 #' @seealso \code{\link{attach_marker_annotations}},
 #'   \code{\link{track_marker_labels}}
 #' @export
 standardize_marker_annotations <- function(x, meta = NULL,
-                                           match_bp = .HS_ANNOT_DEFAULT_BP) {
+                                           match_bp = .HS_ANNOT_DEFAULT_BP,
+                                           chr_map = NULL) {
   df <- as.data.frame(x, stringsAsFactors = FALSE)
   if (!"Name" %in% names(df))
-    stop("standardize_marker_annotations: 'x' needs a Name column.")
+    .hs_abort("standardize_marker_annotations: 'x' needs a Name column.")
   has_marker <- "Marker" %in% names(df)
-  has_pos    <- all(c("Chrom", "Pos") %in% names(df))
+  has_span   <- "Chrom" %in% names(df) && all(c("Start", "End") %in% names(df))
+  has_pos    <- "Chrom" %in% names(df) && ("Pos" %in% names(df) || has_span)
   if (!has_marker && !has_pos)
-    stop("standardize_marker_annotations: 'x' needs Marker, or Chrom + Pos.")
+    .hs_abort("standardize_marker_annotations: 'x' needs Marker, or Chrom + Pos ",
+              "(or Chrom + Start + End).")
+  if (has_pos && !"Pos" %in% names(df))      # a region: matched at its midpoint
+    df$Pos <- (as.numeric(df$Start) + as.numeric(df$End)) / 2
   if (!is.numeric(match_bp) || length(match_bp) != 1L || is.na(match_bp) ||
       match_bp < 0)
-    stop("standardize_marker_annotations: 'match_bp' must be a single ",
+    .hs_abort("standardize_marker_annotations: 'match_bp' must be a single ",
          "number >= 0.")
 
   n <- nrow(df)
@@ -76,49 +88,46 @@ standardize_marker_annotations <- function(x, meta = NULL,
     stringsAsFactors = FALSE)
 
   if (!is.null(meta)) {
-    if (!is_geno_meta(meta))
-      stop("standardize_marker_annotations: 'meta' is not a valid GenoMeta.")
-    map <- as.data.frame(meta$map_info, stringsAsFactors = FALSE)
-    map$Pos <- as.numeric(map$Pos)
+    .hs_check_meta(meta, "standardize_marker_annotations", "meta")
+    if (has_pos) .hs_require_bp(meta, "standardize_marker_annotations")
+    # One Marker -> locus lookup (D5 §3.6 c), in map order.
+    loc <- .marker_locus_table(meta, keyed = FALSE)
 
     # Marker route first: known ids take their mapped position.
     if (has_marker) {
-      idx <- match(out$Marker, map$Marker)
+      idx <- match(out$Marker, loc$Marker)
       hit <- !is.na(idx)
-      out$Chrom[hit] <- map$Chrom[idx[hit]]
-      out$Pos[hit]   <- map$Pos[idx[hit]]
+      out$Chrom[hit] <- loc$Chrom[idx[hit]]
+      out$Pos[hit]   <- loc$Pos[idx[hit]]
       out$matched_dist_bp[hit] <- 0
       out$Marker[!hit] <- NA_character_
     }
-    # Positional route for everything still unresolved but located.
+    # Positional route for everything still unresolved but located: nearest
+    # marker on the (mapped) chromosome, one vectorised pass (D5 §3.6 d); a
+    # matched row takes the container's chromosome spelling.
     todo <- is.na(out$Marker) & !is.na(out$Chrom) & !is.na(out$Pos)
-    for (i in which(todo)) {
-      cand <- map[map$Chrom == out$Chrom[i], , drop = FALSE]
-      if (nrow(cand) == 0L) next
-      d <- abs(cand$Pos - out$Pos[i])
-      j <- which.min(d)
-      if (d[j] <= match_bp) {
-        out$Marker[i]          <- cand$Marker[j]
-        out$matched_dist_bp[i] <- d[j]
-      }
+    if (any(todo)) {
+      nm <- .hs_nearest_marker(.hs_map_chrom(loc$Chrom, chr_map), loc$Pos,
+                               out$Chrom[todo], out$Pos[todo], match_bp)
+      hit <- !is.na(nm$index)
+      w <- which(todo)[hit]
+      out$Marker[w]          <- loc$Marker[nm$index[hit]]
+      out$Chrom[w]           <- loc$Chrom[nm$index[hit]]
+      out$matched_dist_bp[w] <- nm$dist[hit]
     }
     # Block of the resolved marker.
-    bmm <- meta$block_marker_map_info
-    if (!is.null(bmm)) {
-      bidx <- match(out$Marker, as.character(bmm$Marker))
-      out$Block <- ifelse(is.na(bidx), NA_character_,
-                          as.character(bmm$Block)[bidx])
-    }
+    bidx <- match(out$Marker, loc$Marker)
+    out$Block <- ifelse(is.na(bidx), NA_character_, loc$Block[bidx])
   } else if (has_marker && !has_pos) {
-    stop("standardize_marker_annotations: the Marker route needs 'meta' ",
+    .hs_abort("standardize_marker_annotations: the Marker route needs 'meta' ",
          "to resolve positions.")
   }
 
   unplaced <- is.na(out$Marker)
   if (!is.null(meta) && any(unplaced))
-    warning("standardize_marker_annotations: ", sum(unplaced), " of ", n,
+    .hs_warn("standardize_marker_annotations: ", sum(unplaced), " of ", n,
             " row(s) match no marker within ",
-            format(match_bp, big.mark = ","), " bp — kept with Marker/Block ",
+            format(match_bp, big.mark = ","), " bp \u2014 kept with Marker/Block ",
             "NA (first: ",
             paste(utils::head(out$Name[unplaced], 5L), collapse = ", "),
             if (sum(unplaced) > 5L) " ..." else "", ").")
@@ -145,33 +154,103 @@ standardize_marker_annotations <- function(x, meta = NULL,
 #' @param match_bp Passed to the standardizer (default the shared 10 kb).
 #' @param source   Optional free-text provenance note (e.g. the file the df
 #'   came from).
+#' @param chr_map  Passed to the standardizer: container chromosome -> the
+#'   table's spelling.
 #'
-#' @return The \code{GenoMeta} with \code{$annotation$custom} set.
+#' @return The \code{GenoMeta} with \code{$annotation$custom} set. The
+#'   provenance under \code{metadata$annotation$custom} records the source,
+#'   \code{match_bp}, \code{chr_map}, the counts, the unplaced names and an
+#'   ISO-8601 \code{created} stamp.
 #' @seealso \code{\link{standardize_marker_annotations}},
 #'   \code{\link{track_marker_labels}}
 #' @export
 attach_marker_annotations <- function(meta, x,
                                       match_bp = .HS_ANNOT_DEFAULT_BP,
-                                      source = NULL) {
-  if (!is_geno_meta(meta))
-    stop("attach_marker_annotations: 'meta' is not a valid GenoMeta.")
+                                      source = NULL, chr_map = NULL) {
+  .hs_check_meta(meta, "attach_marker_annotations", "meta")
   std_cols <- c("Marker", "Chrom", "Pos", "Block", "Name", "Type", "Trait",
                 "matched_dist_bp")
-  std <- if (is.data.frame(x) && all(std_cols %in% names(x)))
-    as.data.frame(x, stringsAsFactors = FALSE)[, std_cols]
-  else
-    standardize_marker_annotations(x, meta = meta, match_bp = match_bp)
+  if (is.data.frame(x) && all(std_cols %in% names(x))) {
+    # An already-standardized table: the fast path, but checked (ann/F21) —
+    # every resolved Marker must be in the map and every Block in the blocks.
+    std <- as.data.frame(x, stringsAsFactors = FALSE)[, std_cols]
+    mk  <- as.character(std$Marker)
+    bad_m <- which(!is.na(mk) & !mk %in% as.character(meta$map_info$Marker))
+    if (length(bad_m))
+      .hs_abort("attach_marker_annotations: ", length(bad_m), " row(s) name a ",
+                "Marker that is not in the container's map (first: ",
+                paste(utils::head(std$Name[bad_m], 5L), collapse = ", "),
+                if (length(bad_m) > 5L) " ..." else "", ").", call. = FALSE,
+                data = list(bad = bad_m))
+    known <- unique(as.character(if (!is.null(meta$block_marker_map_info))
+      meta$block_marker_map_info$Block else meta$block_info$Block))
+    bk <- as.character(std$Block)
+    bad_b <- which(!is.na(bk) & !bk %in% known)
+    if (length(bad_b))
+      .hs_abort("attach_marker_annotations: ", length(bad_b), " row(s) name a ",
+                "Block that is not in the container's blocks (first: ",
+                paste(utils::head(std$Name[bad_b], 5L), collapse = ", "),
+                if (length(bad_b) > 5L) " ..." else "", ").", call. = FALSE,
+                data = list(bad = bad_b))
+  } else {
+    std <- standardize_marker_annotations(x, meta = meta, match_bp = match_bp,
+                                          chr_map = chr_map)
+  }
 
-  if (is.null(meta$annotation)) meta$annotation <- list()
-  meta$annotation$custom <- std
-  if (is.null(meta$metadata$annotation)) meta$metadata$annotation <- list()
-  meta$metadata$annotation$custom <- list(
+  ann <- meta$annotation %||% list()
+  ann$custom <- std
+  prov <- meta$metadata$annotation %||% list()
+  prov$custom <- list(
     source          = source %||% NA_character_,
     match_bp        = as.numeric(match_bp),
+    chr_map         = chr_map,
     n               = nrow(std),
     n_matched       = sum(!is.na(std$Marker)),
     n_unplaced      = sum(is.na(std$Marker)),
-    date            = format(Sys.Date()),
+    unplaced        = as.character(std$Name[is.na(std$Marker)]),
+    created         = .hs_utc_now(),
     package_version = as.character(utils::packageVersion("haploStack")))
-  meta
+  # One rebuild path (0.9.0): the custom table joins the stored annotation,
+  # everything else is forwarded and the whole container revalidated.
+  .rebuild_geno_meta(meta, annotation = ann, metadata = list(annotation = prov),
+                     .caller = "attach_marker_annotations")
+}
+
+
+# One nearest-marker matcher (D5 §3.6 d): per chromosome, findInterval() on
+# the sorted positions, comparing the left and right neighbours. Ties keep the
+# 0.8.8 choice — the first map row in map order among the markers at the
+# minimum distance — so the old per-row loop gives identical results.
+#   map_chrom, map_pos  the map (after chr_map), in map order
+#   chrom, pos          the queries
+#   max_bp              beyond it a query is unplaced (NA)
+# Returns list(index = map row or NA, dist = distance or NA), one per query.
+.hs_nearest_marker <- function(map_chrom, map_pos, chrom, pos, max_bp) {
+  n <- length(chrom)
+  index <- rep(NA_integer_, n)
+  dist  <- rep(NA_real_, n)
+  map_chrom <- as.character(map_chrom); map_pos <- as.numeric(map_pos)
+  chrom <- as.character(chrom); pos <- as.numeric(pos)
+  todo <- !is.na(chrom) & !is.na(pos)
+  for (ch in unique(chrom[todo])) {
+    rows <- which(map_chrom == ch & !is.na(map_pos))
+    if (length(rows) == 0L) next
+    # first map row at each distinct position, positions ascending
+    first <- tapply(rows, map_pos[rows], min)
+    pu    <- as.numeric(names(first))
+    o     <- order(pu)
+    pu    <- pu[o]; first <- as.integer(first[o])
+    q  <- which(todo & chrom == ch)
+    k  <- findInterval(pos[q], pu)
+    li <- pmax(k, 1L); ri <- pmin(k + 1L, length(pu))
+    dl <- abs(pos[q] - pu[li]); dr <- abs(pos[q] - pu[ri])
+    dm <- pmin(dl, dr)
+    cl <- ifelse(dl == dm, first[li], NA_integer_)
+    cr <- ifelse(dr == dm, first[ri], NA_integer_)
+    best <- pmin(cl, cr, na.rm = TRUE)
+    ok <- dm <= max_bp
+    index[q[ok]] <- best[ok]
+    dist[q[ok]]  <- dm[ok]
+  }
+  list(index = index, dist = dist)
 }

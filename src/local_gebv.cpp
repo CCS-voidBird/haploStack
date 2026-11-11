@@ -67,6 +67,7 @@ NumericMatrix local_gebv_block_sum_cpp(IntegerMatrix code_mat,
   NumericMatrix result(n_copies, n_blocks);
 
   for (int j = 0; j < n_markers; ++j) {
+    if ((j & 255) == 0) Rcpp::checkUserInterrupt();   // 0.9.0 D1-5: interruptible
     const int b = block_idx[j];              // 1-based block, 0 = skip
     if (b == 0) continue;
     if (b < 0 || b > n_blocks)

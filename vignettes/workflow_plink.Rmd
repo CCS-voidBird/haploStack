@@ -179,7 +179,7 @@ gebv_yield <- compute_profile_localgebv(
   profile        = profile,
   effect_df      = eff_yield,
   level          = "genotype",   # "haplotype" for per-haplotype values
-  center_by_freq = TRUE
+  center = "allele_freq"
 )
 
 # Wide data.table: Block column + one column per sample
@@ -210,7 +210,7 @@ results <- run_haplotype_catalogue(
   output_dir     = "output/catalogue_plink",
   ld_threshold   = 0.5,
   save_profile   = TRUE,        # writes output/catalogue_plink/haplotype_profile_*.rds
-  center_by_freq = TRUE,
+  center = "allele_freq",
   n_cores        = 1L           # set > 1 (requires future + future.apply) for parallel
 )
 
@@ -296,19 +296,21 @@ to PLINK PED for QC checks.
 
 ```{r export}
 # ── PLINK PED → SelectionTools CSV ───────────────────────────────────────────
-write_geno_meta(meta, path = "output/genotype_st.csv", output_format = "st")
+# (the SelectionTools layout is behind use_st_formats(); st_formats = TRUE for one call)
+write_geno_meta(meta, path = "output/genotype_st.csv", preset = "ST",
+                st_formats = TRUE)
 
 # ── PLINK PED → genomicSimulation CSV ────────────────────────────────────────
-write_geno_meta(meta, path = "output/genotype_gs.csv", output_format = "gs")
+write_geno_meta(meta, path = "output/genotype_gs.csv", preset = "GS")
 
 # ── Inspect the converted matrix without writing ─────────────────────────────
-converted <- geno_meta_to_matrix(meta, output_format = "st")
+converted <- geno_meta_to_matrix(meta, preset = "ST", st_formats = TRUE)
 # converted$matrix — markers as rows, samples as columns, "A/T" style cells
 dim(converted$matrix)
 converted$matrix[1:4, 1:5]
 
 # ── Round-trip check: write back to PED ──────────────────────────────────────
-write_geno_meta(meta, path = "output/genotype_roundtrip", output_format = "plink_ped")
+write_geno_meta(meta, path = "output/genotype_roundtrip", preset = "PL")
 # Writes: output/genotype_roundtrip.ped + output/genotype_roundtrip.map
 ```
 

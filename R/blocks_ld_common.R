@@ -23,11 +23,11 @@
 .ld_check_rule <- function(ld_threshold, tolerance, caller, zero_note = NULL) {
   if (!is.numeric(ld_threshold) || length(ld_threshold) != 1L ||
       is.na(ld_threshold) || ld_threshold <= 0 || ld_threshold > 1)
-    stop(caller, ": 'ld_threshold' must be one number in (0, 1] (an r^2).",
+    .hs_abort(caller, ": 'ld_threshold' must be one number in (0, 1] (an r^2).",
          if (!is.null(zero_note)) paste0(" ", zero_note), call. = FALSE)
   if (!is.numeric(tolerance) || length(tolerance) != 1L || is.na(tolerance) ||
       tolerance < 0 || tolerance != round(tolerance))
-    stop(caller, ": 'tolerance' must be one whole number >= 0 (the number ",
+    .hs_abort(caller, ": 'tolerance' must be one whole number >= 0 (the number ",
          "of sub-threshold markers a block may absorb).", call. = FALSE)
   invisible(TRUE)
 }
@@ -53,37 +53,37 @@
 }
 
 # The common tail of every resolver.
-#   attach = FALSE: list(block_marker_map, block_info), and with `output_dir`
-#                   the two canonical files <prefix>_block_info.csv and
-#                   <prefix>_block_marker_map.csv;
-#   attach = TRUE:  the container with the blocks attached. attach_block_info()
-#                   rebuilds it and drops marker_effects and phenotype and
-#                   resets the FAM (INDEX discrepancy 20); the samples and
-#                   markers are unchanged, so they are carried across.
+#   attach = FALSE: list(block_marker_map, block_info, provenance), and with
+#                   `output_dir` the two canonical files (.write_block_files());
+#   attach = TRUE:  the container with the blocks attached (through
+#                   attach_block_info(), which rebuilds it and keeps
+#                   marker_effects, phenotype and the FAM) and, with
+#                   `output_dir`, the same two files.
 # bm:     data.frame(Chrom, Marker, Block) of the blocked markers
 # map_df: data.frame(Marker, Chrom, Pos) of the same markers
+# rule:   list(backend, ld_threshold, tolerance, ..., n_unplaced): the source,
+#         label and params of the provenance record (metadata$blocks, D2-6)
 .ld_finish <- function(geno_meta, bm, map_df, attach, output_dir, prefix,
-                       caller) {
+                       caller, rule) {
+  bi   <- .compute_block_location(bm, map_df)$block_info
+  prov <- .block_provenance(
+    bm, geno_meta$map_info,
+    source      = rule$backend,
+    label       = sprintf("%s_r%s_t%d", rule$backend, format(rule$ld_threshold),
+                          as.integer(rule$tolerance)),
+    params      = rule[setdiff(names(rule), c("backend", "n_unplaced"))],
+    n_unmatched = rule$n_unplaced %||% 0L)
+  res <- list(block_marker_map = data.table::as.data.table(bm),
+              block_info       = data.table::as.data.table(bi),
+              provenance       = prov)
   if (!isTRUE(attach)) {
-    bi <- .compute_block_location(bm, map_df)$block_info
-    if (!is.null(output_dir)) {
-      dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
-      # scipen: a round position (88000000) must not be written as 8.8e+07
-      data.table::fwrite(data.table::as.data.table(bi),
-                         file.path(output_dir, paste0(prefix, "_block_info.csv")),
-                         scipen = 100L)
-      data.table::fwrite(data.table::as.data.table(bm),
-                         file.path(output_dir, paste0(prefix, "_block_marker_map.csv")))
-    }
-    return(list(block_marker_map = data.table::as.data.table(bm),
-                block_info       = data.table::as.data.table(bi)))
+    if (!is.null(output_dir)) .write_block_files(res, output_dir, prefix)
+    return(res)
   }
 
-  out <- attach_block_info(geno_meta, bm, source_type = "block_marker_map")
-  for (f in c("marker_effects", "phenotype", "sample_info"))
-    if (!is.null(geno_meta[[f]])) out[[f]] <- geno_meta[[f]]
+  out <- attach_block_info(geno_meta, res)
   if (!is_geno_meta(out, verbose = TRUE))
-    stop(caller, ": the container failed validation after attaching blocks.",
+    .hs_abort(caller, ": the container failed validation after attaching blocks.",
          call. = FALSE)
   if (!is.null(output_dir))
     invisible(build_block_location_info(out, output_dir = output_dir,

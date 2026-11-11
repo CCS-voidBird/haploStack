@@ -1,11 +1,19 @@
 # =============================================================================
-# catalogue_gebv.R
+# catalogue_gebv.R — local GEBVs, the block catalogue and the allele sheet
 #
-# .compute_effect_size()    — internal: attach effects, centre, sum to hap-GEBV
-# compute_profile_localgebv() — exported: full local-GEBV pipeline
+#   compute_profile_localgebv()   — exported: per-block local GEBV matrix at the
+#                                   genotype or haplotype level (one shared
+#                                   compute core, R/catalogue_engine.R)
+#   compute_block_catalogue()     — exported: one row per (block, subtype) with
+#                                   its allele-combination signature and count
+#   write_block_allele_sheet()    — exported: per-block allele counts / freq
+#   .compute_block_signatures()   — internal: per-copy block signatures
+#   .validate_effect_encoding()   — internal: effect alleles vs the container
 #
-# Q1 (2026-06-08): encoding validation warning added.
-# Q2 (2026-06-08): effect computation extracted into .compute_effect_size().
+# Centring is one table (.HS_CENTER_DEFAULT, R/catalogue_engine.R; 0.9.0 row
+# 15 c); the arithmetic lives in .hap_effects() / .local_gebv_engine().
+# (Header rewritten 2026-11-09, cc/F23: the previous one described functions
+# that no longer exist here.)
 # =============================================================================
 
 # ---------------------------------------------------------------------------
@@ -29,12 +37,13 @@
 #' @param caller    Calling-function name, used in error messages.
 #' @return A single effect data.frame.
 #' @keywords internal
+#' @noRd
 .resolve_effect_df <- function(geno_meta, effect_df, trait = NULL, caller) {
   if (!is.null(effect_df)) return(effect_df)
 
   me <- geno_meta$marker_effects
   if (is.null(me))
-    stop(caller, ": no effects supplied — pass 'effect_df' or attach ",
+    .hs_abort(caller, ": no effects supplied \u2014 pass 'effect_df' or attach ",
          "'marker_effects' to the GenoMeta (e.g. via fit_genomic_prediction()).")
 
   if (is.data.frame(me)) return(me)        # bare table (back-compat)
@@ -42,12 +51,12 @@
   # canonical named list of per-trait tables
   if (!is.null(trait)) {
     if (!trait %in% names(me))
-      stop(caller, ": trait '", trait, "' not in geno_meta$marker_effects. ",
+      .hs_abort(caller, ": trait '", trait, "' not in geno_meta$marker_effects. ",
            "Available: ", paste(names(me), collapse = ", "), ".")
     return(me[[trait]])
   }
   if (length(me) == 1L) return(me[[1L]])
-  stop(caller, ": geno_meta$marker_effects holds multiple traits (",
+  .hs_abort(caller, ": geno_meta$marker_effects holds multiple traits (",
        paste(names(me), collapse = ", "), "); pass 'effect_df' or set 'trait' ",
        "to choose one.")
 }
@@ -70,8 +79,8 @@
 #' @param eff         Standardised effect \code{data.table} with columns
 #'   \code{Marker}, \code{Allele}, \code{Effect}.
 #' @param center        Centring mode applied to the allele effects:
-#'   \code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
-#'   \code{\link{compute_profile_localgebv}} for what each preserves.
+#'   \code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
+#'   \code{\link{compute_profile_localgebv}} for what each preserves.
 #' @param center_by_freq Logical; centre effects by population allele frequency
 #'   before summing.
 #' @param freq_dt Optional pre-computed allele-frequency table (Marker, Allele,
@@ -82,6 +91,7 @@
 #' @return \code{data.table} with columns \code{Sample}, \code{Haplotype_idx},
 #'   \code{Block}, \code{HapEffect}.
 #' @keywords internal
+#' @noRd
 .compute_effect_size <- function(long_dt, eff, center = "none",
                                  freq_dt = NULL) {
   center <- match.arg(as.character(center)[1L], HS_CENTER_MODES)
@@ -157,12 +167,12 @@
 #'
 #' \tabular{llll}{
 #'   \strong{mode} \tab \strong{contribution} \tab \strong{allele contrast} \tab \strong{block variance} \cr
-#'   \co\code{"none"} \tab \code{e_a} \tab \code{e_A - e_B} \tab reference \cr
-#'   \co\code{"locus_mean"} \tab \code{e_a - mean_i} \tab \strong{preserved} \tab \strong{unchanged} \cr
-#'   \co\code{"allele_freq"} \tab \code{e_a * (1 - p_a)} \tab becomes \code{q*e_A - p*e_B} \tab changed
+#'   \code{"none"} \tab \code{e_a} \tab \code{e_A - e_B} \tab reference \cr
+#'   \code{"locus_mean"} \tab \code{e_a - mean_i} \tab \strong{preserved} \tab \strong{unchanged} \cr
+#'   \code{"allele_freq"} \tab \code{e_a * (1 - p_a)} \tab becomes \code{q*e_A - p*e_B} \tab changed
 #' }
 #'
-#' \co\code{"locus_mean"} subtracts \strong{one} value per marker from every allele
+#' \code{"locus_mean"} subtracts \strong{one} value per marker from every allele
 #' at it, so it is a pure location shift: the A-vs-B contrast survives and every
 #' block variance is identical to the uncentred one. It is also invariant to
 #' adding a constant to both alleles' effects at a marker — the property 0.5.3
@@ -171,14 +181,14 @@
 #' \code{d*e_A + (ploidy - d)*e_B - ploidy*mean_i} is exactly
 #' \code{(d - ploidy*p_A) * (e_A - e_B)}.
 #'
-#' \co\code{"allele_freq"} centres each allele by \strong{its own} frequency, so
+#' \code{"allele_freq"} centres each allele by \strong{its own} frequency, so
 #' the two alleles of a marker are weighted differently. That is a reweighting
 #' rather than a shift: block variances change (median factor ~3 on the barley
 #' panel) and rankings can move with them. It was the catalogue default up to
 #' 0.5.5 and is what reproduces those numbers.
 #'
-#' Use \co\code{"locus_mean"} for selection and for any cross-package comparison;
-#' \co\code{"none"} is the default because it is the raw quantity and because it is
+#' Use \code{"locus_mean"} for selection and for any cross-package comparison;
+#' \code{"none"} is the default because it is the raw quantity and because it is
 #' what both entry points to this engine now agree on.
 #'
 #' @section What a haplotype slot is:
@@ -223,11 +233,8 @@
 #'   \code{"haplotype"} keeps them separate with column names
 #'   \code{"<Sample>.<haplotype_idx>"}. See \emph{What a haplotype slot is}.
 #' @param center        Centring mode applied to the allele effects before they
-#'   are summed: \co\code{"none"} (default), \co\code{"locus_mean"} or
-#'   \co\code{"allele_freq"}. See \emph{Centring}.
-#' @param center        Centring mode applied to the allele effects:
-#'   \code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
-#'   \code{\link{compute_profile_localgebv}} for what each preserves.
+#'   are summed: \code{"none"} (default), \code{"locus_mean"} or
+#'   \code{"allele_freq"}. See \emph{Centring}.
 #' @param center_by_freq \strong{Deprecated} logical, kept for one release:
 #'   \code{TRUE} maps to \code{center = "allele_freq"} and \code{FALSE} to
 #'   \code{center = "none"}. Supplying both this and \code{center} is an error.
@@ -282,11 +289,9 @@ compute_profile_localgebv <- function(
   fill_na        = 0,
   .core          = NULL
 ) {
-  center <- .resolve_center(center, center_by_freq,
-                            "compute_profile_localgebv", default = "none")
+  center <- .resolve_center(center, center_by_freq, "compute_profile_localgebv")
   level <- match.arg(level)
-  if (!is_geno_meta(geno_meta))
-    stop("compute_profile_localgebv: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "compute_profile_localgebv", "geno_meta")
 
   # Effect source: explicit effect_df overrides the stored marker_effects; a
   # per-trait list in the GenoMeta is resolved via `trait`.
@@ -303,7 +308,7 @@ compute_profile_localgebv <- function(
     !is.null(markers)
   if (!is.null(.core)) {
     if (any_subset_filter)
-      stop("compute_profile_localgebv: '.core' cannot be combined with ",
+      .hs_abort("compute_profile_localgebv: '.core' cannot be combined with ",
            "samples/markers/chromosomes filters.")
     core        <- .core
     keep_blocks <- blocks
@@ -319,10 +324,10 @@ compute_profile_localgebv <- function(
 
   # Validate allele encoding against the resolved encoding (warns + drops on
   # mismatch, exactly as before).
-  .validate_effect_encoding(eff, core$encoding)
+  .validate_effect_encoding(eff, core$encoding, observed = core$freq_core$Allele)
 
   if (isTRUE(core$empty)) {
-    warning("compute_profile_localgebv: empty genotype data after filtering, ",
+    .hs_warn("compute_profile_localgebv: empty genotype data after filtering, ",
             "or no markers with block assignments remain.")
     return(data.table(Block = character(0L)))
   }
@@ -371,11 +376,16 @@ compute_profile_localgebv <- function(
 #'   \code{Block}, \code{Start}, \code{End}, \code{Pos}, \code{Num_SNPs},
 #'   \code{Block_length}). Recomputed from \code{geno_meta} when \code{NULL}.
 #' @param center        Centring mode applied to the allele effects:
-#'   \code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
-#'   \code{\link{compute_profile_localgebv}} for what each preserves.
-#' @param center_by_freq Logical. Mean-centre allele effects by population
-#'   frequency before summing per block (matches the catalogue pipeline).
-#'   Default \code{TRUE}.
+#'   \code{"none"}, \code{"locus_mean"} or \code{"allele_freq"}. See
+#'   \code{\link{compute_profile_localgebv}} for what each preserves.
+#' @param center_by_freq \strong{Deprecated} logical form of \code{center}
+#'   (\code{TRUE} = \code{"allele_freq"}, \code{FALSE} = \code{"none"}); warns
+#'   on every call. The default centring is \code{"none"} since 0.9.0 (it was
+#'   \code{"allele_freq"} up to 0.8.8; pass \code{center = "allele_freq"} to
+#'   reproduce those numbers).
+#' @param blocks Optional character vector of block ids restricting the
+#'   catalogue to those blocks (0.9.0, cc/F05; \code{\link{run_haplotype_catalogue}}
+#'   passes its \code{selected_blocks}). Default \code{NULL}: every block.
 #' @param group_by How distinct subtypes are enumerated within a block.
 #'   \code{"effect"} (default) groups haplotype states by their local-GEBV
 #'   value (origin granularity); each row carries the \code{signature} of its
@@ -411,13 +421,13 @@ compute_block_catalogue <- function(geno_meta,
                                     center         = NULL,
                                     center_by_freq = NULL,
                                     group_by       = c("effect", "signature"),
+                                    blocks         = NULL,
                                     .core          = NULL,
                                     .signatures    = NULL) {
   group_by <- match.arg(group_by)
-  center   <- .resolve_center(center, center_by_freq,
-                              "compute_block_catalogue", default = "allele_freq")
-  if (!is_geno_meta(geno_meta))
-    stop("compute_block_catalogue: 'geno_meta' is not a valid GenoMeta.")
+  center   <- .resolve_center(center, center_by_freq, "compute_block_catalogue")
+  if (!is.null(blocks)) blocks <- as.character(blocks)
+  .hs_check_meta(geno_meta, "compute_block_catalogue", "geno_meta")
 
   empty <- data.table(
     Block = character(0L), Effect = numeric(0L), Sample = character(0L),
@@ -433,9 +443,9 @@ compute_block_catalogue <- function(geno_meta,
                                   "compute_block_catalogue")
   eff  <- .standardise_effect_dt(effect_df, "compute_block_catalogue")
   core <- if (!is.null(.core)) .core else .catalogue_core(geno_meta)
-  .validate_effect_encoding(eff, core$encoding)
+  .validate_effect_encoding(eff, core$encoding, observed = core$freq_core$Allele)
   lg <- .local_gebv_engine(core, eff, center, level = "haplotype",
-                           fill_na = 0)
+                           fill_na = 0, keep_blocks = blocks)
   lg <- as.data.table(lg)
   sample_cols <- setdiff(names(lg), "Block")
   if (nrow(lg) == 0L || length(sample_cols) == 0L) return(empty[])
@@ -502,6 +512,7 @@ compute_block_catalogue <- function(geno_meta,
   # signature, …); measures and block-span detail follow.
   .lead_identifier_cols(cat_dt)
   data.table::setorder(cat_dt, Block, -Count)
+  data.table::setattr(cat_dt, "hs_center", center)   # D3.5: the centre travels with the table
   cat_dt[]
 }
 
@@ -546,9 +557,11 @@ compute_block_catalogue <- function(geno_meta,
 #' @return \code{data.table} with columns \code{Block}, \code{Sample},
 #'   \code{Haplotype_idx} (integer), \code{signature} (character).
 #' @keywords internal
-.compute_block_signatures <- function(geno_meta, fill_na = NULL, blocks = NULL) {
+#' @noRd
+.compute_block_signatures <- function(geno_meta, fill_na = NULL, blocks = NULL,
+                                      views = NULL) {
   fill_na <- .hs_fill_na(fill_na)
-  prof      <- geno_meta_views(geno_meta)
+  prof      <- if (is.null(views)) geno_meta_views(geno_meta) else views   # cc/F09
   meta_cols <- c("Sample", "Haplotype_idx")
   all_mks   <- setdiff(names(prof$alleles), meta_cols)
 
@@ -667,8 +680,7 @@ write_block_allele_sheet <- function(geno_meta, output_file = NULL,
                                      fill_na = NULL) {
   count_by <- match.arg(count_by)
   fill_na  <- .hs_fill_na(fill_na)
-  if (!is_geno_meta(geno_meta))
-    stop("write_block_allele_sheet: 'geno_meta' is not a valid GenoMeta.")
+  .hs_check_meta(geno_meta, "write_block_allele_sheet", "geno_meta")
 
   views <- geno_meta_views(geno_meta)
   mm    <- views$marker_meta[!is.na(block_id)]        # already genomic-ordered
@@ -738,13 +750,17 @@ write_block_allele_sheet <- function(geno_meta, output_file = NULL,
 #' makes that silent exclusion visible.
 #'
 #' @param eff      Standardised effect data.table (Marker, Allele, Effect).
-#' @param encoding Profile encoding string ("selectiontools", "nucleotide",
-#'   "numeric").
+#' @param encoding Profile encoding string ("nucleotide", "numeric").
+#' @param observed Alleles observed in the container (the core's frequency
+#'   table). The nucleotide vocabulary is "categorical allele labels": a panel
+#'   read from a PLINK 1/2-coded PED keeps its digit labels, so an effect
+#'   table on those labels is valid — the join below is on the label.
 #' @keywords internal
-.validate_effect_encoding <- function(eff, encoding) {
+#' @noRd
+.validate_effect_encoding <- function(eff, encoding, observed = NULL) {
   valid_alleles <- switch(encoding,
-    "selectiontools" = as.character(unname(unlist(DEFAULT_ENCODING_DICT))),
-    "nucleotide"     = names(DEFAULT_ENCODING_DICT),
+    "nucleotide"     = unique(c(names(DEFAULT_ENCODING_DICT),
+                                as.character(observed))),
     "numeric"        = c("0", "1", "2"),
     NULL
   )
@@ -752,7 +768,7 @@ write_block_allele_sheet <- function(geno_meta, output_file = NULL,
 
   bad <- setdiff(unique(eff$Allele), valid_alleles)
   if (length(bad) > 0L) {
-    warning(
+    .hs_warn(
       "compute_profile_localgebv: effect_df contains allele(s) not in the ",
       "'", encoding, "' encoding dict: ",
       paste(bad, collapse = ", "), ". ",

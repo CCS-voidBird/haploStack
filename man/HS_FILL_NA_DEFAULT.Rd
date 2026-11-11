@@ -14,7 +14,7 @@ HS_FILL_NA_DEFAULT
 The character written in place of an unobserved allele when a block's
 haplotype signature is assembled (see \code{\link{write_block_allele_sheet}},
 \code{\link{count_block_subtypes}}). \code{"-"} is the canonical missing-allele
-character of \code{\link{DEFAULT_ENCODING_DICT}}, where it maps to \code{-1L}.
+character of the nucleotide vocabulary.
 }
 \details{
 A signature is the alleles of a haplotype copy pasted together in genomic
@@ -30,7 +30,7 @@ Override globally with \code{options(haploStack.fill_na = "?")}, or per call
 via the \code{fill_na} argument.
 }
 \seealso{
-\code{\link{DEFAULT_ENCODING_DICT}},
-\code{\link{write_block_allele_sheet}}, \code{\link{count_block_subtypes}}
+\code{\link{write_block_allele_sheet}},
+\code{\link{count_block_subtypes}}
 }
 \keyword{datasets}

@@ -132,37 +132,27 @@ test_that("V16: adding a constant to both alleles leaves locus_mean unchanged", 
 
 # -- V15: the deprecation shim ----------------------------------------------
 
-test_that("V15: center_by_freq maps to the new vocabulary", {
-  expect_equal(
-    suppressMessages(haploStack:::.resolve_center(NULL, TRUE, "f")),
-    "allele_freq")
-  expect_equal(
-    suppressMessages(haploStack:::.resolve_center(NULL, FALSE, "f")),
-    "none")
-  expect_equal(haploStack:::.resolve_center(NULL, NULL, "f", default = "none"),
-               "none")
-  expect_equal(
-    haploStack:::.resolve_center(NULL, NULL, "f", default = "allele_freq"),
-    "allele_freq")
+test_that("V15: center_by_freq is defunct (0.9.0, row 26 a); the error names the mode", {
+  expect_error(haploStack:::.resolve_center(NULL, TRUE, "f"),
+               'center = "allele_freq"', class = "hs_error_defunct", fixed = TRUE)
+  expect_error(haploStack:::.resolve_center(NULL, FALSE, "f"),
+               'center = "none"', class = "hs_error_defunct", fixed = TRUE)
+  # 0.9.0 (D3.5): the default comes from the one table, looked up by caller
+  expect_equal(haploStack:::.resolve_center(NULL, NULL, "f"), "none")   # unknown caller
+  expect_equal(haploStack:::.resolve_center(NULL, NULL, "compute_profile_localgebv"), "none")
+  expect_equal(haploStack:::.resolve_center(NULL, NULL, "count_favourable_blocks"), "locus_mean")
+  expect_equal(haploStack:::.resolve_center("allele_freq", NULL, "f"), "allele_freq")
 })
 
-test_that("V15: supplying both center and center_by_freq is an error", {
+test_that("V15: supplying center_by_freq at an entry point is the defunct error", {
   fx <- cen_fixture()
   expect_error(
     compute_profile_localgebv(fx$meta, effect_df = fx$eff,
                               center = "none", center_by_freq = TRUE),
-    "not both")
-})
-
-test_that("V15: the deprecated logical still produces the old numbers", {
-  fx <- cen_fixture()
-  old_true <- suppressMessages(suppressWarnings(compute_profile_localgebv(
-    fx$meta, effect_df = fx$eff, center_by_freq = TRUE)))
-  expect_equal(as_vec(old_true), as_vec(gebv(fx, "allele_freq")))
-
-  old_false <- suppressMessages(suppressWarnings(compute_profile_localgebv(
-    fx$meta, effect_df = fx$eff, center_by_freq = FALSE)))
-  expect_equal(as_vec(old_false), as_vec(gebv(fx, "none")))
+    class = "hs_error_defunct")
+  expect_error(
+    compute_profile_localgebv(fx$meta, effect_df = fx$eff, center_by_freq = FALSE),
+    'center = "none"', class = "hs_error_defunct", fixed = TRUE)
 })
 
 test_that("V15: a logical passed as `center` is refused with the fix named", {
@@ -205,6 +195,10 @@ test_that("haplotype level agrees with genotype level under every mode", {
 
 # -- C2: the default flips, and the old numbers stay reachable ---------------
 
+# 0.9.0: a catalogue result carries provenance (with a creation time) and figure
+# recipes; two runs are compared on their tables.
+.cen_tables <- function(res) lapply(unclass(res), function(tr) tr[setdiff(names(tr), "figures")])
+
 test_that("C2: run_haplotype_catalogue defaults to no centring", {
   expect_equal(formals(run_haplotype_catalogue)$center_by_freq, NULL)
   fx  <- cen_fixture()
@@ -217,29 +211,27 @@ test_that("C2: run_haplotype_catalogue defaults to no centring", {
     fx$meta, effect_list = list(T1 = fx$eff), output_dir = out,
     save_profile = FALSE, center = "none")))
 
-  expect_equal(res_default, res_none)
+  # 0.9.0: the result carries provenance with a creation time; compare the tables.
+  expect_equal(.cen_tables(res_default), .cen_tables(res_none))
 })
 
 test_that("C2: center = 'allele_freq' reproduces the 0.5.5 catalogue numbers", {
   fx  <- cen_fixture()
   out <- withr::local_tempdir()
 
-  # 0.5.5's default was center_by_freq = TRUE; the shim must land on the same
-  # arithmetic as the named mode.
-  old <- suppressMessages(suppressWarnings(run_haplotype_catalogue(
-    fx$meta, effect_list = list(T1 = fx$eff), output_dir = out,
-    save_profile = FALSE, center_by_freq = TRUE)))
+  # 0.5.5's default was center_by_freq = TRUE, which is the named mode
+  # "allele_freq" (the logical is defunct since 0.9.0): the oracle is the
+  # engine under that mode.
   named <- suppressMessages(suppressWarnings(run_haplotype_catalogue(
     fx$meta, effect_list = list(T1 = fx$eff), output_dir = out,
     save_profile = FALSE, center = "allele_freq")))
-
-  expect_equal(old, named)
+  expect_equal(as_vec(named$T1$gebv_matrix), as_vec(gebv(fx, "allele_freq")))
 
   # And it is genuinely a different answer from the new default.
   new_default <- suppressMessages(suppressWarnings(run_haplotype_catalogue(
     fx$meta, effect_list = list(T1 = fx$eff), output_dir = out,
     save_profile = FALSE)))
-  expect_false(isTRUE(all.equal(old, new_default)))
+  expect_false(isTRUE(all.equal(.cen_tables(named), .cen_tables(new_default))))
 })
 
 test_that("C2: compute_profile_localgebv's default is unchanged", {

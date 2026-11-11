@@ -12,7 +12,8 @@ compute_block_annotation(
   chr_map = NULL,
   flank_bp = .HS_ANNOT_DEFAULT_BP,
   strip_prefix = TRUE,
-  browser_base = NULL
+  browser_base = NULL,
+  strict = FALSE
 )
 }
 \arguments{
@@ -46,6 +47,13 @@ behaviour). Stored ids always keep the file's spelling.}
 \code{<base>/Location/View?r=<chrom>\%3A<start>-<end>} links built with
 the mapped chromosome, as the Python route does via its species config.
 \code{NULL} leaves the column empty.}
+
+\item{strict}{When \code{TRUE}, a container chromosome that no gene
+seqid names (or, for a QTL table, no container chromosome on any QTL
+seqid) is an error instead of an \code{hs_warning_input} warning
+(default \code{FALSE}). The warning names the chromosomes and suggests
+a \code{chr_map} when an \code{H} / \code{chr} affix would match;
+nothing is applied.}
 }
 \value{
 A list of class-less tables (haploStack column convention):
@@ -62,8 +70,11 @@ A list of class-less tables (haploStack column convention):
     Chrom, Pos, Block, gene_id, gene_symbol, gene_name, gene_biotype,
     gene_start, gene_end, gene_strand, gene_description, go_terms,
     interpro_domains, ensembl_browser_url}.}
-\item{\code{provenance}}{inputs, counts, \code{chr_map}, \code{flank_bp},
-\code{strip_prefix}, date and package version — written to
+\item{\code{provenance}}{inputs (\code{file}, \code{md5}, \code{size},
+\code{n} per table, no absolute path), counts, \code{chr_map},
+\code{chrom_vocab} (the container's and the annotation's chromosome
+names), \code{chrom_unmatched}, \code{flank_bp}, \code{strip_prefix},
+\code{created} (ISO-8601 UTC) and package version — written to
 \code{metadata$annotation} by \code{\link{attach_block_annotation}}.}
 }
 }

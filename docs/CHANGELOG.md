@@ -710,6 +710,1190 @@ published repo ships:
   holder is still "University of Queensland", which is a rights statement, not an
   authorship one, and it already matches the published copy byte for byte.
 
+> **Updated 2026-11-03 (distribution, no code change).** The GitHub mirror
+> (`CCS-voidBird/haploStack`) had stopped at 0.7.7. On the owner's word the
+> thirteen released tarballs 0.7.8 … 0.8.8 were replayed onto it as one commit
+> and one annotated tag each (`haploStack-<version>`, dated to the version's
+> release date), and a GitHub release was created for every one from the
+> staged `ready_to_use/release_v<version>/` bundle (source tarball for all;
+> Windows binaries only for 0.7.8–0.7.10, which had them). The mirror is at
+> 0.8.8; 0.9.0 follows at its ship step. Tools: `ready_to_use/release_seq.py`,
+> `publish_releases.py`.
+
+## [0.9.0] - 2026-11-11 — Maintenance: server-safe core and cleanup
+
+Maintenance release opened 2026-10-24 and cut 2026-11-11 (tracker
+`.scratch/maintenance-0.9.0/TRACKING.md`, owner decision form
+`DECISION_FORM.md`, questions sheet Q28; threads #037–#040). The seven build
+phases below landed in order, each gated on a green suite and fixed-seed
+parity with 0.8.8. `DESCRIPTION` carried the development version
+**0.8.8.9000** from 2026-11-03 until the cut, so a container built from the
+source tree in that window is stamped `built_with = "0.8.8.9000"` (schema 2).
+At the cut: suite 4 926 / 0 fail / 0 err / 12 skip / 0 warn, parity 22
+identical + 42 allowed objects (the 🔢 rows), 172 exports, 168 Rd pages.
+**Record corrections:** the genomicSimulation persistent session (GSPS) shipped
+in 0.4.6 although `[Unreleased]` above still said it was not built; the
+roadmap and thread #013 now say so. Build phase A (foundations: conditions, local seeds, the
+deprecation ladder, the result-object base, container and cleanup mechanics)
+landed 2026-10-27 on the form's recommended answers. 155 exports (`hs_quiet()`,
+`hs_notes()`, `hs_provenance()`, `hs_figures()`, `write_outputs()` added).
+Suite 3 378 pass / 0 fail / 12 skip (3 135 at the end of B6; the growth is the
+new `test-090-*.R` files). Fixed-seed parity with 0.8.8: simulation
+summaries and plans (TS/OHS/GBS, `metrics = "all"`, block and
+genomicSimulation backends), every catalogue table and the RNG state after
+each run are identical. The first parity harness had no signal (its effects
+did not match the founders' allele coding, so every local GEBV was 0); it was
+re-run on 2026-10-24 with a corrected harness that has real signal and adds
+OCS, selfing with a late GA start, direct pairs and genomicSimulation with
+missing calls: 24 of 24 objects identical.
+
+Build phase B (container and settings: one rebuild path, the cheap validator,
+the schema stamp and upgrade, settings as arguments, the RDS pre-read check)
+landed 2026-10-29. 156 exports (`upgrade_geno_meta()` added). Suite 3 590
+pass / 0 fail / 12 skip (the growth is `test-090-settings.R`,
+`test-090-hygiene.R`, `test-090-schema.R` and the container tests); fixed-seed
+parity with 0.8.8 still 24 of 24 objects identical.
+
+Build phase C (the block map: one resolver with two shapes, block provenance,
+one file writer; SelectionTools' formats behind one switch, on the owner's
+steer of 2026-10-29) landed the same evening. 158 exports (`st_convert()`,
+`use_st_formats()` added). Suite 3 746 pass / 0 fail / 12 skip (the growth is
+`test-090-blocks.R`); fixed-seed parity with 0.8.8 still 24 of 24 objects
+identical.
+
+Build step C-6 (2026-11-03): the owner reviewed the SelectionTools handler
+against its specification — one standalone adapter for SelectionTools inputs
+and recoding, a plain `GenoMeta` out, active only under a global option — and
+the last gaps were closed: the `"selectiontools"` *token* is behind
+`use_st_formats()` like the files (see Changed), every recode in the package
+reads the adapter's one table, the `"ST"` writer preset is gated, and
+`load_geno_meta()` recodes a schema-2 container that still holds the codes
+(a 0.9.0 development build; see Fixed). `upgrade_geno_meta()` is the one
+deliberate exception: a saved container migrates without the switch.
+`ready_to_use/workshop/01a`, `01b` and `templates/01` now simulate `A/T`
+labels. Suite and parity unchanged (0 fail, 24 of 24 identical).
+
+Build step C-5 (the SelectionTools allele encoding retired from the
+container, on the owner's clarification of 2026-10-29 that the real drawback
+of the SelectionTools format is its numeric-categorical allele encoding with
+a slash separator — `A = 1 … T = 4`, missing `-1`, so `A-` is `1/-1` — not
+its marker-row layout) landed the same night. 158 exports (unchanged;
+`REVERSED_ENCODING_DICT` now documented with `DEFAULT_ENCODING_DICT`, 157 Rd
+pages). Suite 3 667 pass / 0 fail / 12 skip / 1 warn (the pre-existing plot-order one) in 2.3 min (the growth is `test-090-st-encoding.R`); fixed-seed parity
+with 0.8.8 still 24 of 24 objects identical.
+
+Step AG (the usage guide shipped inside the package, thread #037, on the
+owner's request of 2026-11-02) landed 2026-11-02. 160 exports
+(`hs_agent_guide()`, `hs_install_skill()` added), 159 Rd pages. Suite 3 705
+pass / 0 fail / 12 skip / 1 warn (the growth is `test-090-agent-guide.R`);
+fixed-seed parity with 0.8.8 still 24 of 24 objects identical.
+
+Build phase D (outputs and catalogue) opened 2026-11-09 with step D3.2: **the
+figure layer**. Compute functions no longer touch a graphics device: a figure
+inside a result is a data-only recipe (`hs_figure`: plotter name, arguments,
+size), built on demand by `hs_build_figure()` and written by
+`hs_render_figure()` — the one place a file device is opened, with ragg /
+cairo fallbacks and the caller's device, `par()` and circlize state restored
+(see Added, Changed). `plot_meta_circos()` now returns its object and draws
+only when printed or rendered (`draw = FALSE`). 162 exports, 161 Rd pages.
+Suite 3 815 pass / 0 fail / 12 skip / 0 warn in 1.2 min (the growth is
+`test-090-figures.R`); fixed-seed parity with 0.8.8 25 of 25 objects
+identical.
+
+Step D3.3 (same day): **`run_haplotype_catalogue()` computes and returns.**
+It returns an `hs_catalogue` result and writes files only when `output_dir`
+is given; `write_outputs()` reproduces the 0.8.8 file set, byte for byte,
+from a result kept in memory; the output label comes from the block
+provenance (decision-form row 13 a); the per-trait copy of the container is
+gone and `block_counts$Sample` is plain text (see Changed, Added). A
+`progress` callback fires per trait and can cancel the run. Suite 3 911 pass
+/ 0 fail / 12 skip / 0 warn (the growth is `test-090-outputs.R`); parity 20
+of 30 objects identical and the 10 catalogue file keys **moved as declared**:
+the fixed-seed container's blocks come from an in-memory map, so its files
+are now labelled by that provenance (`…_user_map_T1.txt`) instead of
+`…_0.5_t0_T1.txt` — every table's contents are identical across the rename.
+
+Step D3.4 (same day): **`analyze_block_catalogue()` returns an
+`hs_block_analysis`**, writes only when `output_dir` is named (through
+`write_outputs()`, same files), builds its circos on the circos engine and
+never touches a device, checks its centring mode against a passed
+catalogue, and gains the two hooks of intake 12 (`candidates = "complete"`,
+`gebv_matrices = FALSE`); `plot_block_effect_circos()` is deprecated
+(decision-form row 12 b). Suite 3 988 pass / 0 fail / 12 skip / 0 warn (the
+growth is `test-090-analysis.R`); parity unchanged from D3.3 (20 identical,
+the 10 declared catalogue moves).
+
+Step D3.5 (same day): **one centring-default table** (decision-form row 15 c,
+a 🔢 change — see Changed), `compute_block_catalogue(blocks =)` so
+`selected_blocks` restricts the catalogue as well as the GEBV matrix,
+`count_favourable_blocks(tol =)`, the centre carried on every result, and
+`center_by_freq` moved onto the deprecation ladder (a warning on every
+call, no session memory). Before the defaults moved, the parity harness
+gained the analysis, catalogue, subtype-count, favourable-count,
+marker-stat and allele-sheet cases, each with an explicit centre and with
+the default, and the 0.8.8 baseline was re-recorded from the snapshot. Suite
+4 023 pass / 0 fail / 12 skip / 0 warn (the growth is
+`test-090-route-numbers.R`); parity 32 identical, 20 moved as declared: the
+10 catalogue renames of D3.3 and exactly the 10 default-centring objects —
+every explicit-centre twin, `compute_marker_stats()` and the allele sheet
+stayed identical.
+
+Step D3.6 (same day): **one chromosome order**, `hs_chrom_levels()`
+(decision-form row 29 a, a 🔢 change of row and axis order only — see
+Changed). The four rules that disagreed are now one exported function and
+three aliases; the catalogue block order, the views' marker order, marker
+statistics, `block_info` and the HapSelect block key all use it. The parity
+harness gained an eleven-chromosome panel (marker stats, views, block info,
+catalogue tables, HapSelect block map) and the 0.8.8 baseline was
+re-recorded; four of those objects moved by row order and are identical
+once sorted, the block summary and the HapSelect block map did not move.
+Suite 4 043 pass / 0 fail / 12 skip / 0 warn; parity 34 identical, 24
+moved as declared. 163 exports, 162 Rd pages.
+
+Step D3.7 (same day): **`compute_marker_stats()` on one encoding pass**, with
+the one Major/Minor tie rule (decision-form row 16 a, a 🔢 change on exact
+ties — see Changed) and ploidy-aware `Het` / `Missing_rate` (cc/F21). The
+array is encoded once and the counts, MAF, Major and Minor all read it; the
+marker locations come from the map and block map directly instead of the
+full views (cc/F19). The suite runner now counts test *errors* beside
+failures (an error-only run used to read as clean). Suite 4 075 pass /
+0 fail / 0 err / 12 skip / 0 warn; parity 33 identical, 25 moved as
+declared: the marker-stat object of the fixed-seed panel moved on its
+`Major` column alone, on exactly its ten exact-tie markers, where 0.8.8 had
+reported the minor allele twice.
+
+Step D3.8 (same day): **`trace_haplotype_family()` reads both parental
+copies** (decision-form row 17 a, a 🔢 change — see Changed). The parity
+harness gained a pedigree case (eight offspring of the fixed-seed panel on
+two parent pairs) before the fix and the 0.8.8 baseline was re-recorded; on
+it the new assignment matches at least as many markers as the old one on
+every row (strictly more on 137 of 384), the parent changed on 165 rows and
+the two rows the old code could only call "unknown" are now assigned. Suite
+4 090 pass / 0 fail / 0 err / 12 skip / 0 warn; parity 33 identical, 26
+moved as declared.
+
+Step D3.9 (same day) closed **build phase D** with the small items of design
+D3 §3.8: the all-negative circos ring that drew as flat grey (viz/F06) and
+`circos_track(limits =)` for a shared colour scale (intake 12), argument
+validation on `circos_track()` (viz/F21), the double-column advice only when
+the figure is narrower (I11), point sizes divided by the device `cex`
+(viz/F18), a missing \pkg{cowplot} as an error instead of a different return
+class (viz/F16), the sample-order tag on a locked phenotype axis (viz/F23),
+the axis-sync reader that trusts the plot's own tag first and leaves a note
+when nothing is readable (io/F26, viz/F30), the `Skew` definition written
+down (viz/F29), the stale `catalogue_gebv.R` header (cc/F23), the fitness
+landscape attached to its result instead of printed (C-run-fitness-print, in
+D4's form), `table_file` deprecated on the two plotters with
+`marker_signal_table()` as the accessor (viz/F24, F07). cc/F26's
+`attach_signal_markers(date =)` is dropped: B-2 decided that the record
+carries no timestamp so identical inputs give identical containers. Suite
+4 128 pass / 0 fail / 0 err / 12 skip / 0 warn; parity unchanged (33
+identical, 26 moved as declared). 164 exports, 163 Rd pages. Phase D's
+remaining steps D3.10 (optional performance) and D3.11 (pipelines and
+vignettes) belong to phase G.
+
+Build phase E (the simulation: design D4, with D1-4, D1-5 and D1-6) landed
+2026-11-10 in twelve steps, each gated on the suite and on the fixed-seed
+parity harness. **The step API (decision-form row 18 a):** `stk_spec()`
+validates every science argument once, `stk_jobs()` lists the (replication,
+scheme) grid, `stk_init()` builds one job's state, `stk_step()` advances it
+by one generation, `stk_result()` collects and `stk_close()` frees;
+`run_stacking_simulation()` is now a wrapper over them with identical
+numbers — a job's random stream lives in its state and is swapped in for
+every step, so a job can be saved, resumed, interleaved with another or
+cancelled, and the caller's own stream is left as it was (row 3). **One
+local-GEBV pass per generation (row 20 a):** the offspring are scored once at
+haplotype level and that table is the block backend's F1mean, the metrics'
+input and the next generation's parent table (probe-identical, no number
+moves). **The result is an `hs_simulation`** with notes for every silent
+fallback, provenance (spec, seed, inputs, backend, jobs) and
+`write_outputs()`; `output_dir` defaults to `NULL` (row 10 a). **Row 19 a:**
+the default `scheme` drops OCS, several traits need `trait =`,
+`select_priority = "low"` is refused where a scheme ignores it,
+`top_founders` above the population is an error. **Row 22 a:** a missing
+call goes to genomicSimulation as `--` (a 🔢 change for panels with missing
+calls, see Changed); the map and effect files carry the header names gS 0.3
+reads (I2). **One genomicSimulation session per R process (row 4 a)** with
+a private scratch directory removed on close and stale-handle checks (D1-6).
+**Progress and cancel** on the LD resolvers — HapSelect per chromosome, which
+the probe and the test show identical to the whole-panel call — and on the
+simulation, with the compiled kernels interruptible (D1-5); **one owner of
+the future plan**, which honours a plan the caller set (D1-4). **The OCS
+reseed is gone (row 3 a, 🔢).** Smaller: `ga_control` reaches the GA engines,
+`create_fitness_index()` with a zero weight, `update_fitness_index()` on its
+registry, `make_cross_design()` no longer writes into its input,
+`summarise_simulation()` without ±Inf, `fit_genomic_prediction()$summary`,
+and the three 0.8.8 back-compat inputs of the driver on the deprecation
+ladder. Gates per step (suite pass / fail / err / skip / warn; parity
+identical + allowed moves): E-1 4 204/0/0/12/0, 32 + 26 · E-2 4 232, 32 +
+26 · E-3 (D1-4, D1-5) 4 286, 32 + 26 · E-5 (D1-6) 4 322, 32 + 26 · E-6
+(D4-3) 4 395 + 1 test-side fix, 26 + 38 (the stream objects moved as row 3
+says; the 0.8.8 baseline was re-recorded with the new harness assertion) ·
+E-7 (D4-4) 4 466, 26 + 38 · E-8/E-9 (D4-5, D4-6) 4 513, 24 + 40 (OCS moved)
+· E-10 (D4-7, D4-8, D4-9) 4 571/0/0/12/0, 22 + 42 (the genomicSimulation
+missing-call case moved as row 22 says; the no-missing case is identical).
+170 exports, 165 Rd pages. `future.apply` was installed into the R 4.4.3 library for the plan
+test; the parallel-worker tests need an installed build (a `future`
+multisession worker loads the installed package, not the development
+namespace) and are skipped under `devtools::test()`.
+
+Build phase F (deprecation, annotation, process hygiene: rows 26, 27, 28,
+30, 33, 36, Q-c and the D1 hygiene steps) landed 2026-11-11 in five steps.
+The defunct / deprecated rungs of the ladder are applied (F-1); the Shiny
+converter is an app directory (F-2); the annotation route has one locus
+contract, with provenance by md5 and the un-gated parity fixture shipped in
+`inst/extdata/parity` (F-3, F-4); `annotate_blocks()` is the one-call route
+and the workshop's module 07 runs in R (F-4); BayesC and SelectionTools leave
+the working directory alone and identifiers sort in C-locale order
+everywhere (F-5, 🔢 row 33 a). Gates: F-1 suite 4 601/0/0/12/0, parity
+22 + 42 allowed; F-2/F-3 4 732; F gate 4 782 / 0 / 0 / 12 / 0, parity 22 identical + 42 allowed, 0 differ.
+171 exports, 166 Rd pages. See the entries below.
+
+Build phase G (close) landed 2026-11-11: `hs_reset_session()` and the
+`?haploStack_server` contract with the leak test behind it (D1-10); one
+`geno_meta_views()` per catalogue run (cc/F09); the workshop, templates and
+vignettes re-read for the 0.9.0 defaults (D3.11); the LD-helper and smoke
+tests (D5-12); and the file placement of D2 §3.9 — `format_helper.R`,
+`catalogue_profile.R` and `catalogue_blockmap.R` are gone, the container
+lives in the `geno_meta_*.R` files and the readers in `read_*.R` (D2-9, no
+behaviour change). Gate: suite 4 926 / 0 / 0 / 12 / 0, parity 22 identical + 42 allowed, 0 differ; 172 exports,
+168 Rd pages. The build is complete; what follows is the ship step (T11).
+
+### Fixed
+
+- **`create_fitness_index()` with a zero trait weight** gave `NaN` in that
+  trait's column (the weighted value divided by the weight); the raw
+  contribution is kept before weighting and the composite is unchanged
+  (sc/F22; D4-8).
+- **`load_geno_meta()` recodes a schema-2 container that still holds
+  SelectionTools codes** (saved by a 0.9.0 development build before C-5). It
+  used to run `upgrade_geno_meta()` only when the schema was old, so such a
+  file loaded with `1/2/3/4` alleles under `encoding = "selectiontools"`;
+  `upgrade_geno_meta()` called directly already recoded it. Found by test S12
+  (C-6, 2026-11-03).
+- **`plot_meta_alignment()` without `rel_widths` no longer makes cowplot
+  warn** (`'x' is NULL so the result will be NULL`): the `NULL` default was
+  forwarded to `cowplot::plot_grid()`, which `rep()`s it; cowplot's own
+  default `1` is passed instead. Layout unchanged. This was the one warning
+  every suite run since 0.8.8 reported (`test-plot-order.R:351`). (2026-11-03)
+- **Re-blocking no longer destroys the rest of the container.**
+  `attach_block_info()`, `build_geno_meta(fam =, blocks =)`,
+  `read_*(block_file =)` and the LD resolvers used to rebuild through a
+  constructor call that forwarded only the block tables: the effects, the
+  phenotype and the FAM parents came back empty (INDEX discrepancy 20, D16,
+  D20). Every transform now derives its result through one internal helper
+  (`.rebuild_geno_meta()`, `R/geno_meta_core.R`) that forwards everything it
+  is not told to replace; the only losses are declared ones (offspring drop
+  the founders' phenotype and family history; replacing the blocks clears the
+  signal selection, the gene annotation and the block provenance). Custom
+  marker annotations survive a re-blocking with their `Block` re-derived.
+- **A hand-edited container is caught.** `is_geno_meta()` fails when the
+  metadata counters (`n_samples`, `n_markers`, `ploidy`) disagree with the
+  array, when `map_info` is not in the array's marker order, when a marker
+  sits in two blocks, or when the container was saved by a newer schema. Up
+  to 0.8.8 a container with `n_markers = 999` or a reversed map passed.
+- **`filter_geno_meta()` keeps map and array aligned** when the requested
+  markers are given in another order (the map is re-ordered to the array).
+- **A later `use_missing_chars()` registration no longer changes how an
+  existing container is read.** The registry is consulted only where a
+  container is built or repaired; afterwards the container's own
+  `metadata$missing_tokens` stamp governs every consumer (frequencies, IBS,
+  clustering, marker effects). Two jobs in one process can read different
+  panels without one registration leaking into the other's numbers.
+- **Seeded calls leave the caller's random stream alone.** `sim_geno_matrix()`,
+  `sim_effect_df()`, `sim_geno_meta()`, `sim_dataset()`, `tune_gbs_penalty()`,
+  the three GA selectors and the encoding detector (reached by every read and
+  build, which silently left seed 42 behind) now draw under a local seed
+  (`R/state.R`) and restore the stream on exit; their output for a given seed
+  is unchanged. `sim_map_data()` gains `seed = NULL`; `sim_dataset()$map` is
+  now the map inside `$geno_meta` (its positions differed up to 0.8.8).
+  `fit_genomic_prediction()` gains `seed =` for the BGLR sampler. The OCS
+  reseed and the simulation job boundary are handled with the simulation
+  design (form rows 3, 18).
+- **Multi-character alleles are refused anywhere in a wide matrix.**
+  `.reshape_wide_alleles()` probed only the first three rows, so an indel
+  further down was cut to its first character and read as a wrong SNP call.
+- **A dummy singleton block's `block_info` row** carries its `Pos`, `Num_SNPs`
+  (1) and `Block_length` (1) when those columns exist, instead of `NA`.
+- **`read_dart_genotype()` help** no longer promises an auto-detection of
+  leading metadata rows that the code does not do: `n_meta_rows` is the count
+  of rows before the header line.
+- **The test suite exercised private copies of the `sim_*` generators**
+  (`tests/testthat/helper-sim_data.R`, sourced into the package environment)
+  instead of the exports. The copies, byte-identical to 0.8.8's, are gone.
+- **PED round trip keeps missing calls missing.** `write_geno_meta()` wrote a
+  missing allele as the text `NA`; `read_plink_ped()` read a fully missing call
+  back as the half call (NA, "A"). Missing alleles are now written as PLINK's
+  `0`.
+- **Identifiers keep their spelling.** `read_genotype()` (row IDs and the FAM
+  block), its map file (`Chrom`, `Marker`) and `read_phenotype()` (all
+  columns, traits still converted with `as.numeric()`) read text as text, so
+  `"007"` no longer becomes `7` and drops block or phenotype rows. The block
+  file reader is handled with the block-map decision (form row 7).
+- **`recode_geno_meta()` keeps the phenotype** (discrepancy 20, recode half).
+- **OHS no longer crashes on an NA local GEBV.** The value counts as an absent
+  copy (0), as copies beyond the data already did; up to 0.8.8 the per-sample
+  sort went ragged and failed with "incorrect number of subscripts".
+- **`export_block_annotation()` on a container with only marker overlays**
+  stops with a message naming `attach_block_annotation()` instead of
+  "object 'Chrom' not found".
+- **Help pages.** `plot_haplotype_alignment` has its own page again (its
+  roxygen block was attached to an internal helper, so `?plot_haplotype_alignment`
+  did not resolve). The `\co\code` typo and a stray control byte that put
+  U+FFFD into 12 pages are gone (discrepancy 37, under-counted in the record:
+  15 R lines and 23 R lines). Two "Bad \link text" errors and a duplicated
+  `@param center` fixed.
+
+### Performance (no numeric change)
+
+- **`compute_parent_coancestry()` has a compiled kernel** (`src/coancestry.cpp`).
+  It reproduces the R loop bit for bit, including R's two-pass `mean()`, and
+  the R loop stays as fallback and test oracle. 60 samples x 900 markers:
+  7.7 s -> 0.11 s. The record measured this at 47 of ~49 s per cycle under
+  `metrics = "all"` (thread 013).
+- **OHS pair matrix** (`.pairwise_block_value_matrix()`): diploid rows are
+  sorted as (max, min) instead of one `sort()` per sample per block, and all
+  pairs go through the vectorised family rule in memory-bounded chunks.
+  Identical matrices; 120 samples x 600 blocks 3.0 s -> 0.66 s, 14 x 50 000
+  blocks 24 s -> 0.6 s.
+
+### Added
+
+- **`hs_reset_session(quiet = TRUE)`** and the help topic **`?haploStack_server`**
+  (decision-form row 1 a; D1-10): the server contract — one job per worker
+  process; guarantees G1–G6 (no process state left changed, every setting an
+  argument, classed errors and partial results on cancel, one gS session per
+  process, text readers for uploads, locale-free ordering) and the backends a
+  worker image needs. `hs_reset_session()` clears the per-job settings, resets
+  the switches, closes an open genomicSimulation session, clears circlize and
+  removes the package's scratch directories, and says what it reset. The leak
+  test `test-090-no-leak.R` runs the block route end to end (and the
+  genomicSimulation, HapSelect, SelectionTools and BayesC variants where
+  installed) between two snapshots of the process state.
+- **`annotate_blocks(meta, gff3, xrefs, qtl, chr_map, flank_bp, strict)`**
+  (decision-form row 23 a; D5-11): the one-call annotation route — each input
+  a path or a table; `read_gff3_genes()` → `compute_block_annotation()` →
+  `attach_block_annotation()`. The workshop's module 07 runs it
+  (`ANNOTATION_ENGINE <- "r"` in `_paths.R`, no Python, conda or network) and
+  writes the same step files as the Python engine; the bridge document's new
+  section 0 describes the R route.
+- **The annotation parity fixture ships** (row 36 b; D5-10):
+  `inst/extdata/parity/` holds 2 400 synthetic markers and 1 195 blocks laid
+  on the public MorexV3 1H + 2H gene rows, with the Python block_annotation
+  0.3.0 step files re-cut once on them (408 KB gzipped, README inside);
+  `test-block-annotation-parity.R` reproduces the five files line for line on
+  every machine. The 2026-09-20 GRDC run stays as a second, machine-gated
+  reference.
+- **The Shiny format converter is an app directory** (row 28 a; D5-4):
+  `inst/shiny/format_converter/app.R`, launched by
+  `run_format_converter_app()` (unchanged call) or `shiny::runApp()` on
+  `system.file("shiny", "format_converter", package = "haploStack")`. A warning
+  raised while reading goes to the Log tab and the read completes (up to 0.8.8
+  the first warning dropped it); the output menu names the presets.
+- **Manifests on the exporters** (D5-9): `export_block_annotation()`,
+  `export_marker_effects()` and `build_block_location_info(output_dir =)`
+  return as before and add `attr(, "hs_files")` (a `data.frame(path, kind,
+  object, bytes)` with absolute paths) and `attr(, "hs_notes")` (the flank
+  caveat; trait-name sanitising). One internal writer (`.hs_write_tables()`)
+  serves all three.
+- **`compute_block_annotation(strict =)`** and the vocabulary check (D5-7): a
+  container chromosome that the gene table never names raises
+  `hs_warning_input` naming it and suggesting the `chr_map` that an `H` /
+  `chr` affix would make (never applied); `strict = TRUE` makes it an error.
+  A QTL table is checked only on a complete mismatch. Provenance records
+  `chrom_vocab` (both sides) and `chrom_unmatched`.
+- **`chr_map =`** on `standardize_marker_annotations()`,
+  `attach_marker_annotations()` and `track_marker_labels()`, and
+  **`read_gff3_genes(rename_seqid =)`** (D5-7): one direction everywhere —
+  names are the container's spelling, values the other table's.
+- **`docs/haploStack_io_reference_0.9.0.md`**: the annotation files (GFF3,
+  xref dump, QTL BED, the five step files, the overlay table, the provenance
+  keys).
+- Internal: `.hs_sort()` / `.hs_order()` (C-locale ordering, `R/state.R`),
+  `.hs_require_bp()`, `.hs_vocab_check()`, `.hs_nearest_marker()`,
+  `.hs_write_tables()`, `.hs_utc_now()`, `.hs_annotation_counts()`,
+  `.st_with_io_dirs()`, `.hs_converter_dir()`, `.greedy_selection()`.
+- **The simulation step API** (decision-form row 18 a; D4-3):
+  `stk_spec()`, `stk_jobs()`, `stk_init()`, `stk_step()`, `stk_result()`,
+  `stk_close()`. A `"block"` state survives `saveRDS()` and resumes
+  identically; a genomicSimulation state holds a live group and refuses to
+  step from a file (`hs_error_state`). `print.stk_spec()`.
+- **`run_stacking_simulation(trait =, keep_populations =, backend_opts =,
+  ga_control =, progress =)`** (D4-3, D4-4, D4-8): the trait to breed on when
+  the effects hold several; `"final"` or `"none"` final populations;
+  genomicSimulation options `cM_per_mb`, `map_unit` (`"auto"`, `"bp"`,
+  `"cM"`) and `keep_files`; GA controls for OHS `"GA_pairwise"` and GBS
+  `gbs_engine = "GA"`; the package's progress callback — per generation with
+  `n_cores = 1` (`unit = "cycle"`, the generation's summary row in the
+  payload), per job with `n_cores > 1` — whose `FALSE` cancels with an
+  `hs_error_cancelled` carrying the partial result.
+- **`hs_simulation` result** (D4-4): the five 0.8.8 elements plus `notes`
+  (one row per job and code — `fallback_truncation`, `ocs_grm_failed`,
+  `ocs_kinship_cap`, `metric_failed`, `f1mean_failed`,
+  `d2ideal_direction_blind`, `gs_map_scaled`, `monitor_write_failed`,
+  `figure_failed` — and one warning per code at the end of the run),
+  `provenance` (status, the resolved spec, trait, seed, RNG kind, input sizes,
+  block provenance, backend and version, the founder ideal's summary, the file
+  tag, one row per job, kept scratch directories) and `figures` (empty);
+  `print.hs_simulation()`; **`write_outputs.hs_simulation()`** writes
+  `stacking_plans_<tag>.txt`, `stacking_summary_<tag>.txt` and
+  `Trajectories_<tag>.png` with a manifest, and refuses to overwrite unless
+  asked.
+- **`progress =`** on `hapS_ld_blocks()` (one event per chromosome, the
+  finished chromosomes' block map as the partial result on cancel),
+  `st_ld_blocks()` and `st_ld_blocks_files()` (start / done) (D1-5).
+- **`gs_load_geno_meta(work_dir = NULL, replace =, trait =, map_unit =)`**
+  (D1-6, D4-6, D4-7): a private scratch directory by default, removed by
+  `gs_close()`; `replace = TRUE` to close an open session; the trait to load
+  when the effects hold several; the map unit. The handle carries the session
+  `token` and `own_dir`.
+- **`gbs_pair_selection(gbs_engine = "greedy")`** (D4-1), so the three GBS
+  entry points share one specification (`"GA"` is refused over family sets as
+  the driver refuses it).
+- **`fit_genomic_prediction()$summary`** (io/F14; D4-9): `model`, `n_train`,
+  `var_u`, `var_e`, `h2` (GBLUP only; `NA` otherwise), `seed`, `backend`,
+  `backend_version`, beside the backend's own object.
+- Internal, for the record: `.STK_SCHEMES` (the scheme registry),
+  `.hap_cols()`, `.gbs_spec()`, `.stk_trajectories_view()`,
+  `.stk_founder_measures()`, `.hs_parallel_ok()`, `.hs_with_plan()`,
+  `.hs_keep_plan()`, `.hs_keep_rng()`, `.hs_options_get()`,
+  `.hapS_blocks_to_bm()`, `.gs_check_handle()`, `.gs_session_clear()`,
+  `.stk_dispatch()` (a bounded queue: at most `n_cores` futures alive).
+- **`circos_track(limits = c(low, high))`** for `"rect"` rings (intake 12,
+  owner 2026-11-08; D3.9): fixes the colour scale instead of the ring's own
+  data range, so several rings or several figures share one scale; the legend
+  bar runs over the limits and values outside take the end colours.
+- **`marker_signal_table(p)`** (D3.9): the table behind a
+  `plot_marker_signal()` or `plot_marker_effects()` plot, replacing the
+  plotters' `table_file` argument (see Deprecated).
+- **`hs_chrom_levels(x)`** (D3.6): the one natural chromosome order (see
+  Changed), exported so a script can sort its own tables the way every
+  haploStack figure and table does. `.natural_chrom_levels()` and
+  `.hs_chr_order()` are aliases of it.
+- **`compute_block_catalogue(blocks =)`** (cc/F05; D3.5): a character vector of
+  block ids restricts the catalogue, and `run_haplotype_catalogue(selected_blocks
+  =)` now passes its selection through, so `hap_catalogue` shrinks to the
+  selected blocks as the GEBV matrix always did. **`count_favourable_blocks(tol
+  = 0)`** (C-prefer): a local GEBV with `|value| <= tol` is `Zero`; the default
+  keeps the strict 0.8.8 sign rule.
+- **`analyze_block_catalogue(candidates = c("all", "complete"), gebv_matrices =
+  TRUE)`** (intake 12, owner 2026-11-08; D3.4). `candidates = "complete"`
+  lets only fully observed subtypes (signatures without the missing-allele
+  token) represent a block — a missing call contributes 0 to the local GEBV, so
+  a gapped signature can outscore every observed one where the population
+  carries only the unfavourable allele; a block with no complete subtype falls
+  back to all, and the reported `subtypes` table is not filtered.
+  `gebv_matrices = FALSE` skips the per-trait genotype-level matrices (about
+  250 MB on the barley panel) and the `"heatmap"` plot, with a note.
+- **`write_outputs()` for an analysis** (D3.4): `write_outputs(res, dir, what =
+  c("tables", "figures"), overwrite = FALSE, create_dir = TRUE)` writes
+  `block_subtypes.txt`, `block_selected.txt`, `block_S.txt`, `block_N.txt`,
+  `block_top.txt` and `block_<plot>.png` from an `hs_block_analysis` kept in
+  memory, with the same manifest and overwrite rules as the catalogue method.
+- **`write_outputs()` for a catalogue** (D3.3):
+  `write_outputs(res, dir, what = c("tables", "figures", "container"),
+  overwrite = FALSE, geno_meta = NULL, create_dir = TRUE)` writes the 0.8.8
+  file set from an `hs_catalogue` kept in memory — the same names and bytes
+  `output_dir` gives at compute time — and returns a manifest
+  `data.frame(path, kind, object, bytes)`. Existing targets are refused with
+  `hs_error_input` naming them unless `overwrite = TRUE`; a figure that fails
+  to render becomes a note (`figure_failed`) and a manifest row with
+  `bytes = NA` instead of aborting the tables after it; the container is
+  written only when `geno_meta` is supplied.
+- **`run_haplotype_catalogue(progress =)`** (D1 §3.5 contract; D3.3): a
+  function called after each trait with `list(stage = "catalogue", unit =
+  "trait", i, n, label, elapsed, payload = list(trait))`; returning `FALSE`
+  stops the run with `hs_error_cancelled`, whose `partial` field holds the
+  finished traits and `at` the position. Also new, with the 0.8.8 default:
+  `plot_block_counts(sample_order =)`; `selected_blocks` also accepts a
+  character vector of block ids.
+- **One figure renderer, `hs_render_figure(x, file, width_mm, height_mm, dpi,
+  create_dir, overwrite)`** (D3.2). Takes a ggplot, an `hs_figure` recipe
+  (built first), an `hs_meta_circos`, a nested `hs_figure_set` (one file per
+  leaf, the leaf path appended to the stem) or a `recordedplot`; picks the
+  device from the extension (`.png` / `.tiff` through ragg when installed,
+  else cairo; `.pdf` through `cairo_pdf()`, else `pdf()` with a
+  `fonts_not_embedded` note; `.svg` needs cairo); refuses an unknown
+  extension or a missing directory (`create_dir = FALSE`) with
+  `hs_error_input`; restores the previous device, `par()` and circlize state.
+  `save_journal_figure()` is now a wrapper on it (journal widths, the
+  title warning, `create_dir = TRUE`; its `<= 0.8.1` branch is gone).
+- **Figure recipes.** `hs_figure` (plotter name, arguments, size, file stem)
+  is what a result stores instead of a rendered plot; `hs_build_figure(fig,
+  result)` builds it, resolving `hs_ref` pointers into the owning result so
+  a catalogue does not carry a second copy of its tables; `print()` on a
+  recipe builds and draws it; `hs_figures(x, build = TRUE)` builds every
+  recipe of a result. `plot_localgebv_alignment()` /
+  `plot_favourable_blocks()` keep their generation → family → ggplot shape,
+  now classed `hs_figure_set` so the renderer writes one file per leaf.
+- `print()` / `plot()` methods for `hs_meta_circos`: a circos object draws
+  on the current device when printed, as a ggplot does.
+- **A usage guide ships inside the package, written as an agent skill**
+  (thread #037). `inst/skills/haplostack/` holds `SKILL.md` and reference
+  pages on the block map, the `GenoMeta` container, the stacking simulation
+  and troubleshooting; it installs with the package, so it describes the build
+  in use. `hs_agent_guide()` prints it (`hs_agent_guide("blocks")` etc. for a
+  reference page); `hs_install_skill(path)` copies it into an agent's skills
+  folder such as `.claude/skills`, stamping the haploStack version, and
+  refuses to replace an existing copy unless `overwrite = TRUE`. Nothing is
+  written on install or load. Coding agents do not search the R library for
+  skills, so the guide is announced where they look on first contact: the
+  startup line (`Usage guide (people and AI agents): hs_agent_guide()`),
+  `?haploStack`, `DESCRIPTION` and the README. `test-090-agent-guide.R` keeps
+  every function the guide calls an existing export.
+- **A `GenoMeta` stores nucleotide alleles only (C-5).** The container's
+  categorical vocabulary is `"nucleotide"` — `A/C/G/T`, or digits a file used
+  as allele labels (PLINK's 1/2 coding, which `read_plink_ped()` keeps as it
+  is) — beside the dosage vocabulary `"numeric"`. SelectionTools' code table
+  (`A = 1, C = 2, G = 3, T = 4`, missing `-1`) lives in `R/st_formats.R` and
+  is applied at the boundary: `st_convert()` and the `"ST"` preset of
+  `read_genotype()` / `read_st_genotype()` translate the codes on the read
+  (behind `use_st_formats()`, with `st_formats =` on the readers), and
+  `st_convert(to = "selectiontools", dict = "fixed")` writes the fixed table
+  (the default `"marker"` keeps the per-marker `1, 2, …` codes the LD
+  resolver needs). `upgrade_geno_meta()` — so `load_geno_meta()` — recodes a
+  container saved with `metadata$encoding = "selectiontools"` (the array, the
+  `char_dict`, the `Allele` column of stored effects), whatever its schema;
+  `"0"` and `"-"` tokens are left as they were, since the recode is a change
+  of vocabulary, not a repair. Integer codes reaching `build_geno_meta()`,
+  `new_geno_meta()` or `detect_genotype_encoding()` with no declared
+  encoding are refused with an `hs_error_format` (hint `st_convert()`) that
+  names both declarations. The local-GEBV effect validator accepts the
+  alleles the container actually holds, so digit labels and their effects
+  join as before.
+- **The block map has two shapes, and they are defined by the functions.**
+  `attach_block_info()` — and through it every reader's `block_file =`,
+  `build_geno_meta(blocks =)` and the LD resolvers — accepts a block-marker
+  map `(Chrom, Marker, Block)` (blocking by markers) or a block-region map
+  `(Chrom, Block, Start, End)` (blocking by regions), from a data.frame or a
+  file whose header carries those names (case does not matter). One resolver
+  (`R/geno_meta_blocks.R`) reads identifiers as text (`007` stays `007`),
+  joins a marker map on `Marker`, reconciles a one-to-one chromosome rename
+  (`1H` → `1`, reported once) or takes `chrom_map =`, expands a region map by
+  position (the `foverlaps` engine that `expand_block_info()` now wraps, same
+  row order as before), keeps a region map's declared span as
+  `Region_Start` / `Region_End` beside the marker-derived `Start` / `End`,
+  and stops with an `hs_error_block_map` on anything else: a headerless file
+  or an alias header such as `Chr, SNP, Block` (0.8.8 guessed and could
+  silently produce an all-singleton container), an inconsistent rename, a
+  block on two chromosomes, a region on an unknown chromosome (the message
+  suggests the `chrom_map`), a map with no marker in the panel. Under half
+  matched is a warning. A marker in two blocks is an error unless
+  `overlap = "first"` (`block_overlap =` on the readers) keeps each marker's
+  first block. Exact duplicate rows are dropped silently.
+- **Block provenance.** A container records where its blocks came from in
+  `metadata$blocks`: `source` (`"user_map"`, `"hapS_ld_blocks"`,
+  `"st_ld_blocks"`, `"unknown"` after an upgrade), `label`, the file name and
+  md5, `map_md5` (the identity of the block set — the same for a file, a
+  data.frame or a round-tripped CSV), `n_blocks`, `n_singletons`, `n_matched`,
+  `n_unmatched` and the parameters applied (layout, overlap, `chrom_map`,
+  renames, or the LD rule). `filter_geno_meta()` adds `pruned_from`; a
+  re-blocking replaces the record. The LD resolvers return it with
+  `attach = FALSE`, and attaching that list keeps the resolver's identity.
+- **`st_convert()` and `use_st_formats()`.** SelectionTools is being retired
+  from haploStack. Its own formats remain readable and writable through one
+  standalone converter: `st_convert()` turns a SelectionTools matrix (`"m"`)
+  genotype file plus `"mcp"` map into a `GenoMeta`, a `st.def.hblocks()`
+  block table into a block-marker map for `attach_block_info()`, and writes
+  a `GenoMeta` out in those formats (`to = "selectiontools"`; what
+  `st_ld_blocks()` writes for its own run). Everything that touches a
+  SelectionTools format — `st_convert()`, `st_ld_blocks()`,
+  `st_ld_blocks_files()`, the deprecated `define_haplotype_blocks*()` names —
+  is behind one switch, off by default: `use_st_formats(TRUE)` for the
+  session (option `haploStack.st_formats`, validated on read) or
+  `st_formats = TRUE` on the call. The `"ST"` preset of `read_genotype()` is
+  a plain delimited layout and is not gated.
+- **Container schema and `upgrade_geno_meta()`.** Every container now carries
+  `metadata$schema_version` (`2L`) and `built_with` (the package version that
+  built it); `ploidy`, `n_samples` and `n_markers` are derived from the array
+  and never trusted, and `new_geno_meta()` requires only `source_format` in
+  its `metadata`. A file saved by 0.6.0–0.8.8 (schema 1) is upgraded in
+  memory by `load_geno_meta()` with one message — metadata only: counters
+  re-derived, `char_dict` as a list, a block provenance record
+  (`metadata$blocks`, `source = "unknown"`), the schema stamp — and the file
+  is left unchanged. The exported `upgrade_geno_meta()` does the same for an
+  object in memory, and refuses a container two blocks share a marker in or
+  whose annotation no longer fits. A newer schema is refused
+  (`hs_error_schema`).
+- **Settings as arguments.** The five process settings
+  (`haploStack.missing_chars`, `sample_order`, `fill_na`, `strict_missing`,
+  `use_rcpp`) are resolved once, at the entry point, through one internal
+  resolver with the precedence argument > option > default, and passed down
+  as plain arguments; no helper reads an option itself (a hygiene test keeps
+  it so). `read_genotype()`, `read_st_genotype()`, `read_gs_genotype()`,
+  `read_plink_ped()`, `read_dart_genotype()`, `read_vcf_genotype()`,
+  `build_geno_meta()`, `new_geno_meta()` and `repair_geno_meta()` take
+  `missing_chars =` (a character vector for the call; `character(0)` ignores
+  the registry); `is_geno_meta()` and `load_geno_meta()` take
+  `strict_missing =`. An argument is validated exactly as the setter validates
+  it; an unusable option value is ignored, never obeyed.
+- **`is_geno_meta(strict =)`.** The default check is cheap (no array scan on
+  a stamped container); `strict = TRUE` scans for missing tokens regardless
+  of the stamp, requires `sample_info` rows in array order and no
+  `block_info` row without a marker. `load_geno_meta()` and
+  `upgrade_geno_meta()` use it.
+- **`load_geno_meta()` checks the file before unserialising it** (form row
+  32): under `max_bytes`, and starting like an R serialisation (gzip, bzip2
+  or xz header, or the uncompressed `X`/`A`/`B` header), else
+  `hs_error_format`. Its help page says "trusted input only — never on a user
+  upload"; a service accepts genotypes through the text readers.
+- **Result objects.** The base for the entry points' return values
+  (`R/results.R`): class `hs_result` with accessors `hs_notes()` (every
+  haploStack warning or silent fallback raised during the run, one row per
+  distinct message with a count), `hs_provenance()` and `hs_figures()`;
+  `print()` and `summary()` methods that open no device; the `write_outputs()`
+  generic. The catalogue, analysis and simulation entry points adopt it in the
+  following build phases; until then `write_outputs()` has no method.
+- **Deprecation ladder.** One file (`R/haploStack-deprecated.R`) holds the
+  helpers and the two help pages `?haploStack-deprecated` /
+  `?haploStack-defunct` with the table of every retired name. Deprecation
+  warnings carry `hs_warning_deprecated` (and base `deprecatedWarning`),
+  defunct errors `hs_error_defunct` (and `defunctError`). The two
+  `define_haplotype_blocks*()` names warn through it.
+- `new_geno_meta(annotation =)`; the annotation check it shares with
+  `is_geno_meta()` and `attach_block_annotation()` is one function.
+- **genomicSimulation read-back tells its own missing from ours.** A GenoMeta
+  missing cell crosses into gS as a placeholder allele pair; an allele gS
+  itself could not load is a different thing. Every read-back now requests
+  gS's missing under a sentinel, reads it as NA and raises a warning with the
+  count (`hs_warning_fallback`, code `gs_true_missing`), since the package
+  has no definition for a gS missing yet. Writing `--` (gS's own form)
+  instead of the text `NA` lands with the simulation step (form row 22).
+
+### Changed
+
+- **File placement** (D2 §3.9; D2-9, the last code change, no behaviour
+  change): `format_helper.R`, `catalogue_profile.R` and `catalogue_blockmap.R`
+  are gone. The container lives in `geno_meta_core.R` (constructor,
+  validator, rebuild, schema), `geno_meta_missing.R` (the missing-allele
+  portal, `repair_geno_meta()`), `geno_meta_blocks.R` (block maps, attach,
+  location, expand), `geno_meta_build.R` (`build_geno_meta()`),
+  `geno_meta_transform.R` (`filter_geno_meta()`, `recode_geno_meta()`) and
+  `geno_meta_io.R` (save / load / views / matrices / writers); the presets in
+  `format_presets.R`; the readers in `read_text.R`, `read_plink.R`,
+  `read_delimited.R`, `read_dart.R`, `read_vcf.R`; `%||%` and
+  `.lead_identifier_cols()` in `utils.R`.
+- **`run_haplotype_catalogue()` builds `geno_meta_views()` once** per run and
+  hands it to the compute core and the block signatures (cc/F09; D3.10):
+  identical tables, one melt of the array instead of two.
+- **An unseeded BayesC fit puts the session stream back** (D1-10 / G1):
+  `fit_genomic_prediction(model = "bayesc", seed = NULL)` draws its chain from
+  the session stream and restores it when the call returns.
+- 🔢 **Identifiers sort in C-locale byte order everywhere** (decision-form
+  row 33 a; D1-11): the 23 `sort()` calls and 6 `order()` calls on sample,
+  marker, block, chromosome and allele names use `method = "radix"`, the
+  order data.table already used. A Windows desktop, a Linux server and a
+  Chinese-locale session now order every table the same way. **What moves:**
+  only identifier sets with mixed case or punctuation (under a non-C locale
+  base R sorted `a, A, b, B`; the package now gives `A, B, a, b`), and any
+  draw that indexed such an order. Single-case alphanumeric identifiers
+  (every fixture, the parity harness, barley AGG1) are unchanged. Chromosome
+  names follow `hs_chrom_levels()` regardless.
+- **One locus contract for the annotation route** (D5-7): `chr_map` is
+  container → annotation on every function that takes one (the GFF3 reader's
+  file → stored rename is `rename_seqid =`); coordinates are bp — a declared
+  `metadata$pos_unit` other than `"bp"` is refused, an undeclared unit whose
+  largest position is under 10 000 warns (`hs_warning_input`); one
+  Marker → locus lookup; one nearest-marker matcher (`findInterval()` per
+  chromosome, ties to the first map row — identical to the 0.8.8 loop, and
+  about 50× faster on 5 000 × 50 000); `track_marker_labels()` always runs the
+  standardizer (a region table is matched at its midpoint and keeps its span);
+  a standardized table attached directly must name markers of the map and
+  blocks of the container (`hs_error_input` naming the first bad rows). A
+  matched row stores the container's chromosome spelling.
+- **Annotation provenance** (D5-8): each input is recorded as `file` (base
+  name), `md5`, `size`, `n` — no absolute path, no modification time, so two
+  reads of one file are one record; the stamp is `created` (ISO-8601 UTC) in
+  place of `date`. The QTL path gets the same record. The custom overlay's
+  provenance adds `chr_map` and `unplaced` (the names). After
+  `filter_geno_meta()` the counts (`n_blocks`, `n_blocks_hit`, `n_features`,
+  `n_marker_gene`, the custom counts) describe the pruned tables (ann/F7).
+- **`read_gff3_genes()`** (D5-8): lines are pre-filtered on the feature type
+  before splitting (a whole-genome GFF3 parses in under 100 MB instead of
+  about 400 MB); `start` / `end` are numeric (values beyond int32 read; the
+  exports are byte-identical); a `feature_type` column carries the file's
+  spelling into `features$feature_type` (`"gene"` when absent).
+- **The QTL BED reader** (D5-8) skips `#`, `track` and `browser` lines and
+  refuses a non-numeric or missing coordinate and `start > end`
+  (`hs_error_format`, naming the line).
+- **`meta$annotation$blocks` is stored in the container's block order**
+  (ann/F22); `export_block_annotation()` re-sorts to the Python order, so the
+  step files are unchanged. Its returned paths are absolute.
+- **`fit_genomic_prediction(model = "bayesc")`** (D1-7) writes BGLR's chain
+  files to a private temporary directory that is removed when the call
+  returns (up to 0.8.8 they landed in the working directory); the fit's
+  `NamefileOut` is `NA` then; a caller's `saveAt =` is passed through
+  untouched. `summary` gains `nIter` and `burnIn`.
+- **SelectionTools' `st.input.dir` / `st.output.dir`** (D1-8): the bridge
+  points both at its private directory for the call and restores whatever
+  the user had, present or absent; the working directory is no longer changed
+  (`setwd()` is gone) and a user's own non-empty setting is no longer refused
+  (up to 0.8.8 it was an error naming the remedy).
+- **Workshop module 07 runs in R by default** (`ANNOTATION_ENGINE <- "r"`,
+  `ANNOT_FLANK_BP = 0`, `CHR_MAP` from `HS_CHR_MAP` in `_paths.R`): the R
+  engine keeps the container's chromosome spelling (`1H`) in the step files
+  where the Python hand-over wrote `1`; every other byte is the same on the
+  workshop container. The `"python"` engine (the block_annotation driver)
+  stays for the Ensembl route and the Python figures; the package's README
+  and CHANGELOG mark its local route superseded.
+- **`BASE_COLOR_MAP` / `COLOR_MAP` carry the nucleotide palette only**
+  (C-6 item 5, owner 2026-11-03): the `"selectiontools"` palettes went with
+  the encoding; `make_allele_color_map(encoding = "selectiontools")` falls
+  back to the nucleotide palette. `geno_meta_views()`,
+  `.gp_allele_dosage()` and the effect-encoding check no longer understand
+  the token (no container past the portal carries it); `HS_ENCODINGS` and
+  `HS_MISSING_MODES` keep it on the ladder to 0.10.
+- `vignettes/skill_*.md` and `vignettes/Evaluate_stacking_blocks.R` are
+  build-ignored (row 30 b); `selection_grid.md` is pinned to 0.9.0 and its
+  replicate bullet rewritten (intake 05).
+- 🔢 **The OCS reseed is gone** (decision-form row 3 a; D4-5):
+  `ocs_selection()` called `set.seed(seed)` on every call, which reset the
+  caller's stream and made the crossing draws after every OCS cycle of
+  `run_stacking_simulation()` restart from the same point, so OCS replicates
+  within one run coincided from the second cycle on. **What moves:** every
+  OCS arm's `summary` and `plans` from cycle 2, and OCS replicates now differ
+  (parity objects `ocs$summary`, `ocs$plans`); TS / OHS / GBS are identical.
+  There is no pin to the old numbers: it was a bug. `ocs_selection(seed =)`
+  is kept and ignored (the greedy draws nothing).
+- 🔢 **A missing call goes to genomicSimulation as `--`** (decision-form row
+  22 a, the owner's token; D4-7): up to 0.8.8 the text `NA` was written, which
+  gS read as the alleles N and A, and the invented A segregated. Either copy
+  missing gives `--` (the container's NA-any rule); gS carries it as a literal
+  pair that propagates like its own missing and carries no effect; read-back
+  maps `-` (and the legacy `N`) to NA. **What moves:** genomicSimulation-backend
+  results on panels with missing calls (parity objects `gs_na$summary`,
+  `gs_na$plans`); panels without missing calls are identical. The map and
+  effect files now carry the header names gS 0.3 recognises (`marker chr
+  pos`, `marker allele eff`), which ends the "Failed to parse 1 line(s)" on
+  every load (I2) and changes no number; `.gs_require()` wants gS >= 0.3;
+  `gs_cross_plan()` on a session loaded without effects gives `F1mean` `NA`
+  (it read 0); `map_unit = "auto"` (the 0.8.8 heuristic) notes `gs_map_scaled`
+  when it scales a bp map.
+- **The caller's random stream is left as it was** after
+  `run_stacking_simulation()` and the step API (row 3; D4-3): the job stream
+  lives in the state. A script that drew random numbers after a run and relied
+  on the leftover stream sees different draws; `stk_spec(seed = NULL)` draws
+  one integer from the caller's stream and records it.
+- **`run_stacking_simulation(output_dir = NULL)`** is the default (row 10 a;
+  D4-4): nothing is written unless a directory is named; then the 0.8.8 files
+  are written through `write_outputs()` and the result is returned invisibly.
+  Up to 0.8.8 the default wrote into `./stacking_output`.
+- **Row 19 a guards** (intake 07; D4-6): the default `scheme` is `c("TS",
+  "OHS", "GBS")` (OCS by name only); effects holding several traits need
+  `trait =` (an `hs_error_input` naming them; a `Trait` column in one long
+  table is read, and an unknown `trait` is an error instead of the silent
+  first-table fallback, N3); `select_priority = "low"` is refused for OHS, OCS
+  and GBS unless `construct_method = "argmax"` (they select the high tail
+  whatever it says); `top_founders` above the population is an error (it was
+  capped silently); `d2ideal` under `"low"` with a direction-blind builder is
+  measured against the high ideal and noted once (`d2ideal_direction_blind`).
+- **One genomicSimulation session per R process** (row 4 a; D1-6): a second
+  `gs_load_geno_meta()` while one is open is an `hs_error_state` unless
+  `replace = TRUE`; `gs_cross_plan()`, `gs_group_to_geno_meta()`,
+  `gs_group_gebv()` and `gs_sync_group_names()` refuse a handle whose session
+  was closed or replaced; `gs_close()` acts only for the live session, removes
+  the private scratch and is idempotent. The driver opens the session on the
+  founders at `stk_init()` and frees it when the job is done (sc/F21: a
+  failing cycle leaks nothing); its scratch is a private `hs_gs_*` directory
+  per job unless `backend_opts$keep_files = TRUE`.
+- **One local-GEBV pass per generation** (row 20 a; D4-2): the block
+  backend's genotype-level F1mean pass and the second haplotype-level pass of
+  the next cycle are gone; the one haplotype-level table gives the same
+  numbers (the D4 probe, now a test: fully blocked, with missing cells,
+  partially blocked, with and without the kernel). On a failed pass F1mean and
+  the offspring metrics are NA for the generation with note `f1mean_failed`,
+  and the next generation recomputes. The timing of that pass is
+  `offspring_gebv`; `crossing` is crossing only.
+- **Silent fallbacks leave a trace** (sc/F19, sc/F09; D4-4): fewer than two
+  parents from a scheme (`fallback_truncation`), a GRM failure under OCS
+  (`ocs_grm_failed`), the kinship cap stopping the OCS set
+  (`ocs_kinship_cap` — `ocs_selection()` now raises `hs_warning_fallback`
+  where it printed a message), a failed metric (`metric_failed`), a live
+  monitor file or figure that could not be written (`monitor_write_failed`,
+  `figure_failed`). Each is a row in `hs_notes()` and one warning per code at
+  the end of the run; nothing is silent.
+- **HapSelect blocks per chromosome** (D1-5): `hapS_ld_blocks()` runs
+  `pairwise_ld()` / `def_blocks()` chromosome by chromosome (identical tables
+  and block IDs to the whole-panel call on three probe panels, pinned by the
+  test), which is what makes the per-chromosome progress event and the
+  partial result possible. The compiled kernels check for an interrupt every
+  256 markers, so an interrupt or `setTimeLimit()` reaches them.
+- **One owner of the future plan** (D1-4): `n_cores > 1` under the caller's
+  sequential plan sets a multisession plan for the call and puts sequential
+  back (0.8.8); under a plan the caller set it uses that plan and says so once
+  (it was overridden). `n_cores = 1` never touches the plan. HapSelect's plan
+  and progressr options are put back through the same helpers; no file but
+  `state.R` calls `future::plan()`, `set.seed()` or reads an option by name.
+- **The scheme registry** (sc/F07; D4-1): the four schemes' selectors, pair
+  scorers and properties live in one table; the twelve string matches on the
+  scheme name are gone, and the `%||%` fallbacks on driver options, whose
+  values equalled the defaults, with them. One parser of the
+  `<Sample>.<copy>` column names (`.hap_cols()`, sc/F24), one GBS resolver
+  (`.gbs_spec()`, sc/F25), one plan expansion for both backends
+  (`.expand_cross_plan(keep_cols =)`, io/F19), one trajectories view
+  (sc/F23), the founder row through the generation's summary builder
+  (sc/F26). The genomicSimulation read-back on the driver path no longer
+  builds a FAM the rename rebuilds (io/F25). Parity identical.
+- **`summarise_simulation()`** skips a metric column with no value (the
+  compat view's `BlockCoverage` is all NA) instead of returning ±Inf with two
+  warnings per group (sc/F23, I02); a table with no usable metric is an error.
+- **`update_fitness_index()`** keeps to the original marker × allele registry
+  as its documentation says (sc/F29): a marker present only in the updated
+  effects is no longer admitted.
+- **`make_cross_design(method = "custom")`** works on a copy of
+  `cross_table`: the `Cross_ID` and `n_offspring` columns it adds no longer
+  land on the caller's table (sc/F28). A `n_offspring` column already in the
+  table still wins over the argument (documented; unequal family sizes need
+  it).
+- **Figure-layer corrections** (D3.9): an all-negative `"rect"` circos ring
+  now uses the sequential ramp reversed over its range instead of collapsing
+  to one grey (viz/F06); `circos_track()` refuses a non-positive or infinite
+  `height_mm`, a non-finite `min_gap_rad` and a non-integer or negative
+  `label_top_n` with `hs_error_input` (viz/F21); the "double column (183 mm)"
+  advice is printed only when the figure is narrower than that (I11); point
+  sizes on the circos are divided by the device `cex` as well as its point
+  size, so a caller's `par(cex =)` no longer scales labels twice (viz/F18);
+  `plot_clustered_alignment(show_dendrogram = TRUE)` without \pkg{cowplot} is
+  an `hs_error_dependency` naming the install instead of a warning and a
+  different return class (viz/F16); `plot_phenotype_bars(sample_levels =)`
+  tags the drawn order on the plot with source `"argument"` (viz/F23);
+  `plot_meta_alignment()`'s axis sync reads the panel's own order tag first,
+  then the scale limits, then builds the plot, and leaves a note
+  (`axis_sync_skipped`) when none is readable (io/F26, viz/F30);
+  `phenotype_summary()`'s `Skew` is documented as Pearson's second coefficient
+  without the factor 3, values unchanged (viz/F29);
+  `run_fitness_pipeline(plot_landscape = TRUE)` attaches the plot as
+  `attr(fi, "landscape")` and prints it only at an interactive console
+  (C-run-fitness-print).
+- 🔢 **`trace_haplotype_family()` compares an offspring copy with both copies
+  of each parent** (decision-form row 17 a; D3.8). Up to 0.8.8 only parent
+  copy 1 was read, so a block inherited from a heterozygous parent's second
+  copy scored no match and went to the other parent, "ambiguous" or "unknown".
+  Now the parent's best-matching copy counts and is reported in the new column
+  `ParentHap` (`NA` for ambiguous or unknown). **What moves:** `Parent` and
+  `n_match` wherever a parent is heterozygous in the block; `n_total` is
+  unchanged and the new `n_match` is never smaller than the old one. There is
+  no pin: the old reading was a bug.
+- 🔢 **`compute_marker_stats()`: one Major/Minor rule, ploidy-aware `Het` and
+  `Missing_rate`** (decision-form row 16 a, cc/F21; D3.7). `Minor` is the
+  least frequent observed allele, ties broken by allele order (the allele the
+  dosage counts, so it agrees with `MAF`); `Major` is the most frequent of the
+  *remaining* alleles, ties broken the same way. **What moves:** on an exact
+  two-way tie `Major` becomes the other allele (0.8.8 reported the minor allele
+  twice); nothing else changes — `MAF`, `Minor`, counts and rates are identical.
+  `Het` is defined for diploid data only and is `NA` at any other ploidy (it was
+  a two-layer guess on a tetraploid); a dosage-coded container
+  (`metadata$encoding == "numeric"`, the phantom second layer that the 0.9.1
+  dosage model retires) is read as one layer, so its `Missing_rate` is the true
+  one instead of 0.5 on every marker. Internally the array is encoded once
+  (cc/F19) and the locations come from the map and block map directly.
+- 🔢 **One chromosome order everywhere** (decision-form row 29 a; D3.6).
+  `hs_chrom_levels()` is the rule: strip a leading `chr` / `chrom` /
+  `chromosome`, names whose key starts with an integer first (by the integer,
+  then the rest of the key), the others after alphabetically, locale-free. It
+  replaces four rules that disagreed — the circos and Manhattan plots put
+  `Un` first and `10H` before `1H`, the alignment panels used a natural
+  order, and tables (`gebv_matrix`, `compute_marker_stats()`,
+  `geno_meta_views()`, `block_info`) sorted chromosomes as plain strings
+  (`10` before `2`). **What moves:** figure axis order and the *row order* of
+  those tables, plus HapSelect block ids (which embed the chromosome key),
+  on panels with ten or more numbered chromosomes, bare numbers plus a
+  scaffold, or `chr`-prefixed names. Values never change. Barley `1H`–`7H`
+  (with or without `Un`) is identical under every rule, and so is any panel
+  whose chromosomes are plain integers without a scaffold (its block ids keep
+  the integer key). No pin is needed: sort by your own key to recover the old
+  order.
+- 🔢 **One centring default for the catalogue and selection functions**
+  (decision-form row 15 c; D3.5). Eight entry points share one table
+  (`.HS_CENTER_DEFAULT`): `run_haplotype_catalogue()`,
+  `compute_profile_localgebv()` and `predict_gebv()` already defaulted to
+  `center = "none"`; `compute_block_catalogue()`, `analyze_block_catalogue()`,
+  `count_block_subtypes()` and `count_favourable_subtypes()` move from
+  `"allele_freq"` to **`"none"`** (Q22.h); `count_favourable_blocks()` moves
+  from `"allele_freq"` to **`"locus_mean"`** — its output is a *sign* count, and
+  an uncentred sign mostly reflects which allele the effect file called the
+  reference, while the locus mean is a per-block shift that leaves every
+  subtype argmax unchanged. **What moves:** local GEBVs, `hap_catalogue`
+  `Effect`, `S` / `N`, `top_blocks`, subtype tables and favourable counts from
+  any of the five functions called without `center =` (workshop and template
+  module 04 among them). **Pin:** `center = "allele_freq"` reproduces every
+  0.8.8 number. The centre used is now recorded on every result:
+  `hs_provenance(res)$center` for a catalogue or analysis, `attr(x,
+  "hs_center")` on the tables and lists of `compute_block_catalogue()`,
+  `count_block_subtypes()`, `count_favourable_subtypes()` and
+  `count_favourable_blocks()`.
+- **`analyze_block_catalogue()` returns an `hs_block_analysis` and writes only
+  when asked** (D3.4). The nine 0.8.8 fields are unchanged; `figures` (data-only
+  recipes of the built plots), `notes` and `provenance` (centre, traits, value
+  source, transform, fitness rule, candidate rule, the passed catalogue's
+  centre) are added. `output_dir = NULL` no longer warns; a named directory is
+  written through `write_outputs()` (same five tables and `block_<plot>.png`
+  files). The `"circos"` plot is built on the circos engine
+  (`plot_meta_circos()` over one `track_block_effect()` ring per trait) as an
+  `hs_meta_circos` in `$plots`, never drawn during the analysis and never
+  through the deprecated legacy plotter; without \pkg{circlize} it is skipped
+  with a note. A plot that cannot be built is a note (`plot_skipped`) instead
+  of a bare warning. With `catalogue =`, an explicit `center` that differs
+  from the catalogue's centring is an `hs_error_input`; the default adopts the
+  catalogue's with a note (`center_adopted`); a pre-0.9.0 catalogue leaves
+  `center_unknown`. A supplied unused `...` argument warns
+  (`hs_warning_input`).
+- **`run_haplotype_catalogue()` writes nothing unless asked** (decision-form
+  row 10 a; D3.3). `output_dir` defaults to `NULL`: the function returns an
+  `hs_catalogue` (visibly) and no file is created; pass
+  `output_dir = "catalogue_output"` for the 0.8.8 behaviour (the result is
+  then returned invisibly, as before), or call `write_outputs(res, dir,
+  geno_meta = meta)` at any later time for the same files. `save_profile` is
+  consulted only when `output_dir` is given. A script that relied on the old
+  default directory must now name it.
+- **The output label follows the block provenance** (row 13 a; D3.3). Files
+  were stamped `<ld>_t<tol>` from two arguments that only labelled names
+  (`0.5_t0` by default, whatever made the blocks). Now: LD-built blocks keep
+  `<r2>_t<tol>` from `metadata$blocks`; a user block map gives the map
+  file's stem, or the resolver's label (`user_map`) for an in-memory table;
+  a container with no provenance keeps `0.5_t0` and the result carries the
+  note `label_legacy_default`, so old scripts on old `.rds` files write the
+  same names. `label =` sets it directly; the 0.8.8 `ld_threshold` /
+  `tolerance` pair still overrides when given (both now default `NULL`).
+  **Who sees a change:** user-map containers built in 0.9.0 — their files
+  are `…_<mapstem>_…` instead of `…_0.5_t0_…`; pin with `label = "0.5_t0"`.
+- **The catalogue result is an `hs_catalogue`** (D3.3): still a list keyed by
+  trait with the five 0.8.8 tables, plus `figures` (three recipes), with
+  notes and provenance (centre, traits, file stems, label, block provenance,
+  engine) behind `hs_notes()` / `hs_provenance()`. Two shape changes: the
+  per-trait `$geno_meta` copy of the container is **gone** (nothing in the
+  package, tests, vignettes or pipelines read it; `write_outputs(geno_meta =)`
+  writes it), and `block_counts$Sample` is **character** instead of a factor
+  carrying the bar order — `plot_block_counts()` now orders the bars itself
+  (same order; written files are byte-identical). Trait names are sanitised
+  for file names (a renamed stem is a note; two traits that collide after
+  sanitising are an `hs_error_input`), and an empty catalogue core (no
+  block-assigned marker in the genotype) is an `hs_error_input` before any
+  work or write instead of a late failure.
+- **`plot_meta_circos()` no longer draws when called** (decision-form row
+  11 a; D3.2). `draw` defaults to `FALSE` and the `hs_meta_circos` object is
+  returned visibly, so a bare console call still auto-prints and draws, while
+  a script that builds the figure and renders it with `hs_render_figure()` or
+  `save_journal_figure()` draws exactly once. `draw = TRUE` keeps the 0.8.8
+  behaviour (draw now, return invisibly). A script that relied on the old
+  default to draw inside a device it had opened must pass `draw = TRUE` or
+  `print()` the object.
+- **The simulator emits nucleotides.** `sim_geno_meta()`, `sim_geno_matrix()`
+  and `sim_dataset()` default to `encoding = "nucleotide"`; the draws are the
+  ones 0.8.8 made, with `A` for `1` and `T` for `4` (the allele is sampled by
+  position). `sim_dataset()$geno_st` / `$eff_st` are kept for scripts that
+  read them; its container is built from the same draw in nucleotides.
+- **`detect_genotype_encoding()` returns `"nucleotide"` or `"numeric"`** and
+  refuses slash-separated integer codes (see Added); the detector proper is
+  internal and still names them, for the portal and the legacy
+  `process_genotype()` layer (`split_haplotypes()$encode`).
+- **Readers build, then attach.** `read_plink_ped()`, `read_dart_genotype()`
+  and `read_vcf_genotype()` no longer hand block tables to the constructor
+  through a private file reader (`.read_block_file()`, deleted): they build
+  the container and call `attach_block_info()` on `block_file =`, which may
+  now be a data.frame. The FAM, the provenance and every check above apply on
+  every route.
+- **One block-file writer.** `build_block_location_info(output_dir =)`, the
+  LD resolvers' `output_dir =` and `st_ld_blocks_files()` write the same two
+  files through one function: `<prefix>_block_info.csv` now carries the seven
+  columns `Chrom, Block, Start, End, Pos, Num_SNPs, Block_length` (plus
+  `Region_Start, Region_End` after a region map and the `Signal_*` columns
+  after a selection) with positions as plain integers — the resolvers' file
+  wrote four columns and `8.8e+07` for a round position — and
+  `<prefix>_block_marker_map.csv` is the exact round trip. One message names
+  both files.
+- **`st_ld_blocks_files()`** is `st_convert()` + `st_ld_blocks(attach =
+  FALSE)`: it returns the seven-column `block_info` and the provenance, and
+  no longer writes SelectionTools' side files (`<tag>.ld.txt`,
+  `<tag>.haplotype_map.txt`). It is behind `use_st_formats()` like the rest.
+- **"Not a valid GenoMeta" errors carry the reason.** The ~60 entry-point
+  guards are one internal call; the message keeps the 0.8.8 prefix
+  (`fn: 'geno_meta' is not a valid GenoMeta`) and appends the first failing
+  condition instead of printing it as a separate message line, keeps any
+  hint the function gave (also as the condition's `hint` field), and the
+  condition's call is the caller's own.
+- **`is_geno_meta()` trusts the missing-token stamp.** A container built by
+  0.6.0 or later records the vocabulary it was normalised against, so the
+  validator no longer re-scans its array on every call (0.18 s per call on a
+  500 x 19 000 x 2 panel, at ~60 call sites); only an unstamped container is
+  scanned, or any container under `strict = TRUE`.
+- **`attach_signal_markers()` records no timestamp** (`signal_selection$date`
+  is gone): containers built from the same inputs are `identical()`.
+- **`filter_geno_meta()` prunes the `block_info` row of a block whose every
+  marker left** (form row 6). The code always did; the help pages of
+  `new_geno_meta()`, `filter_geno_meta()` and `docs/geno_meta_structure.md`
+  said the rows were preserved.
+- **`metadata$family_history` is not carried to offspring containers** (the
+  founders' pedigree does not describe the progeny; X7). The crossing
+  backends, `update_geno_meta_from_matrix()` and the driver's advance step
+  drop it alongside the phenotype; `sample_info` holds the progeny's parents.
+- **Classed conditions.** Every error, warning and message now carries a class
+  (`hs_error`, `hs_warning`, `hs_message`; missing optional packages
+  `hs_error_dependency`). Text and call are unchanged. New `hs_quiet(expr)`
+  muffles only haploStack's progress messages. **Phase A:** every error is an
+  input error (`hs_error_input`) unless it names another kind
+  (`hs_error_dependency`, `hs_error_state`, `hs_error_cancelled`,
+  `hs_error_internal`, the last at the package's own assertion sites); input
+  errors may carry a finer class in front (`hs_error_format`,
+  `hs_error_block_map`, `hs_error_schema`, `hs_error_defunct`). Conditions can
+  carry fields: every dependency error has `hint` (the install command).
+- **`metadata$char_dict`** is always a named list of integer codes (a named
+  vector is converted, an absent one is derived from the observed alleles)
+  and is no longer a required constructor field; it is informational.
+- `expand_block_info()` help and example name the map argument it has taken
+  since 0.5.x, not a container.
+- `DESCRIPTION` `Remotes:` names `vllrs/genomicSimulation` beside HapSelect.
+- Non-ASCII characters inside R string literals (83, mostly em-dashes in
+  messages) are `\u` escapes; the runtime text is identical.
+- **Dependencies.** Imports go from 11 to 9. Dropped dplyr and magrittr (the
+  one chain is data.table now, bit-for-bit identical on eight parity cases
+  including the SelectionTools file route), and tidyr, reshape2, stringr and
+  methods (no call site). Declared graphics, grDevices, grid and tools, which
+  were already called. Suggests: dropped scico, gridExtra, LDheatmap and
+  praise (unused); declared withr, pdftools and ragg (used). `zip` and
+  `future` are now checked before use.
+
+### Deprecated
+
+- **`greedy_selection()` and `genetic_algorithm_selection()`** (row 27 a;
+  D5-3): warn on every call, removed in 0.10. The driver runs the same
+  coverage objective as the `OHS` scheme: `ohs_selection(method = "Greedy")`
+  / `ohs_selection()` (GA), or `run_stacking_simulation(scheme = "OHS")`. The
+  GA's own greedy fallback calls a non-warning internal twin. `quick_start`
+  and `simulation_stacking` now teach `ohs_selection()`.
+- **`st_ld_blocks_files()`** (row 27 a): `st_convert()` followed by
+  `st_ld_blocks()`; removed in 0.10 (still behind `use_st_formats()`).
+- **`process_genotype()` / `transform_genotype()`** (row 27 a): the
+  pre-GenoMeta layer; build with `build_geno_meta()` or a reader, write with
+  `write_geno_meta()` / `geno_meta_to_matrix()`. Removed in 0.10 with the
+  helpers only they use.
+- **`output_format =`** on `geno_meta_to_matrix()` and `write_geno_meta()`
+  (Q-c a): the old spelling of `preset =` (`"plink_ped"` → `"PL"`, `"st"` →
+  `"ST"`, `"gs"` → `"GS"`); warns, mapped as before, defunct in 0.9.x. The
+  vignettes and the converter use `preset`.
+- **`select_method =`** on `run_stacking_simulation()` joins
+  `catalogue_results` / `trait_name` on the ladder (Q-c a): `scheme =`.
+- **`extend =`** on `transform_effects()` / `read_effect_file()`: the
+  zero-effect rows it promised were never added (the branch needed a
+  dictionary entry no dictionary has); supplying it warns "... and is
+  ignored" and the dead branch is gone.
+- **`plot_meta_circos(legend =)`**: `legend_position = "none"`.
+- **`read_gff3_genes(chr_map =)`**: renamed `rename_seqid =` (it renames
+  file → stored, the opposite direction to every other `chr_map`).
+- `catalogue_results =`, `trait_name =` and a catalogue list passed as
+  `geno_meta` on `run_stacking_simulation()` (sc/F31; D4-8): on the ladder
+  since 0.9.0 (they never warned), `hs_warning_deprecated` on every call,
+  mapped as before; pass the `GenoMeta` and `trait =`.
+- `ocs_selection(seed =)` is ignored (D4-5): the greedy is deterministic.
+  Kept in the signature; documented, not warned.
+- `table_file =` on `plot_marker_signal()` and `plot_marker_effects()` (0.9.0,
+  viz/F24; D3.9): a plotter does not write files. The table is on the plot
+  (`marker_signal_table(p)`); `save_marker_signal()` writes it beside the image.
+  A supplied path still writes this release, with `hs_warning_deprecated`.
+- `center_by_freq =` on the eight centring entry points (D3.5): on the
+  deprecation ladder since 0.6.0 in name, it now warns
+  `hs_warning_deprecated` on **every** call (the one-shot session message is
+  gone — no process state) and maps as before (`TRUE` → `center =
+  "allele_freq"`, `FALSE` → `center = "none"`). Defunct with phase F
+  (decision-form row 26 a).
+- `plot_block_effect_circos()` (0.9.0, decision-form row 12 b; D3.4): warns
+  `hs_warning_deprecated` on every call and points to the circos engine,
+  `plot_meta_circos(lapply(traits, track_block_effect, analysis = x))`, which
+  `analyze_block_catalogue(plots = "circos")` now uses. Behaviour is otherwise
+  unchanged, except that with no device open it draws on a null PDF device
+  and returns the recorded plot, so no `Rplots.pdf` is left behind. The chord
+  links (`link_top`) return as a `"links"` track of the engine in 0.9.x.
+  Workshop and template module 04 switch to the engine call at phase G.
+- `analyze_block_catalogue(write_outputs =)` (0.9.0; D3.4): `output_dir` alone
+  decides whether files are written. A supplied value warns; `FALSE` is still
+  honoured this release.
+- `encoding = "selectiontools"` on `build_geno_meta()`, `new_geno_meta()`,
+  `sim_geno_meta()` and `sim_geno_matrix()` (0.9.0; warning class
+  `hs_warning_deprecated`): the alleles are translated to nucleotides and the
+  container is stamped `"nucleotide"` (`sim_geno_matrix()` still returns the
+  `1/4` matrix for now). Use `st_convert()` for SelectionTools' own files.
+  Defunct in 0.10 (the token joins `.HS_ENCODING_REMOVED`). **Behind
+  `use_st_formats()` since C-6:** while the switch is off the call stops with
+  an `hs_error_input` (hint `use_st_formats(TRUE)`; these take no per-call
+  `st_formats` argument).
+- `"selectiontools"` as either side of `translate_alleles()` /
+  `transform_effects()`, and `use_missing_chars(mode = "selectiontools")`
+  (0.9.0): kept for the legacy `process_genotype()` layer and for
+  `st_convert(missing_chars =)`; warn on every call, and are behind
+  `use_st_formats()` since C-6.
+- `geno_meta_to_matrix()` / `write_geno_meta()` with the `"ST"` preset (the
+  SelectionTools layout, cells as nucleotides) are behind `use_st_formats()`
+  since C-6; both gain `st_formats =` for one call. `st_convert(to =
+  "selectiontools")` writes SelectionTools' own codes.
+
+### Defunct
+
+- **`define_haplotype_blocks()` and `define_haplotype_blocks_meta()`**
+  (row 26 a; D5-3; deprecated since 0.7.10): `hs_error_defunct` naming
+  `st_convert()` + `st_ld_blocks()` / `st_ld_blocks()`; the stubs keep their
+  signatures until 0.10 so an old call is told the replacement.
+- **`center_by_freq =`** on the eight centring entry points (row 26 a;
+  deprecated since 0.6.0): `hs_error_defunct` at the one resolver site, the
+  message naming the mode the logical meant (`center = "allele_freq"` for
+  `TRUE`, `"none"` for `FALSE`); the argument stays in the signatures for one
+  release.
+- `recode_geno_meta(to_type = "selectiontools")` (0.9.0; error class
+  `hs_error_defunct`, replacement `st_convert(to = "selectiontools")`). It
+  skipped the deprecated rung: a `GenoMeta` stores nucleotide alleles only, so
+  there was no container it could have returned. `to_type = "nucleotide"`
+  stays as the explicit recode for a container that still carries the codes.
+
+### Removed
+
+- `R/format_helper_gui.R` (the UI and server closures moved to the app
+  directory), `.st_check_io_dirs()` / `.st_drop_io_dirs()` (replaced by
+  `.st_with_io_dirs()`), the dead `valid_chars` zero-fill block of
+  `transform_effects()`, and the `"selectiontools"` entries of
+  `BASE_COLOR_MAP` / `COLOR_MAP` (C-6 item 5).
+- Dead internal helpers `.normalise_map_dt()` and `.normalise_block_dt()`,
+  the one-line kernel wrappers `.use_rcpp()` / `.gebv_kernel()` (inlined),
+  three tombstone comments, and the 26 `man/dot-*.Rd` pages of internal
+  helpers (now `@noRd`; the seven cross-references to them are plain text).
+- `.hapS_dosage_frame()` no longer filters missing *tokens*: inside a
+  GenoMeta a missing allele is `NA` and nothing else.
+- Compiled leftovers in `src/`, root `Rplots.pdf` / `test_load.txt`, the
+  `.Rbuildignore` line that would have hidden a future `src/Makevars.win`,
+  and the stray `Config/roxygen2/version: 8.0.0` stamp (pages are built with
+  roxygen2 7.3.3).
+- Test runs no longer leave `tests/testthat/Rplots.pdf` (`setup.R` opens a
+  null device).
+
+### Docs
+
+- T11 (ship): `inst/CITATION` and `CITATION.cff`; `LICENSE` in the two-line
+  form (full text in `LICENSE.md`); `BugReports` dropped from `DESCRIPTION`
+  (Q20 f); the trajectories legend follows the owner's naming rule (method +
+  mode: `TS-CD`, `GBS-CD`, `BECD` for the pairs mode); workshop `01c` turns
+  `use_st_formats()` on for its SelectionTools branch; `templates/01` states
+  SelectionTools' codes as A=1, C=2, G=3, T=4 and the position units the code
+  takes (bp, mbp); `INPUT_FILE_FORMATS.md` no longer claims positional block
+  columns; the mirror scripts sync `inst/` and know 0.9.0.
+- Phase G (D3.11): the workshop's `save_fig()` renders the 0.9.0 figure
+  objects; module 04 draws the circos on the engine; `example_catalogue_visualisation.Rmd`
+  (engine circos), `example_stacking_simulation.Rmd` (replicates differ since
+  0.9.0), `quick_start.Rmd` (TS / OHS / GBS), `templates/05` (OCS row), the
+  workshop README (module 07 in R); `ready_to_use/workshop/Rplots.pdf`
+  removed (intake 06); README `R/` listing follows the split.
+- `docs/haploStack_io_reference_0.9.0.md` (new); the bridge document
+  `../docs/haplostack_annotation_bridge.md` gains section 0 (the R route) and
+  a related-documents row; `ready_to_use/block_annotation/` README and
+  CHANGELOG note the superseded local route; workshop
+  `07_block_annotation_PYTHON.md` notes the R engine. Vignettes:
+  `output_format` → `preset` in four, `quick_start` steps 5 and 7 and
+  `simulation_stacking` §3–4 on `ohs_selection()` and the GenoMeta driver,
+  `selection_grid.md` at 0.9.0; README quick example, stage diagram and
+  selection table; `ready_to_use/README.md` and two HaploSim strings name
+  the defunct `define_haplotype_blocks*()`.
+- `center_by_freq` replaced by `center =` in six vignettes,
+  `ready_to_use/templates/03_catalogue.R` and `workshop/03_catalogue.R` (same
+  numbers: `TRUE` is `"allele_freq"`, `FALSE` is `"none"`). README and
+  quick start list the real dependencies.
+
 ## [0.8.8] - 2026-10-22 — The outer annotation sits on the ticks
 
 Owner feedback on the 0.8.7 VP1 figure a2: "the position of the annotation

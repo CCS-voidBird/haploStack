@@ -26,7 +26,8 @@ gbs_pair_selection(
   shortlist_k = NULL,
   max_use = Inf,
   overshoot = c("skip", "stop"),
-  select_priority = c("high", "low")
+  select_priority = c("high", "low"),
+  gbs_engine = "greedy"
 )
 }
 \arguments{
@@ -98,6 +99,11 @@ exceed the name limit: \code{"skip"} it (default) or \code{"stop"} there.}
 
 \item{select_priority}{\code{"high"} (default) takes the minimum score;
 \code{"low"} the maximum.}
+
+\item{gbs_engine}{The family engine. Only \code{"greedy"} (the default) is
+implemented over family sets; \code{"GA"} is refused with the same message
+as the driver (pair plan Phase D). Present so the three GBS entry points
+share one specification (0.9.0).}
 }
 \value{
 A \code{"pair_selection"} \code{data.table}: \code{Parent1},

@@ -32,8 +32,11 @@ with several stored traits an error asks which.}
 \item{title}{Optional plot title, replacing the default
 \code{"Marker Effect — <trait>"}.}
 
-\item{table_file}{Optional path; when non-\code{NULL} the plotted table is
-written there as a tab-separated file. Default \code{NULL}.}
+\item{table_file}{\strong{Deprecated} (0.9.0): a plotter does not write
+files. The plotted table is on the plot (\code{\link{marker_signal_table}(p)},
+i.e. \code{attr(p, "effect_table")}); write it with \code{data.table::fwrite()}.
+A supplied path still writes this release, with a warning. Default
+\code{NULL}.}
 }
 \value{
 A \code{ggplot} object. The plotted table is attached as

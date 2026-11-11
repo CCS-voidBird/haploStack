@@ -48,11 +48,83 @@
 .hs_map_chrom <- function(chrom, chr_map) {
   if (is.null(chr_map)) return(chrom)
   if (is.null(names(chr_map)) || any(!nzchar(names(chr_map))))
-    stop("'chr_map' must be a fully named character vector ",
+    .hs_abort("'chr_map' must be a fully named character vector ",
          "(container name -> annotation seqid).")
   hit <- chrom %in% names(chr_map)
   chrom[hit] <- unname(chr_map[as.character(chrom[hit])])
   chrom
+}
+
+# One unit rule (D5 §3.6 b): annotation coordinates are bp. A container that
+# declares another unit is refused; one that declares nothing is checked for
+# plausibility (a largest position under 10 000 looks like Mb or cM) and warns.
+.hs_require_bp <- function(meta, caller) {
+  pu <- meta$metadata$pos_unit
+  if (!is.null(pu) && !identical(tolower(as.character(pu)), "bp"))
+    .hs_abort(caller, ": map_info$Pos is stored in '", pu,
+              "' but annotation coordinates are bp \u2014 convert the container ",
+              "positions to bp before annotating.", call. = FALSE)
+  if (is.null(pu)) {
+    mx <- suppressWarnings(max(as.numeric(meta$map_info$Pos), na.rm = TRUE))
+    if (is.finite(mx) && mx < 1e4)
+      .hs_warn(caller, ": the largest map position is ", format(mx),
+               " and annotation coordinates are bp \u2014 positions this small ",
+               "look like Mb or cM (metadata$pos_unit is not set). Check the ",
+               "container's unit before trusting the overlaps.",
+               class = "hs_warning_input", call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+# Partial-vocabulary check before an overlap (ann/F26, F24): container
+# chromosomes (after chr_map) that the feature table never names. A warning
+# (hs_warning_input) names them and suggests an affix map when one would
+# match (never applied); strict = TRUE makes it an error. Returns the set.
+.hs_vocab_check <- function(container_mapped, annotation, what, strict, caller) {
+  unmatched <- setdiff(unique(as.character(container_mapped)),
+                       unique(as.character(annotation)))
+  if (length(unmatched) == 0L) return(character(0L))
+  sug <- .hs_suggest_chr_map(unmatched, unique(as.character(annotation)))
+  msg <- paste0(caller, ": ", length(unmatched), " container chromosome(s) have no ",
+                what, " on that seqid \u2014 their blocks get no ", what, ": ",
+                paste(utils::head(unmatched, 12L), collapse = ", "),
+                if (length(unmatched) > 12L) " ..." else "",
+                ". ", what, " seqids: ",
+                paste(utils::head(.hs_sort(unique(as.character(annotation))), 12L),
+                      collapse = ", "),
+                if (length(unique(annotation)) > 12L) " ..." else "", ".",
+                if (!is.null(sug)) paste0(" A chr_map that would match: chr_map = ",
+                                          sug, ".") else "")
+  if (isTRUE(strict))
+    .hs_abort(msg, call. = FALSE, data = list(bad = unmatched))
+  .hs_warn(msg, class = "hs_warning_input", call. = FALSE)
+  unmatched
+}
+
+# An affix map suggestion: container "1" vs annotation "1H" / "chr1" / "chr1H"
+# (and the reverse). Names that match one annotation seqid after stripping a
+# leading chr/chrom and a trailing H are suggested; nothing is applied.
+.hs_suggest_chr_map <- function(unmatched, vocab) {
+  key <- function(x) toupper(sub("H$", "", sub("^chr(om)?", "", x, ignore.case = TRUE)))
+  kv <- key(vocab)
+  hit <- vapply(unmatched, function(u) {
+    m <- vocab[kv == key(u)]
+    if (length(m) == 1L) m else NA_character_
+  }, character(1L))
+  ok <- !is.na(hit)
+  if (!any(ok)) return(NULL)
+  paste0("c(", paste(sprintf("\"%s\" = \"%s\"", unmatched[ok], hit[ok]),
+                    collapse = ", "), ")")
+}
+
+# The provenance record of an annotation input: the reader's attribute, or a
+# minimal record for an in-memory table.
+.hs_annotation_src <- function(x) {
+  s <- attr(x, "hs_annotation_source", exact = TRUE)
+  if (is.null(s))
+    list(file = NA_character_, md5 = NA_character_, size = NA_real_,
+         n = nrow(as.data.frame(x)))
+  else s
 }
 
 
@@ -108,6 +180,12 @@
 #' @param strip_prefix Strip the GFF3 type prefix (\code{gene:}) from gene ids
 #'   \strong{at the xref join only} (default \code{TRUE}, the Python
 #'   behaviour). Stored ids always keep the file's spelling.
+#' @param strict    When \code{TRUE}, a container chromosome that no gene
+#'   seqid names (or, for a QTL table, no container chromosome on any QTL
+#'   seqid) is an error instead of an \code{hs_warning_input} warning
+#'   (default \code{FALSE}). The warning names the chromosomes and suggests
+#'   a \code{chr_map} when an \code{H} / \code{chr} affix would match;
+#'   nothing is applied.
 #' @param browser_base Optional Ensembl browser base URL (e.g.
 #'   \code{"https://plants.ensembl.org/Hordeum_vulgare"}); when given, the
 #'   (marker, gene) table carries
@@ -129,8 +207,11 @@
 #'     Chrom, Pos, Block, gene_id, gene_symbol, gene_name, gene_biotype,
 #'     gene_start, gene_end, gene_strand, gene_description, go_terms,
 #'     interpro_domains, ensembl_browser_url}.}
-#'   \item{\code{provenance}}{inputs, counts, \code{chr_map}, \code{flank_bp},
-#'     \code{strip_prefix}, date and package version — written to
+#'   \item{\code{provenance}}{inputs (\code{file}, \code{md5}, \code{size},
+#'     \code{n} per table, no absolute path), counts, \code{chr_map},
+#'     \code{chrom_vocab} (the container's and the annotation's chromosome
+#'     names), \code{chrom_unmatched}, \code{flank_bp}, \code{strip_prefix},
+#'     \code{created} (ISO-8601 UTC) and package version — written to
 #'     \code{metadata$annotation} by \code{\link{attach_block_annotation}}.}
 #' }
 #'
@@ -142,20 +223,16 @@ compute_block_annotation <- function(meta, genes, xrefs = NULL, qtl = NULL,
                                      chr_map = NULL,
                                      flank_bp = .HS_ANNOT_DEFAULT_BP,
                                      strip_prefix = TRUE,
-                                     browser_base = NULL) {
-  if (!is_geno_meta(meta))
-    stop("compute_block_annotation: 'meta' is not a valid GenoMeta.")
+                                     browser_base = NULL,
+                                     strict = FALSE) {
+  .hs_check_meta(meta, "compute_block_annotation", "meta")
   if (is.null(meta$block_marker_map_info))
-    stop("compute_block_annotation: the GenoMeta has no blocks — call ",
+    .hs_abort("compute_block_annotation: the GenoMeta has no blocks \u2014 call ",
          "attach_block_info() first.")
-  pu <- meta$metadata$pos_unit
-  if (!is.null(pu) && !identical(tolower(as.character(pu)), "bp"))
-    stop("compute_block_annotation: map_info$Pos is stored in '", pu,
-         "' but annotation coordinates are bp — convert the container ",
-         "positions to bp before annotating.")
+  .hs_require_bp(meta, "compute_block_annotation")
   if (!is.numeric(flank_bp) || length(flank_bp) != 1L || is.na(flank_bp) ||
       flank_bp < 0)
-    stop("compute_block_annotation: 'flank_bp' must be a single number >= 0.")
+    .hs_abort("compute_block_annotation: 'flank_bp' must be a single number >= 0.")
   flank_bp <- as.numeric(flank_bp)
 
   # --- genes table -----------------------------------------------------------
@@ -163,15 +240,17 @@ compute_block_annotation <- function(meta, genes, xrefs = NULL, qtl = NULL,
   need_g <- c("chrom", "start", "end", "gene_id")
   miss <- setdiff(need_g, names(g))
   if (length(miss) > 0L)
-    stop("compute_block_annotation: 'genes' is missing column(s): ",
-         paste(miss, collapse = ", "), " — use read_gff3_genes().")
+    .hs_abort("compute_block_annotation: 'genes' is missing column(s): ",
+         paste(miss, collapse = ", "), " \u2014 use read_gff3_genes().")
   for (cc in c("gene_name", "biotype", "strand"))
     if (!cc %in% names(g)) g[, (cc) := NA_character_]
+  if (!"feature_type" %in% names(g)) g[, feature_type := "gene"]
   g <- g[, .(chrom = as.character(chrom), start = as.numeric(start),
              end = as.numeric(end), strand = as.character(strand),
              gene_id = as.character(gene_id),
              gene_name = as.character(gene_name),
-             biotype = as.character(biotype))]
+             biotype = as.character(biotype),
+             feature_type = as.character(feature_type))]
   g[, gidx := .I]
 
   # --- block spans (recomputed from marker positions, the step-1 contract) ---
@@ -186,6 +265,11 @@ compute_block_annotation <- function(meta, genes, xrefs = NULL, qtl = NULL,
   bl[, bidx := .I]
   bl[, MChrom := .hs_map_chrom(Chrom, chr_map)]
 
+  # Partial vocabulary (ann/F26): named before the overlap, so a block with no
+  # genes is explained; under strict it stops the call.
+  unmatched <- .hs_vocab_check(bl$MChrom, g$chrom, "gene", strict,
+                               "compute_block_annotation")
+
   # --- gene x block overlap (flank pads the query window only) ---------------
   gk <- data.table::copy(g)
   setkeyv(gk, c("chrom", "start", "end"))
@@ -194,12 +278,12 @@ compute_block_annotation <- function(meta, genes, xrefs = NULL, qtl = NULL,
                   type = "any", nomatch = NULL)
   setorder(ov, bidx, gidx)
 
-  if (nrow(ov) == 0L)
-    warning("compute_block_annotation: no block overlaps any gene. ",
+  if (nrow(ov) == 0L && length(unmatched) == 0L)
+    .hs_warn("compute_block_annotation: no block overlaps any gene. ",
             "Block chromosomes (mapped): ",
-            paste(sort(unique(bl$MChrom)), collapse = ", "),
+            paste(.hs_sort(unique(bl$MChrom)), collapse = ", "),
             " | gene seqids: ",
-            paste(utils::head(sort(unique(g$chrom)), 12L), collapse = ", "),
+            paste(utils::head(.hs_sort(unique(g$chrom)), 12L), collapse = ", "),
             if (length(unique(g$chrom)) > 12L) " ..." else "",
             ". Pass 'chr_map' to translate the container's chromosome ",
             "names onto the annotation's.")
@@ -224,7 +308,7 @@ compute_block_annotation <- function(meta, genes, xrefs = NULL, qtl = NULL,
                      Block_start = bl$Start[bidx], Block_end = bl$End[bidx],
                      Num_SNPs = bl$Num_SNPs[bidx],
                      Block_length = bl$Block_length[bidx],
-                     feature_type = "gene",
+                     feature_type = feature_type,
                      feature_id = gene_id, feature_name = gene_name,
                      feature_biotype = biotype,
                      feature_start = start, feature_end = end,
@@ -238,11 +322,18 @@ compute_block_annotation <- function(meta, genes, xrefs = NULL, qtl = NULL,
          else as.data.table(qtl)
     miss_q <- setdiff(c("chrom", "start", "end", "name"), names(q))
     if (length(miss_q) > 0L)
-      stop("compute_block_annotation: 'qtl' is missing column(s): ",
+      .hs_abort("compute_block_annotation: 'qtl' is missing column(s): ",
            paste(miss_q, collapse = ", "))
+    q_src <- .hs_annotation_src(q)
     q <- q[, .(chrom = as.character(chrom), start = as.numeric(start),
                end = as.numeric(end), name = as.character(name))]
     q[, qidx := .I]
+    # A QTL table legitimately names a few chromosomes, so only a complete
+    # mismatch (no container chromosome on any QTL seqid) is a vocabulary
+    # problem (agent call, F-3).
+    unmatched_q <- if (!any(unique(bl$MChrom) %in% unique(q$chrom)))
+      .hs_vocab_check(bl$MChrom, q$chrom, "QTL", strict, "compute_block_annotation")
+    else character(0L)
     setkeyv(q, c("chrom", "start", "end"))
     ovq <- foverlaps(qb, q, by.x = c("MChrom", "qs", "qe"),
                      type = "any", nomatch = NULL)
@@ -258,9 +349,8 @@ compute_block_annotation <- function(meta, genes, xrefs = NULL, qtl = NULL,
   }
 
   # --- (marker, gene) pairs: marker in gene AND in its own padded block ------
-  mk <- as.data.table(meta$map_info)[
-    , .(Marker = as.character(Marker), Chrom = as.character(Chrom),
-        Pos = as.numeric(Pos))]
+  # One Marker -> locus lookup (D5 §3.6 c), in map order.
+  mk <- .marker_locus_table(meta, keyed = FALSE)[, .(Marker, Chrom, Pos)]
   mk[, midx := .I]
   mk[, MChrom := .hs_map_chrom(Chrom, chr_map)]
   fk <- features[, .(ridx, MChrom, feature_start, feature_end)]
@@ -280,7 +370,7 @@ compute_block_annotation <- function(meta, genes, xrefs = NULL, qtl = NULL,
   pairs <- pairs[Pos >= Block_start - flank_bp & Pos <= Block_end + flank_bp]
   # Python order: chromosomes ascending as strings (pandas groupby), then the
   # marker map's row order, then the feature-record order.
-  pairs[, chr_key := match(Chrom, sort(unique(mk$Chrom)))]
+  pairs[, chr_key := match(Chrom, .hs_sort(unique(mk$Chrom)))]
   setorder(pairs, chr_key, midx, ridx)
   pairs[, chr_key := NULL]
 
@@ -292,7 +382,7 @@ compute_block_annotation <- function(meta, genes, xrefs = NULL, qtl = NULL,
   if (!is.null(xrefs)) {
     xr <- as.data.table(xrefs)
     if (!"gene_id" %in% names(xr))
-      stop("compute_block_annotation: 'xrefs' needs a gene_id column — ",
+      .hs_abort("compute_block_annotation: 'xrefs' needs a gene_id column \u2014 ",
            "use read_gene_xrefs().")
     idx <- match(key, xr$gene_id)
     for (cc in ann_cols) {
@@ -318,21 +408,15 @@ compute_block_annotation <- function(meta, genes, xrefs = NULL, qtl = NULL,
                            gene_strand, gene_description, go_terms,
                            interpro_domains, ensembl_browser_url)]
 
-  src_of <- function(x) {
-    s <- attr(x, "hs_annotation_source", exact = TRUE)
-    if (is.null(s)) list(path = NA_character_, size = NA_real_,
-                         mtime = NA_character_, n = nrow(as.data.frame(x)))
-    else s
-  }
   provenance <- list(
-    gff3            = src_of(genes),
+    gff3            = .hs_annotation_src(genes),
     n_genes         = nrow(g),
-    xref            = if (is.null(xrefs)) NULL else src_of(xrefs),
-    qtl             = if (!has_qtl) NULL
-                      else list(n = nrow(q),
-                                path = if (is.character(qtl)) qtl
-                                       else NA_character_),
+    xref            = if (is.null(xrefs)) NULL else .hs_annotation_src(xrefs),
+    qtl             = if (!has_qtl) NULL else q_src,
     chr_map         = chr_map,
+    chrom_vocab     = list(container  = .hs_sort(unique(bl$Chrom)),
+                           annotation = .hs_sort(unique(g$chrom))),
+    chrom_unmatched = if (has_qtl) union(unmatched, unmatched_q) else unmatched,
     flank_bp        = flank_bp,
     strip_prefix    = isTRUE(strip_prefix),
     browser_base    = browser_base,
@@ -340,7 +424,7 @@ compute_block_annotation <- function(meta, genes, xrefs = NULL, qtl = NULL,
     n_blocks_hit    = sum(blocks$gene_count > 0L),
     n_features      = nrow(features),
     n_marker_gene   = nrow(marker_gene),
-    date            = format(Sys.Date()),
+    created         = .hs_utc_now(),
     package_version = as.character(utils::packageVersion("haploStack"))
   )
 
@@ -394,28 +478,20 @@ compute_block_annotation <- function(meta, genes, xrefs = NULL, qtl = NULL,
 #'   \code{\link{export_block_annotation}}
 #' @export
 attach_block_annotation <- function(meta, annotation) {
-  if (!is_geno_meta(meta))
-    stop("attach_block_annotation: 'meta' is not a valid GenoMeta.")
+  .hs_check_meta(meta, "attach_block_annotation", "meta")
   if (!.hs_is_annotation(annotation))
-    stop("attach_block_annotation: 'annotation' must be the list returned by ",
+    .hs_abort("attach_block_annotation: 'annotation' must be the list returned by ",
          "compute_block_annotation().")
 
-  known_blocks <- unique(as.character(
-    if (!is.null(meta$block_marker_map_info)) meta$block_marker_map_info$Block
-    else meta$block_info$Block))
-  bad_b <- setdiff(unique(as.character(annotation$blocks$Block)), known_blocks)
-  if (length(bad_b) > 0L)
-    stop("attach_block_annotation: ", length(bad_b), " annotated block(s) ",
-         "not in the container's blocks (first: ",
-         paste(utils::head(bad_b, 5L), collapse = ", "),
-         ") — the annotation was computed against different block ",
-         "definitions.")
-  bad_m <- setdiff(unique(as.character(annotation$marker_gene$Marker)),
-                   meta$map_info$Marker)
-  if (length(bad_m) > 0L)
-    stop("attach_block_annotation: ", length(bad_m), " annotated marker(s) ",
-         "not in map_info (first: ",
-         paste(utils::head(bad_m, 5L), collapse = ", "), ").")
+  known_blocks <- if (!is.null(meta$block_marker_map_info)) meta$block_marker_map_info$Block
+                  else meta$block_info$Block
+  reason <- .hs_check_annotation(annotation[c("blocks", "features", "marker_gene")],
+                                 known_blocks, meta$map_info$Marker)
+  if (!is.null(reason))
+    .hs_abort("attach_block_annotation: ", reason,
+              if (grepl("annotated block", reason, fixed = TRUE))
+                " The annotation was computed against different block definitions."
+              else "")
 
   # Stored as plain data.frames — the container's own convention (map_info,
   # block_info are data.frames), and a data.table's .internal.selfref pointer
@@ -424,17 +500,45 @@ attach_block_annotation <- function(meta, annotation) {
   # gene tables and survives this attach.
   custom <- meta$annotation$custom
   custom_prov <- meta$metadata$annotation$custom
-  meta$annotation <- lapply(annotation[c("blocks", "features", "marker_gene")],
-                            function(x) as.data.frame(x,
-                                                      stringsAsFactors = FALSE))
-  meta$metadata$annotation <- annotation$provenance
+  ann <- lapply(annotation[c("blocks", "features", "marker_gene")],
+                function(x) as.data.frame(x, stringsAsFactors = FALSE))
+  # Stored in the container's block order (ann/F22); the exporter re-sorts to
+  # the Python order, so the files are unchanged.
+  ord <- order(match(as.character(ann$blocks$Block), unique(as.character(known_blocks))))
+  ann$blocks <- ann$blocks[ord, , drop = FALSE]
+  rownames(ann$blocks) <- NULL
+  prov <- annotation$provenance
   if (!is.null(custom)) {
-    meta$annotation$custom <- custom
-    meta$metadata$annotation$custom <- custom_prov
+    ann$custom  <- custom
+    prov$custom <- custom_prov
   }
-  meta
+  # One rebuild path (0.9.0): the annotation and its provenance are set,
+  # everything else is forwarded and the whole container revalidated.
+  .rebuild_geno_meta(meta, annotation = ann, metadata = list(annotation = prov),
+                     .caller = "attach_block_annotation")
 }
 
+
+# Internal: the provenance counts of a stored annotation, recomputed from the
+# tables after a prune (ann/F7): the table rows are the truth, the counts
+# describe them.
+.hs_annotation_counts <- function(ann, prov) {
+  if (is.null(prov) || is.null(ann)) return(prov)
+  if (!is.null(ann$blocks)) {
+    prov$n_blocks     <- nrow(ann$blocks)
+    prov$n_blocks_hit <- sum(as.integer(ann$blocks$gene_count) > 0L, na.rm = TRUE)
+  }
+  if (!is.null(ann$features))    prov$n_features    <- nrow(ann$features)
+  if (!is.null(ann$marker_gene)) prov$n_marker_gene <- nrow(ann$marker_gene)
+  if (!is.null(ann$custom) && !is.null(prov$custom)) {
+    mk <- ann$custom$Marker
+    prov$custom$n          <- nrow(ann$custom)
+    prov$custom$n_matched  <- sum(!is.na(mk))
+    prov$custom$n_unplaced <- sum(is.na(mk))
+    prov$custom$unplaced   <- as.character(ann$custom$Name[is.na(mk)])
+  }
+  prov
+}
 
 # Internal: prune a stored annotation to surviving blocks / markers
 # (filter_geno_meta()). Returns NULL for NULL in. The gene tables prune on
@@ -487,9 +591,13 @@ attach_block_annotation <- function(meta, annotation) {
 #'   list returned by \code{\link{compute_block_annotation}}.
 #' @param output_dir Directory for the TSVs (created when missing).
 #' @param prefix     Optional filename prefix (default \code{NULL} writes the
-#'   Python filenames exactly).
+#'   Python filenames exactly). The files are written by the package's one
+#'   table writer, so an existing file is replaced.
 #'
-#' @return Invisibly, the written paths (named character vector).
+#' @return Invisibly, the written paths (named character vector, absolute
+#'   since 0.9.0), with the manifest \code{data.frame(path, kind, object,
+#'   bytes)} as \code{attr(, "hs_files")} and any caveat (the flank note) as
+#'   \code{attr(, "hs_notes")}.
 #'
 #' @seealso \code{\link{compute_block_annotation}},
 #'   \code{\link{attach_block_annotation}}
@@ -501,48 +609,57 @@ export_block_annotation <- function(x, output_dir, prefix = NULL) {
            a$provenance <- x$metadata$annotation
            a
          } else
-           stop("export_block_annotation: 'x' must be a ",
+           .hs_abort("export_block_annotation: 'x' must be a ",
                 "compute_block_annotation() result or a GenoMeta carrying ",
                 "$annotation (attach_block_annotation()).")
   from_meta <- !.hs_is_annotation(x)
+  # A container can carry only marker-level overlays (annotation$custom from
+  # attach_marker_annotations()); the block tables below need the gene trio
+  # that attach_block_annotation() stores. Up to 0.8.8 this failed inside
+  # data.table with "object 'Chrom' not found".
+  if (!all(c("blocks", "features", "marker_gene") %in% names(ann)) ||
+      is.null(ann$blocks))
+    .hs_abort("export_block_annotation: this container carries no block ",
+         "annotation (only ", paste(setdiff(names(ann), "provenance"),
+                                     collapse = ", "),
+         "). Run attach_block_annotation() first.", call. = FALSE)
 
   if (missing(output_dir) || !is.character(output_dir))
-    stop("export_block_annotation: 'output_dir' is required.")
+    .hs_abort("export_block_annotation: 'output_dir' is required.")
   if (!dir.exists(output_dir))
     dir.create(output_dir, recursive = TRUE)
 
+  notes <- character(0L)
   flank <- ann$provenance$flank_bp
-  if (!is.null(flank) && is.numeric(flank) && flank != 0)
-    message("export_block_annotation: this annotation was computed with ",
-            "flank_bp = ", format(flank, big.mark = ","), " — hit counts are ",
+  if (!is.null(flank) && is.numeric(flank) && flank != 0) {
+    notes <- paste0("computed with flank_bp = ", format(flank, big.mark = ","),
+                    "; hit counts are not comparable to a Python ",
+                    "block_annotation run (no padding)")
+    .hs_inform("export_block_annotation: this annotation was computed with ",
+            "flank_bp = ", format(flank, big.mark = ","), " \u2014 hit counts are ",
             "not comparable to a Python block_annotation run, which has no ",
             "padding. Recompute with flank_bp = 0 for byte-level parity.")
-
-  pfx <- if (is.null(prefix) || !nzchar(prefix)) "" else paste0(prefix, "_")
-  path_of <- function(nm) file.path(output_dir, paste0(pfx, nm))
-  wr <- function(dt, nm) {
-    p <- path_of(nm)
-    data.table::fwrite(dt, p, sep = "\t", quote = FALSE, na = "", eol = "\n")
-    p
   }
 
+  # The Python step order (sort_values(["chrom", "start_pos"]), chrom as a
+  # string); the stored table is in block_info order since 0.9.0.
   bl <- as.data.table(ann$blocks)
-  out <- c()
+  setorder(bl, Chrom, Start)
+  tables <- list()
 
-  step1 <- bl[, .(chrom = Chrom, block = Block,
-                  start_pos = .hs_int_col(Start), end_pos = .hs_int_col(End),
-                  n_markers = .hs_int_col(Num_SNPs),
-                  length_bp = .hs_int_col(Block_length))]
-  out["step1_block_coordinates"] <- wr(step1, "step1_block_coordinates.tsv")
+  tables[["step1_block_coordinates.tsv"]] <-
+    bl[, .(chrom = Chrom, block = Block,
+           start_pos = .hs_int_col(Start), end_pos = .hs_int_col(End),
+           n_markers = .hs_int_col(Num_SNPs),
+           length_bp = .hs_int_col(Block_length))]
 
   if (from_meta && !is.null(x$block_marker_map_info)) {
     bmm <- as.data.table(x$block_marker_map_info)
-    out["step1_block_marker_map"] <- wr(
+    tables[["step1_block_marker_map.tsv"]] <-
       bmm[, .(chrom = as.character(Chrom), marker = as.character(Marker),
-              block = as.character(Block))],
-      "step1_block_marker_map.tsv")
+              block = as.character(Block))]
   } else if (!from_meta) {
-    message("export_block_annotation: no GenoMeta given — ",
+    .hs_inform("export_block_annotation: no GenoMeta given \u2014 ",
             "step1_block_marker_map.tsv skipped (the annotation list does ",
             "not carry the marker map).")
   }
@@ -557,7 +674,7 @@ export_block_annotation <- function(x, output_dir, prefix = NULL) {
                        gene_ids = gene_ids, gene_names = gene_names),
                   if (has_qtl) list(qtl_count = .hs_int_col(qtl_count),
                                     qtl_names = qtl_names))]
-  out["step3_local_annotation"] <- wr(step3, "step3_local_annotation.tsv")
+  tables[["step3_local_annotation.tsv"]] <- step3
 
   fe <- as.data.table(ann$features)
   recs <- fe[, .(block = Block, chrom = Chrom,
@@ -575,8 +692,7 @@ export_block_annotation <- function(x, output_dir, prefix = NULL) {
                  feature_strand = data.table::fifelse(is.na(feature_strand),
                                                       "", feature_strand),
                  ensembl_browser_url = "")]
-  out["step3_local_annotation_records"] <-
-    wr(recs, "step3_local_annotation_records.tsv")
+  tables[["step3_local_annotation_records.tsv"]] <- recs
 
   mg <- as.data.table(ann$marker_gene)
   step4 <- mg[, .(marker_name = Marker, marker_chr = Chrom,
@@ -592,7 +708,65 @@ export_block_annotation <- function(x, output_dir, prefix = NULL) {
                                                     gene_strand),
                   gene_description, go_terms, interpro_domains,
                   ensembl_browser_url)]
-  out["step4_deep_annotation"] <- wr(step4, "step4_deep_annotation.tsv")
+  tables[["step4_deep_annotation.tsv"]] <- step4
 
+  # One writer (ann/F16, D5 §3.6 h): absolute paths and a manifest.
+  w <- .hs_write_tables(tables, output_dir, prefix = prefix, sep = "\t",
+                        quote = FALSE, na = "", eol = "\n")
+  out <- w$paths
+  names(out) <- sub("[.]tsv$", "", names(tables))
+  attr(out, "hs_files") <- w$manifest
+  attr(out, "hs_notes") <- notes
   invisible(out)
+}
+
+
+#' Annotate the container's blocks in one call
+#'
+#' The one-call form of the R annotation route (0.9.0, decision-form row 23 a;
+#' closes Q25.b): read the gene table (and, when given, the xref dump and the
+#' QTL table), compute the overlaps with \code{\link{compute_block_annotation}}
+#' and store them on the container with \code{\link{attach_block_annotation}}.
+#' Each input is a path or an already-read table. This is the call the
+#' workshop's module 07 and a server make; the three-call sequence stays
+#' available for inspection between the steps.
+#'
+#' @param meta  A valid \code{GenoMeta} with blocks attached.
+#' @param gff3  Path to the GFF3 (plain or \code{.gz}), or the table
+#'   \code{\link{read_gff3_genes}} returns.
+#' @param xrefs Optional: path to an Ensembl xref dump, or the table
+#'   \code{\link{read_gene_xrefs}} returns.
+#' @param qtl   Optional: path to a 4-column QTL BED, or a \code{chrom, start,
+#'   end, name} table.
+#' @param feature_type Passed to \code{\link{read_gff3_genes}} when
+#'   \code{gff3} is a path (default \code{"gene"}).
+#' @inheritParams compute_block_annotation
+#' @param ... Further arguments of \code{\link{compute_block_annotation}}
+#'   (\code{strip_prefix}, \code{browser_base}).
+#'
+#' @return The \code{GenoMeta} with \code{$annotation} and
+#'   \code{metadata$annotation} set, exactly as the three calls give it.
+#'
+#' @examples
+#' \dontrun{
+#' meta <- annotate_blocks(meta, "Barley_genes.gff3",
+#'                         chr_map = c("1" = "1H", "2" = "2H"), flank_bp = 0)
+#' export_block_annotation(meta, "annotation_out")
+#' }
+#' @seealso \code{\link{compute_block_annotation}},
+#'   \code{\link{attach_block_annotation}},
+#'   \code{\link{export_block_annotation}}
+#' @export
+annotate_blocks <- function(meta, gff3, xrefs = NULL, qtl = NULL, chr_map = NULL,
+                            flank_bp = .HS_ANNOT_DEFAULT_BP, strict = FALSE,
+                            feature_type = "gene", ...) {
+  .hs_check_meta(meta, "annotate_blocks", "meta")
+  genes <- if (is.character(gff3) && length(gff3) == 1L)
+    read_gff3_genes(gff3, feature_type = feature_type) else gff3
+  xr <- if (is.character(xrefs) && length(xrefs) == 1L) read_gene_xrefs(xrefs)
+        else xrefs
+  ann <- compute_block_annotation(meta, genes, xrefs = xr, qtl = qtl,
+                                  chr_map = chr_map, flank_bp = flank_bp,
+                                  strict = strict, ...)
+  attach_block_annotation(meta, ann)
 }

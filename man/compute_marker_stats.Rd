@@ -50,10 +50,23 @@ result is independent of how alleles happen to be stored.
 \details{
 Statistics are derived from a single integer-encoding pass over
 \code{geno_meta$geno_arrays} (\code{[n_samples x n_markers x ploidy]}) and reuse
-the internal counting kernels (\code{\link{.marker_allele_counts}},
-\code{\link{.marker_maf}}). Marker location and block membership are taken from
+the internal counting kernels (\code{.marker_allele_counts()},
+\code{.marker_maf()}). Marker location and block membership are taken from
 the GenoMeta map and block assignments.
 }
+\section{Major, minor and ploidy (0.9.0)}{
+
+One rule names the alleles (decision-form row 16 a): \code{Minor} is the
+least frequent observed allele, ties broken by allele order (so it is the
+allele the dosage counts and \code{MAF} agrees with it); \code{Major} is the
+most frequent of the remaining alleles, ties broken the same way. On an exact
+two-way tie the two therefore differ (0.8.8 reported the same allele for
+both). \code{MAF} is \code{1 - } the major-allele frequency from the same
+counts. \code{Het} is defined for diploid data only and is \code{NA} at any
+other ploidy; a dosage-coded container (\code{metadata$encoding ==
+"numeric"}) is read as one layer, so its \code{Missing_rate} is the true one.
+}
+
 \examples{
 \dontrun{
 meta  <- load_geno_meta("my_geno_meta.rds")

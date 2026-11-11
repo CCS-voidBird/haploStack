@@ -47,7 +47,7 @@ external file we read back in the next section.
 
 ```{r make-family}
 set.seed(1)
-alleles    <- c("1", "4")
+alleles    <- c("A", "T")
 n_per_chrom <- 6L; n_chrom <- 3L; block_size <- 3L
 n_mk       <- n_per_chrom * n_chrom
 markers    <- paste0("M", seq_len(n_mk))
@@ -96,9 +96,9 @@ for (oid in names(off_arr)) arr[oid, , ] <- off_arr[[oid]]
 
 meta <- new_geno_meta(
   geno_arrays = arr, map_info = map, block_marker_map_info = bmm,
-  metadata = list(ploidy = 2L, char_dict = c("1" = 1L, "4" = 2L),
+  metadata = list(ploidy = 2L, char_dict = c("A" = 1L, "T" = 2L),
                   n_samples = length(ids), n_markers = n_mk,
-                  source_format = "selectiontools", encoding = "selectiontools"))
+                  source_format = "simulated", encoding = "nucleotide"))
 
 # The pedigree: founders have missing parents ("0").
 pedigree <- rbind(

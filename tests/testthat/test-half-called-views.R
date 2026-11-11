@@ -22,7 +22,7 @@
 library(testthat)
 library(haploStack)
 
-kernel_available <- function() is.function(haploStack:::.gebv_kernel())
+kernel_available <- function() is.function(haploStack:::.hs_kernel("local_gebv_block_sum_cpp"))
 
 # Fixture: a small blocked panel in the requested encoding, with (i) a few
 # both-missing cells (what a PED reader produces) and (ii) a set of
@@ -85,7 +85,7 @@ kernel_available <- function() is.function(haploStack:::.gebv_kernel())
   long[, .(Block, Copy, Sample, engine)]
 }
 
-for (enc in c("nucleotide", "selectiontools")) {
+for (enc in "nucleotide") {     # the one categorical vocabulary since 0.9.0 (C-5)
 
   test_that(paste0("views keep the observed copy of a half-called cell (", enc, ")"), {
     fx <- .hc_fixture(enc)
