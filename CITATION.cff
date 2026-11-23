@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "haploStack: Haplotype Block Analysis and Stacking Simulation for Genomic Breeding"
+version: 0.8.8
+date-released: 2026-10-22
+license: MIT
+repository-code: "https://github.com/CCS-voidBird/haploStack"
+url: "https://github.com/CCS-voidBird/haploStack"
+abstract: >-
+  A toolkit for haplotype block definition, catalogue construction, and
+  breeding-cycle simulation (haplotype stacking) in diploid crop species.
+  The workflow covers genotype format standardisation, haplotype blocks from a
+  user-supplied block map (optionally built locally from LD with HapSelect or
+  SelectionTools), haplotype catalogue construction with per-sample local GEBVs,
+  and breeding-cycle simulation of haplotype stacking under truncation, optimal
+  haplotype and genotype building selection. Designed for the GRDC barley
+  haplotype stacking project but applicable to any biparental or multiparental
+  breeding programme.
+keywords:
+  - haplotype blocks
+  - genomic selection
+  - haplotype stacking
+  - plant breeding
+  - barley
+  - R package
+authors:
+  - family-names: Chen
+    given-names: Chensong
+    email: chensong.chen@uq.edu.au
+    affiliation: The University of Queensland

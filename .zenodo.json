@@ -1,0 +1,37 @@
+{
+  "title": "haploStack: Haplotype Block Analysis and Stacking Simulation for Genomic Breeding",
+  "version": "0.8.8",
+  "publication_date": "2026-10-22",
+  "description": "<p>R package (Rcpp) for haplotype block definition, haplotype catalogue construction and breeding-cycle simulation of haplotype stacking in diploid crop species. The workflow covers genotype format standardisation; haplotype blocks from a user-supplied block map (optionally built locally from LD with HapSelect or SelectionTools); haplotype catalogue construction with per-sample local GEBVs, Manhattan plots and alignment visualisations; and breeding-cycle simulation of haplotype stacking under truncation (TS), optimal haplotype (OHS) and genotype building (GBS) selection. Designed for the GRDC barley haplotype stacking project but applicable to any biparental or multiparental breeding programme.</p><p>This record archives version 0.8.8, the last release of the 0.8 series (built 2026-10-22). The source tarball of the same version is attached to the GitHub release <code>haploStack-0.8.8</code>.</p>",
+  "creators": [
+    {
+      "name": "Chen, Chensong",
+      "affiliation": "The University of Queensland"
+    }
+  ],
+  "license": "MIT",
+  "upload_type": "software",
+  "access_right": "open",
+  "language": "eng",
+  "keywords": [
+    "haplotype blocks",
+    "genomic selection",
+    "haplotype stacking",
+    "plant breeding",
+    "barley",
+    "R package"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/CCS-voidBird/haploStack",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    },
+    {
+      "identifier": "https://github.com/CCS-voidBird/haploStack/releases/tag/haploStack-0.8.8",
+      "relation": "isIdenticalTo",
+      "scheme": "url"
+    }
+  ],
+  "notes": "Funded by the Grains Research and Development Corporation (GRDC) barley haplotype stacking project."
+}
